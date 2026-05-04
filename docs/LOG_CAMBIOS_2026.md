@@ -1,4 +1,23 @@
 ---
+## 2026-05-03 — MontuMS completado + MS-Flow operativo
+
+**Repo:** github.com/RodMontu/MontuMS (privado)
+**Commit:** 036e6c5
+
+**Archivos creados:**
+- agentes.md — catálogo completo MS Team (11 agentes Claude + equipo Gemini + coordinadores)
+- proyectos.md — estado de 5 proyectos activos + pipeline TO
+- convenciones.md — IPs, aliases, reglas operativas, rutas clave, URLs raw GitHub
+- docs/INVENTARIO_MAESTRO.md — migrado desde Samba (fuente de verdad → GitHub)
+- docs/LOG_CAMBIOS_2026.md — migrado desde Samba
+- docs/CLAWDIO_ASISTENTE_PERSONAL.md — migrado desde Samba
+
+**Decisiones:**
+- GitHub MontuMS reemplaza carpeta DOCUMENTOS_TECNICOS como fuente de verdad activa
+- Samba /mnt/extra/DOCUMENTOS_TECNICOS/ queda como archivo histórico
+- Gemini Lead (Gem) configurado con system prompt MS-Flow + conocimientos cargados
+- MS-Flow bautizado oficialmente como protocolo de coordinación de la MS
+
 ## 2026-05-03 — MS-Flow inaugurado + repo MontuMS
 
 **MS-Flow:** protocolo de coordinación de la Metodología Sinérgica (MS).

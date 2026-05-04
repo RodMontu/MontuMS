@@ -1,37 +1,53 @@
-# Handoff — Infraestructura Clawdio + MS-Flow inauguración
-**Última actualización:** 2026-05-03
-**Sesión anterior:** Miaude — fixes Clawdio + implementación MS-Flow base
-**Próxima sesión:** OptiFierro entrega final martes 2026-05-05
+# Handoff — MS-Flow inauguración completa
+**Última actualización:** 2026-05-03 — 21:30 hrs
+**Sesión anterior:** Miaude — sesión completa de infraestructura MS-Flow
+**Próxima sesión:** DOS frentes paralelos (ver abajo)
 
 ---
 
-## Proyecto activo
-MS-Flow — Sistema de trabajo orquestado (inauguración)
+## Lo que se completó hoy
 
-## Objetivo de la sesión anterior
-Reparar Clawdio (monitor.sh + SOUL.md) e implementar la infraestructura base de MS-Flow (handoff + repo MontuMS).
+- ✅ Fix monitor.sh (heredoc — bug unterminated string literal)
+- ✅ Fix SOUL.md (registro lingüístico, criterio de oro, prohibidos)
+- ✅ Hermes reiniciado — crons 08:00 y 20:00 operativos
+- ✅ Repo MontuMS creado (github.com/RodMontu/MontuMS, privado)
+- ✅ SSH key serverX → GitHub configurada (id_ed25519_github)
+- ✅ Infraestructura handoff: /home/x/MontuMS/ + symlink + aliases
+- ✅ Gemini Lead (Gem) configurado con system prompt MS-Flow completo
+- ✅ agentes.md — catálogo completo 11 agentes Claude + equipo Gemini
+- ✅ proyectos.md — 5 proyectos activos + pipeline TO
+- ✅ convenciones.md — IPs, aliases, reglas, URLs raw
+- ✅ docs/ — INVENTARIO_MAESTRO, LOG_CAMBIOS, CLAWDIO migrados desde Samba
+- ✅ GitHub reemplaza Samba como fuente de verdad activa
+- ✅ MS-Flow bautizado oficialmente como protocolo de coordinación de la MS
+- ✅ LOG_CAMBIOS_2026.md actualizado y pusheado desde AG
 
-## Estado actual
-- ✅ Completados: fix monitor.sh, fix SOUL.md, repo MontuMS creado, README MS-Flow, handoff_actual.md operativo
-- 🔄 En curso: symlink handoff → MontuMS (esta sesión)
-- ⏳ Pendientes: conectar Clawdio como lector/escritor del repo, definir hooks CC, OptiFierro entrega final
+## Problema pendiente — Rabín (CRÍTICO)
+Monitor.sh sigue fallando en los crons 08:00 y 20:00 — el fix de hoy no fue suficiente. El cron de las 20:00 indica que el script está siendo **interpretado como Python en vez de bash**. Esto sugiere que el problema no es solo sintaxis del script sino cómo Hermes lo invoca.
 
-## Decisiones tomadas
-- MS-Flow es el nombre del protocolo de coordinación de la MS (sistema nervioso)
-- Repo MontuMS en GitHub (privado, RodMontu) es el sistema de archivos compartido Claude↔Gemini
-- Handoff vive en /home/x/MontuMS/handoff_actual.md con symlink desde /home/x/handoff/
-- CCa solo para tareas críticas — priorizar ccor1-5 para coding rutinario
+## Dos frentes abiertos para próximas sesiones
 
-## Próximo paso concreto
-Arrancar revisión OptiFierro V2 en TO para entrega final martes 2026-05-05.
-Ejecutar en TO: revisar estado actual de pendientes PEND-01, PEND-03, PEND-04 y nginx bind-mount.
+### Frente 1 — Clawdio (ventana separada)
+- RCA real del monitor.sh (interpretado como Python, no bash)
+- Verificar fix SOUL.md aplicado correctamente
+- Diseñar rol Clawdio Dev como coordinador MS-Flow
+- Restricción: usar ccor1-3 y ccl prioritariamente
+
+### Frente 2 — OptiFierro (ventana separada) — URGENTE martes 2026-05-05
+- Configurar SSH Mac → TO
+- Instalar Gemini CLI en TO
+- Revisar 17-18 puntos pendientes de reunión cliente martes pasado
+- Estrategia: Mac con VPN para QA + Gemini CLI en TO para ejecución
 
 ## Convenciones activas
-- serverX = 192.168.1.111 / serveri3 = 192.168.1.211
+- serverX = 192.168.1.111, user x
+- serveri3 = 192.168.1.211, user i3
+- TO = 192.168.1.65, user OptiFierro (Windows 11)
 - AG = Antigravity / G3F = Gemini 3 Flash / G3.1PH = Gemini 3.1 Pro High
-- CCa = tokens caros / ccor1-5 = gratuitos (priorizar)
-- Miaude = arquitectura / Clawdio = orquestación / CC+AG = ejecución
+- CCa = tokens caros / ccor1-3 = gratuitos (priorizar) / ccor4-5 = pago OpenRouter
+- MontuMS = github.com/RodMontu/MontuMS — fuente de verdad
+- DOCUMENTOS_TECNICOS en Samba = archivo histórico, no tocar
 - Docker: rebuild siempre / Correos: solo borrador
 
-## Contexto adicional
-MS-Flow inaugurado hoy. El repo MontuMS es el hub central. AG puede leer este archivo directamente para tomar contexto sin reexplicación. Próxima sesión arranca con OptiFierro — conectarse a TO (192.168.1.65) y revisar estado del sistema con Gustavo Godoy para cerrar entrega del martes.
+## Próximo paso concreto
+Abrir dos ventanas de chat nuevas con los mensajes de arranque provistos por Miaude al cierre de esta sesión. Cada ventana trabaja un frente independiente.

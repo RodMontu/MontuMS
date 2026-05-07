@@ -504,6 +504,8 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 - **IA local:** Ollama/qwen2.5 (contenedor `optifierro-ollama`)
 - **Despliegue:** Docker Compose en TO (192.168.1.65)
 - **Repo:** https://github.com/RodMontu/Optifierro-V2.git (master)
+- **Skill activa:** Miaude_sin_Montu — autonomía operacional CCa + Codex + Gemini CLI sin intervención de Montu
+- **Herramienta nueva:** claude_usage.py — monitor de cuota Claude.ai via Playwright (en ~/Documents/claude_usage.py, login manual pendiente para activar headless)
 
 # 11. Matriz de Puertos en TO
 - Frontend Principal: `0.0.0.0:3001->80`
@@ -518,11 +520,12 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 - Coronel: `sucursal_id=14` (Cubigest=14, SQLite=14)
 *NOTA CRÍTICA:* Cubigest usa Id=4 para Cerrillos. SQLite usa Id=10. El motor tiene un puente interno: `get_cubigest_sucursal_ids(10)→[4]`. NUNCA cambiar este mapeo sin actualizar ambos lados.
 
-# 13. Estado actual (Marzo 2026)
-- Motor: OPERATIVO en Calama y Cerrillos. (Coronel en diagnóstico).
-- Geovictoria: OPERATIVO en TO con scheduler.
-- UI: Facelift (naranja #f97316, sidebar oscuro #111827). 
-- Branding Comercial: "Sistema de Planificación de la Producción" (ocultar nombre OptiFierro).
+# 13. Estado actual (Mayo 2026)
+- **Estado actual (Mayo 2026)**
+  - QA Pre-Entrega completado: 2026-05-07
+  - 10 fixes aplicados y verificados (ver LOG_CAMBIOS_2026.md 2026-05-07)
+  - Pendiente entrega formal a Gustavo Godoy (Torres Ocaranza)
+  - BLOQUEADO (externo): permisos SQL Server Cubigest para Calama/Coronel — contactar Roberto
 
 # 14. Repositorios GitHub
 - `https://github.com/RodMontu/scrap-geovictoria` (privado). Stack: Python, Playwright, SQLite, FastAPI. Despliegue en TO.

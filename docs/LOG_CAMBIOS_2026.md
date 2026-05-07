@@ -1,4 +1,46 @@
 ---
+═══════════════════════════════════════════════════
+FECHA: 2026-05-07
+PROYECTO: OptiFierro V2 — QA Pre-Entrega + Fixes
+SESIÓN: QA completo 7 secciones + 10 fixes aplicados + verificación Fase 2
+═══════════════════════════════════════════════════
+
+### Fixes aplicados (todos verificados PASS por Codex CLI)
+
+**Backend — Torres Ocaranza (PROMETHEUS-AI-CORE 192.168.1.65)**
+- AV-02 backend: POST /api/averias ahora retorna `requires_reprogram: True` en el JSON de respuesta. Archivo: routers/averias.py línea 108.
+- OP-01 DB: maquinas_info.Operador_Habitual corregido de 'OmRamirez' a 'oramirez' (1 fila). SQLite: optifierro_v2.db.
+- OP-01 código: routers/maquinas.py — query de nombre_map cambiada a LEFT JOIN con LOWER() case-insensitive entre maquinas_info y operadores_matriz.
+- OP-02 DB: operadores_matriz id=18, username=ctrujillo — nombre actualizado de '(Nombre Pendiente - confirmar con RRHH)' a 'Carlos Alexis Rogers Trujillo'. Fuente: asistencia.db de scrap-geovictoria.
+
+**Frontend — Torres Ocaranza**
+- AV-01: window.confirm() reemplazado por modal React en GestorAverias.tsx. Texto: "Confirma lo siguiente: [resumen falla]".
+- AV-02 frontend: Banner auto-dismiss 8s en GestorAverias.tsx cuando response.requires_reprogram === true. Texto: "Averia registrada. Para reflejar el cambio en la planificacion ejecuta Reprogramar".
+- PROG-03: Math.min eliminado en GestorProgramacion.tsx línea 488. porcentajeCarga ahora muestra valor real sin cap. Si >100% muestra barra roja.
+- PROG-05: Fallback hora inicio turno corregido de '08:15'/'20:15' a '08:00'/'20:10' en GestorProgramacion.tsx líneas 792, 816, 1170.
+- PROG-06: Función getTextColorForBackground() implementada en GestorProgramacion.tsx con WCAG_AA_CONTRAST_RATIO = 4.5. Las cajitas del Gantt calculan automáticamente texto blanco o negro según contraste del fondo.
+- PROG-07: Condición lista_etiqueta_ids.length > 1 cambiada a >= 1 en GestorProgramacion.tsx línea 945. Modal ahora muestra etiquetas aunque haya solo 1.
+- VS-01: Indicador de sucursal activa en VistaSemanal.tsx corregido. Dot ahora usa flex items-center gap-1.5 (inline izquierda del nombre).
+
+**Build y deploy**
+- npm run build: PASS exit 0. Solo warning pre-existente de chunk size Vite (no bloqueante).
+- docker compose restart backend: ejecutado post-fixes backend.
+- docker compose restart frontend: ejecutado 3 veces durante la sesión (post-cada batch de fixes).
+
+### Metodología usada en esta sesión
+- Miaude_sin_Montu Skill activa: CCa + Gemini CLI + Codex CLI en paralelo sin intervención manual de Montu.
+- CCa (Mac): diagnóstico, análisis de código fuente.
+- Codex CLI (TO, GPT-5.5): fixes backend + fixes frontend + QA verificación. Acceso directo al filesystem de TO sin SSH desde Mac.
+- Gemini CLI (Mac): intentado para frontend pero bloqueado por falta de SSH configurado hacia TO. Reemplazado por Codex en TO.
+- Fase 2 verificación: 10/10 checks PASS.
+
+### Pendientes críticos post-sesión
+- BACKLOG-MP01-ROBERTO (PRIORIDAD MÁXIMA): Usuario OptiFierro necesita GRANT SELECT en SQL Server Cubigest para bases de Calama (TOLTDA/TOREN/TORREON1) y Coronel (TOSOL/TOGENUA/TMAESTRANZA) sobre tabla INFORMAT_Vista_OrdenesCompra. Contactar a Roberto en TO. Sin esto, obtener_oc_pendientes_inet retorna {} para Calama y Coronel.
+- PROG-02 pendiente: Operador en tooltip/modal Gantt no coincide con operador asignado. Requiere investigación más profunda del flujo de datos. Fase siguiente.
+- Fase 2 (post-entrega): ADMIN-01 (turno noche marcado FALTA), RCA#4 (semántica Turno A/B), MAQ-MEJORA-01 (restricciones al motor), PROG-OBS-01 (argumento LLM).
+
+---
+
 ## 2026-05-03 — MontuMS completado + MS-Flow operativo
 
 **Repo:** github.com/RodMontu/MontuMS (privado)

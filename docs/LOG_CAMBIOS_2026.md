@@ -1,5 +1,26 @@
 ---
 ═══════════════════════════════════════════════════
+FECHA: 2026-05-08
+SESIÓN: Fix MCP y VPN Respaldo
+═══════════════════════════════════════════════════
+
+#### Fix MCP bridge Clawdio en Claude Desktop
+- Síntoma: "Could not attach to MCP server clawdio" en Claude Desktop
+- Causa raíz: /usr/local/bin/hermes-mcp-bridge sin bit de ejecución (-rw-r--r-- en vez de -rwxr-xr-x)
+- Fix: chmod +x /usr/local/bin/hermes-mcp-bridge
+- Verificación: hermes v0.12.0 responde en /home/i3/.local/bin/hermes — path correcto
+- Estado: RUNNING ✅
+- Pendiente: hermes 850 commits behind — evaluar hermes update en serveri3
+
+#### VPN TO: script de respaldo actualizado
+- Script ~/conectar_to_vpn.sh actualizado en MacBook
+- IP anterior (GTD): 152.230.125.218
+- IP nueva (TLINK, respaldo): 45.4.1.234
+- Causa: caída del proveedor principal GTD, conexión de respaldo TLINK activada
+
+---
+
+═══════════════════════════════════════════════════
 FECHA: 2026-05-07
 PROYECTO: OptiFierro V2 — QA Pre-Entrega + Fixes
 SESIÓN: QA completo 7 secciones + 10 fixes aplicados + verificación Fase 2
@@ -39,7 +60,38 @@ SESIÓN: QA completo 7 secciones + 10 fixes aplicados + verificación Fase 2
 - PROG-02 pendiente: Operador en tooltip/modal Gantt no coincide con operador asignado. Requiere investigación más profunda del flujo de datos. Fase siguiente.
 - Fase 2 (post-entrega): ADMIN-01 (turno noche marcado FALTA), RCA#4 (semántica Turno A/B), MAQ-MEJORA-01 (restricciones al motor), PROG-OBS-01 (argumento LLM).
 
+
+## 2026-05-06 — cctol habilitado en MacBook (Devstral remoto vía VPN)
+- Alias cctol agregado en /Users/montu/.zshrc
+- Patrón: ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=ollama /Users/montu/.local/bin/claude --model devstral --dangerously-skip-permissions
+- Ollama en TO (192.168.1.65) ya escuchaba en 0.0.0.0:11434 sin cambios necesarios
+- Test funcional end-to-end: CCTOL_MAC_OK ✅
+- Restricción operacional: VPN TO activa en un solo equipo a la vez (nunca simultáneos)
+- GPU TO: RTX 5060 Ti 16GB, modelo devstral
+
+## 2026-05-06 — MS v3.0 aprobada: incorporación Equipo OpenAI
+- Metodología Sinérgica actualizada a v3.0
+- Nueva capa de equipo incorporada: Equipo OpenAI (ChatGPT como Subgerente/cerebro secundario, Codex CLI como ejecutor)
+- Estructura de 4 capas:
+  1. ARQUITECTO: Claude (Miaude)
+  2. LÍDERES/SUBGERENTES: Gemini (chat) + ChatGPT
+  3. COORDINADOR/ORQUESTADOR: Clawdio Rabín
+  4. EJECUTORES: CCa + CC's + Gemini CLI + Antigravity + Codex CLI
+- Codex CLI instalado: Mac (v0.120.0, /usr/local/bin/codex), TO (v0.128.0, user OptiFierro)
+- Codex asignado como ejecutor preferente en Windows/PowerShell (TO) y fallback de CCa por cuota
+- Deuda técnica: verificar versión en serverX y serveri3; autenticación OpenAI pendiente en todos los equipos
+
+## 2026-05-05/06 — Clawdio: desacoplamiento de serverX
+- terminal.backend cambiado de ssh → local en /home/i3/.hermes/config.yaml
+- terminal.backend cambiado de ssh → local en /home/i3/.hermes/config.yaml
+- terminal.cwd cambiado de /home/x → /home/i3
+- Fix supermercado.json: eliminado prefijo ```json corrupto, lista_mes_actual reactivada con 3 productos (vinagre blanco, leche almendras Orasi, galletas Gran Cereal cacao)
+- Ejecutado con Codex CLI desde MacBook
+- Backup: /home/i3/.hermes/config.yaml.bak.20260506_1034
+- Deuda: productos_habituales vacío, reconstruir lista completa con Pecas
+
 ---
+
 
 ## 2026-05-03 — MontuMS completado + MS-Flow operativo
 

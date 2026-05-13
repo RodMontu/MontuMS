@@ -373,8 +373,9 @@ Cierre de seguridad:
 - GPU: Intel Iris Plus 655
 - OS: macOS Sequoia 15.7.5
 - Rol: movilidad, administración remota, gestión
-- **IA de Terminal:** Gemini CLI (v0.38.2 / Node v24.13.0) — Autenticado bajo suscripción Google One AI Pro.
+- **IA de Terminal:** Gemini CLI (v0.40.1 / Node v24.13.0) — Autenticado bajo suscripción Google One AI Pro.
 - **Modelos CLI Activos:** Utiliza **Gemini 3.1 Pro** para razonamiento sistémico, análisis de logs/telemetría, y **Gemini Code Assist** para ejecución de bash y scripts locales/remotos.
+- **Alias cctol:** `ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=ollama claude --model devstral --dangerously-skip-permissions` (Requisito: VPN TO activa, nunca simultáneo con otro equipo).
 - **Vector de Control:** Actúa como puente interactivo y ejecutor autónomo vía túnel SSH pre-configurado hacia serverX y serveri3.
 
 ## 5.2 Dell Latitude 5490
@@ -561,6 +562,16 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 | Herramienta | Versión | Método | Ubicación | Estado |
 | :--- | :--- | :--- | :--- | :--- |
 | Claude Code | 2.1.111 | Native installer | `~/.local/bin/claude` | ✅ Activo |
+| Codex CLI | 0.120.0 | Native (Mac) | `/usr/local/bin/codex` | ✅ Activo |
+| Codex CLI | 0.128.0 | Native (TO) | (Windows, PATH) | ✅ Activo |
+
+### Codex CLI — Matriz de Despliegue
+| Equipo | Versión | Path | Estado |
+|---|---|---|---|
+| MacBook (montu) | 0.120.0 | /usr/local/bin/codex | ✅ instalado |
+| TO (OptiFierro) | 0.128.0 | (Windows, PATH global) | ✅ instalado, exec policy probada |
+| serverX | pendiente | — | verificar |
+| serveri3 | pendiente | — | verificar |
 
 - Auth: Suscripción Claude Pro (cuenta claude.ai)
 - Auto-updates: habilitado (canal: latest)
@@ -576,6 +587,7 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 - `ccqwen`: Claude Code con `qwen3.5:cloud`
 - `ccgemma`: Claude Code con `gemma3n` local
 - `ccor1` a `ccor5`: Aliases OpenRouter (ver detalle en INVENTARIO_LLMS_LOCALES.md)
+- `cctol` (Mac): `ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=ollama claude --model devstral --dangerously-skip-permissions` (vía VPN TO)
 - `kde-on` / `kde-off`: levantar/bajar KDE manualmente
 
 ### Ollama (Update Abril 2026)
@@ -705,7 +717,8 @@ NO levantar en serverX bajo ninguna circunstancia.
 ### Integración Claude Desktop (MCP)
 - Bridge: /usr/local/bin/hermes-mcp-bridge (Mac)
 - Config: ~/Library/Application Support/Claude/claude_desktop_config.json
-- Estado: RUNNING — Claude Desktop conectado como cliente MCP de Clawdio
+- Estado: RUNNING ✅ (corregido 2026-05-08, chmod +x)
+- Nota: hermes 850 commits behind, evaluar update en serveri3
 - Hermes expone conversaciones y herramientas vía `hermes mcp serve` sobre SSH
 
 ### Canal de retorno (Opción A — archivos)
@@ -721,15 +734,22 @@ NO levantar en serverX bajo ninguna circunstancia.
 **Creado:** 2026-05-02
 **Propósito:** Brújula sistémica para el trabajo coordinado entre Montu, Claude, Clawdio y agentes del ecosistema.
 
-### Stack de modelos (mayo 2026)
+### Stack de modelos (mayo 2026 — MS v3.0)
 | Recurso | Costo | Rol |
 |---|---|---|
 | Claude Sonnet (Desktop/chat) | Pro | Arquitectura, RCA, decisiones críticas |
 | Gemini 2.5 Pro (Antigravity/CLI) | Pro Gemini | Análisis extenso, relay cuando Claude agota cuota |
+| ChatGPT Pro / Codex CLI | Pro OpenAI | Subgerente secundario, ejecutor preferente Windows/TO |
 | Gemini 2.5 Flash (Clawdio) | Pro Gemini | Orquestación, SSH, distribución de prompts |
 | Qwen3 Coder 480B:free (OpenRouter) | Gratis | Coding rutinario, 262K ctx |
 | Nemotron 3 Super:free (OpenRouter) | Gratis | Análisis mixto, 1M ctx |
 | qwen2.5-coder:7b (Ollama local) | Local GPU | Privacidad total, offline |
+
+### Estructura de 4 capas (MS v3.0)
+1. **ARQUITECTO:** Claude (Miaude) — Planificación y visión estratégica.
+2. **LÍDERES / SUBGERENTES:** Gemini (chat) + ChatGPT — Análisis de apoyo y supervisión.
+3. **COORDINADOR / ORQUESTADOR:** Clawdio Rabín — Puente de ejecución y gestión de contexto.
+4. **EJECUTORES:** CCa + CC's + Gemini CLI + Antigravity + Codex CLI — Implementación atómica.
 
 ### Principio cardinal
 Montu deja de ser el canal de comunicación entre Claude y los agentes. Clawdio actúa como puente de ejecución. Montu supervisa y valida. Las instrucciones correctivas siempre van de Montu directamente a Claude, nunca mediadas por Clawdio.

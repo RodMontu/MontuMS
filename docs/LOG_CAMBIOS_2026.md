@@ -1,4 +1,22 @@
 ---
+═══════════════════════════════════════════════════
+FECHA: 2026-05-15
+PROYECTO: Infraestructura NAS — Migración SMB → NFS
+═══════════════════════════════════════════════════
+
+[MIGRACIÓN NAS SERVERX]
+RCA final: cliente SMB de macOS Sequoia tiene bug con Samba/Linux
+que produce fts_read: Permission denied en readdir, irresolvible
+por configuración (afecta Finder, Terminal y todos los procesos).
+SOLUCIÓN: Migrado a NFS nativo.
+- serverX: nfs-kernel-server activo, exports en /etc/exports:
+  /mnt/extra y /home/x exportados a 192.168.1.41 (rw,no_root_squash)
+- Mac: mounts en ~/Miau-Nube y ~/Home-X via mount -t nfs
+- LaunchAgent: com.user.nfs-serverx (automontaje cada 5 min)
+- Samba: smb.conf actualizado con config 2026 para macOS (por si acaso)
+Estado: ✅ NFS funcionando. SMB deprecado para acceso desde Mac.
+---
+---
 ===================================================
 FECHA: 2026-05-15
 SESION: Fix Clawdio - ModuleNotFoundError init_db

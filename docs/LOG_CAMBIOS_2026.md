@@ -1,4 +1,24 @@
 ---
+===================================================
+FECHA: 2026-05-15
+SESION: Fix Clawdio - ModuleNotFoundError init_db
+===================================================
+
+#### Fix Clawdio: ModuleNotFoundError init_db
+
+- **Sintoma:** Clawdio fallaba con execute_code para deberes/ideas. Error: ModuleNotFoundError: No module named init_db. Ruta incorrecta generada en runtime: /home/i3/.hermes/skills/productivity/personal-productivity-db/scripts
+
+- **RCA:** init_db.py esta en /home/i3/.hermes/init_db.py (raiz directa). MEMORY.md no documentaba el patron de importacion correcto, Gemini Flash inferia la ruta y la alucinaba. Bug de contexto ausente, no de codigo.
+
+- **Fix aplicado por Miaude via Control Your Mac:**
+  - Bloque PATRON DE IMPORTACION DB - OBLIGATORIO agregado en /home/i3/.hermes/memories/MEMORY.md
+  - Patron correcto: sys.path.insert(0, /home/i3/.hermes) — nunca subdirectorios
+  - Hermes reiniciado. Smoke test: import exitoso
+
+- **Aprendizaje:** LLM sin ground truth en contexto inventa rutas plausibles pero falsas. Solucion: anclar la verdad en MEMORY.md.
+
+
+---
 ═══════════════════════════════════════════════════
 FECHA: 2026-05-08
 SESIÓN: Fix MCP y VPN Respaldo

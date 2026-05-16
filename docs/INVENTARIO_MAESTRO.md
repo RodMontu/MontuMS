@@ -163,8 +163,10 @@ Persistencia desacoplada de contenedores.
 flowchart LR
   subgraph X[serverX 192.168.1.111]
     subgraph IANET[ia-net]
-      OW[open-webui\n:3000]
-      OL[ollama\n:11434]
+      OW[open-webui
+:3000]
+      OL[ollama
+:11434]
       OW -->|API local| OL
     end
   end
@@ -175,10 +177,14 @@ flowchart LR
 flowchart TB
   subgraph X[serverX 192.168.1.111]
     subgraph SAGNET[superagente_default]
-      WEB[superagente-web\n:18080]
-      API[superagente-api\n:18000]
-      ORC[superagente-orchestrator\n:18100]
-      QD[(qdrant / superagente-qdrant\ninternal 6333-6334)]
+      WEB[superagente-web
+:18080]
+      API[superagente-api
+:18000]
+      ORC[superagente-orchestrator
+:18100]
+      QD[(qdrant / superagente-qdrant
+internal 6333-6334)]
 
       WEB --> API
       ORC --> QD
@@ -192,9 +198,12 @@ flowchart TB
 flowchart TB
   subgraph X[serverX 192.168.1.111]
     subgraph SIMNET[sim-with-ollama_default]
-      SIMW[simstudio\n:3100]
-      SIMRT[realtime\n:3002]
-      SIMDB[(pgvector\n:5432)]
+      SIMW[simstudio
+:3100]
+      SIMRT[realtime
+:3002]
+      SIMDB[(pgvector
+:5432)]
 
       SIMW --> SIMDB
       SIMRT --> SIMDB
@@ -210,7 +219,8 @@ flowchart TB
 flowchart LR
   subgraph X[serverX 192.168.1.111]
     subgraph PEGNET[pegas-net]
-      PW[pegas_v2\n:8000]
+      PW[pegas_v2
+:8000]
     end
   end
 ```
@@ -221,8 +231,10 @@ flowchart LR
 flowchart LR
   subgraph X[serverX 192.168.1.111]
     subgraph N8NNET[n8n_default]
-      N8N[n8n\n:5678]
-      V[(n8n_data\nvolume)]
+      N8N[n8n
+:5678]
+      V[(n8n_data
+volume)]
       N8N --- V
     end
   end
@@ -234,8 +246,10 @@ flowchart LR
 flowchart LR
   subgraph X[serverX 192.168.1.111]
     subgraph PNET[portainer_default]
-      P[portainer\n:9000/9443]
-      PV[(portainer_data\nvolume)]
+      P[portainer
+:9000/9443]
+      PV[(portainer_data
+volume)]
       P --- PV
     end
   end
@@ -255,6 +269,14 @@ flowchart LR
 ---
 
 ## 2.9 NoMachine Server (Acceso Escritorio Remoto)
+- **NoMachine 8.20.1** — operativo ✅
+  - Protocolo: NX sobre SSH, puerto 4000
+  - Display: virtual (sin display manager activo)
+  - Desktop: KDE Plasma 5.27 (startplasma-x11)
+  - Xwrapper: allowed_users=anybody, needs_root_rights=yes
+  - dbus-x11: instalado ✅
+  - xvfb.service: deshabilitado (conflictaba con NoMachine)
+  - Cliente: NoMachine en MacBook Pro 13" 2018
 - **Versión:** 8.20.1
 - **Puerto:** 4000 (protocolo NX)
 - **Servicio systemd:** `nxserver.service` (enabled, arranca con el sistema)
@@ -375,7 +397,7 @@ Cierre de seguridad:
 - Rol: movilidad, administración remota, gestión
 - **IA de Terminal:** Gemini CLI (v0.40.1 / Node v24.13.0) — Autenticado bajo suscripción Google One AI Pro.
 - **Modelos CLI Activos:** Utiliza **Gemini 3.1 Pro** para razonamiento sistémico, análisis de logs/telemetría, y **Gemini Code Assist** para ejecución de bash y scripts locales/remotos.
-- **Alias cctol:** `ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=ollama claude --model devstral --dangerously-skip-permissions` (Requisito: VPN TO activa, nunca simultáneo con otro equipo).
+- **Alias cctol:** `ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=*** claude --model devstral --dangerously-skip-permissions` (Requisito: VPN TO activa, nunca simultáneo con otro equipo).
 - **Vector de Control:** Actúa como puente interactivo y ejecutor autónomo vía túnel SSH pre-configurado hacia serverX y serveri3.
 
 ## 5.2 Dell Latitude 5490
@@ -587,7 +609,7 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 - `ccqwen`: Claude Code con `qwen3.5:cloud`
 - `ccgemma`: Claude Code con `gemma3n` local
 - `ccor1` a `ccor5`: Aliases OpenRouter (ver detalle en INVENTARIO_LLMS_LOCALES.md)
-- `cctol` (Mac): `ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=ollama claude --model devstral --dangerously-skip-permissions` (vía VPN TO)
+- `cctol` (Mac): `ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=*** claude --model devstral --dangerously-skip-permissions` (vía VPN TO)
 - `kde-on` / `kde-off`: levantar/bajar KDE manualmente
 
 ### Ollama (Update Abril 2026)
@@ -679,7 +701,7 @@ NO levantar en serverX bajo ninguna circunstancia.
 
 ### Servicios systemd (usuario i3)
 | Servicio | Descripción |
-|---|---|
+|---|---|---|
 | hermes-gateway.service | Gateway principal Clawdio |
 | stt-proxy.service | Proxy STT Flask (puerto 9877) |
 
@@ -736,7 +758,7 @@ NO levantar en serverX bajo ninguna circunstancia.
 
 ### Stack de modelos (mayo 2026 — MS v3.0)
 | Recurso | Costo | Rol |
-|---|---|---|
+|---|---|---|---|
 | Claude Sonnet (Desktop/chat) | Pro | Arquitectura, RCA, decisiones críticas |
 | Gemini 2.5 Pro (Antigravity/CLI) | Pro Gemini | Análisis extenso, relay cuando Claude agota cuota |
 | ChatGPT Pro / Codex CLI | Pro OpenAI | Subgerente secundario, ejecutor preferente Windows/TO |

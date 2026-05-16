@@ -1,3 +1,32 @@
+## 2026-05-16 — Fix NoMachine serverX: escritorio remoto KDE operativo
+
+### Problema
+NoMachine conectaba pero mostraba pantalla negra con solo cursor del mouse.
+
+### RCA (Root Cause Analysis)
+Tres capas de problema identificadas y resueltas en secuencia:
+1. `/etc/X11/Xwrapper.config` tenía `allowed_users=console` → Xorg no podía arrancar como usuario nx
+2. Paquete `dbus-x11` no instalado post-reinstalación → `dbus-launch` ausente → exit code 127 en startplasma-x11
+3. Servicio `xvfb.service` corriendo en `:0` → NoMachine detectaba Xorg "activo" y no creaba display virtual propio
+
+### Solución aplicada
+- `/etc/X11/Xwrapper.config` → `allowed_users=anybody` + `needs_root_rights=yes`
+- `sudo apt-get install -y dbus-x11`
+- `sudo systemctl stop xvfb && sudo systemctl disable xvfb`
+- `sudo /etc/NX/nxserver --restart`
+- En cliente Mac: aceptar creación de nueva pantalla virtual → KDE Plasma levanta correctamente
+
+### Estado final
+✅ NoMachine operativo desde MacBook Pro → serverX vía LAN
+✅ KDE Plasma 5.27 corriendo en display virtual NoMachine
+✅ xvfb.service deshabilitado permanentemente
+✅ dbus-x11 instalado
+✅ Xwrapper.config corregido
+
+### Notas
+- serverX tiene TV 42" 4K conectado vía HDMI como pantalla de emergencia, pero no se usa como display manager
+- NoMachine crea display virtual bajo demanda (sin display manager activo)
+- Checkbox "Crear siempre nueva pantalla en este servidor" activado en cliente
 ---
 ═══════════════════════════════════════════════════
 FECHA: 2026-05-15

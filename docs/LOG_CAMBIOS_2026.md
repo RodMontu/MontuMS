@@ -1,3 +1,34 @@
+## 2026-05-18 — QA OptiFierro V2: 9/9 PASS + fixes post-entrega Gustavo
+
+### Contexto
+QA completo ejecutado sobre los fixes solicitados por Gustavo Godoy (Torres Ocaranza) post-entrega del 13 de mayo. 9 checks verificados, todos PASS. BACKLOG-MP01-ROBERTO cerrado: Roberto confirmó que el acceso a Cubigest para Calama y Coronel ya existe. Docker Desktop en TO configurado para autoarranque y resiliencia de contenedores.
+
+### Fixes aplicados (commits en Optifierro-V2)
+- `2fa552f` fix(#1): asistencia muestra VACACIONES/LICENCIA/PERMISO desde GV
+- `f5fce4d` fix(#6): cache 15min en obtener_estado_maquinas (Cubigest)
+- `a3a9f51` fix: bolsa de trabajo vacía al montar (id_tarea undefined)
+- `1021b73` fix: turno noche clasificado como FALTA en presencia
+- `7589f0a` fix: operadores repetidos entre turnos (guard sucursal_id==10 removido)
+- `5be1c05` fix: prompt Argumento mejorado con diámetros, carga, ITs rechazadas
+- `af38ced` chore: OLLAMA_URL fallback en docker-compose.yml
+- fix UI: input hora jornada como text HH:MM (fix AM/PM locale) — sin commit aún
+
+### Backlog cerrado
+- **BACKLOG-MP01-ROBERTO:** CERRADO. Roberto confirmó que el acceso a Cubigest para Calama y Coronel ya existe. No requería gestión adicional.
+
+### Infra TO (PROMETHEUS-AI-CORE 192.168.1.65)
+- Docker Desktop: Start on login ✅ configurado
+- Todos los contenedores: restart policy `always` o `unless-stopped` ✅
+- `OLLAMA_URL=http://host.docker.internal:11434` configurado en docker-compose.yml como fallback
+
+### Equipos afectados
+- TO (PROMETHEUS-AI-CORE 192.168.1.65) — OptiFierro V2
+
+### Estado post-cambios
+✅ 9/9 QA PASS — sistema estable post-entrega a Gustavo
+
+---
+
 ## 2026-05-17 — Actualización Hermes/Clawdio Rabín a v0.14.0 + fixes de confiabilidad
 
 ### Cambios aplicados

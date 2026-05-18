@@ -519,6 +519,11 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 - `geovictoria-scheduler` | Imagen: scrap-geovictoria (build local) | Puerto: interno | Scheduler APScheduler (ejecuta scraper L-V 08:06 y 20:06).
 - `ui-rrhh-geovictoria` | Imagen: nginx:alpine (SPA React) | Puerto: 0.0.0.0:8020->80 | UI de consulta de asistencia RRHH (Dashboard).
 
+## 9.1 Configuración Docker Desktop TO (act. 2026-05-18)
+- **Docker Desktop:** Start on login ✅ — todos los contenedores arrancan automáticamente con el sistema
+- **Restart policy:** todos los contenedores con `restart: always` o `unless-stopped` ✅
+- **OLLAMA_URL:** `http://host.docker.internal:11434` — configurado en docker-compose.yml como fallback para conectar al Ollama local del host
+
 # 10. OptiFierro V2 — Stack y Estado
 - **Backend:** FastAPI/Python 3.11
 - **Frontend:** React/Vite/TypeScript/Tailwind v4
@@ -545,10 +550,10 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 
 # 13. Estado actual (Mayo 2026)
 - **Estado actual (Mayo 2026)**
-  - QA Pre-Entrega completado: 2026-05-07
-  - 10 fixes aplicados y verificados (ver LOG_CAMBIOS_2026.md 2026-05-07)
-  - Pendiente entrega formal a Gustavo Godoy (Torres Ocaranza)
-  - BLOQUEADO (externo): permisos SQL Server Cubigest para Calama/Coronel — contactar Roberto
+  - QA Pre-Entrega completado: 2026-05-07 (10 fixes, ver LOG_CAMBIOS_2026.md 2026-05-07)
+  - Entrega formal a Gustavo Godoy: 2026-05-13
+  - QA post-entrega Gustavo: 9/9 PASS — 2026-05-18 (ver LOG_CAMBIOS_2026.md)
+  - BACKLOG-MP01-ROBERTO: CERRADO — Roberto confirmó que permisos Cubigest Calama/Coronel ya existen
 
 # 14. Repositorios GitHub
 - `https://github.com/RodMontu/scrap-geovictoria` (privado). Stack: Python, Playwright, SQLite, FastAPI. Despliegue en TO.

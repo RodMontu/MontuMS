@@ -1,3 +1,13 @@
+## 2026-05-17 — Hermes v0.14.0 + fixes confiabilidad Rabín
+
+- Hermes Agent: v0.12.0 → v0.14.0 "The Foundation Release" (1693 commits, 545 issues, 12 P0)
+- Fix cron output: toolset web → search (web requería API keys no configuradas)
+- SOUL.md: 3 reglas técnicas canónicas (comunicación proactiva, protocolo SSH, formato cron)
+- Memory provider: holographic activado (SQLite FTS5 + HRR local)
+- Config: provider gemini corregido (corrupción por replace múltiple), config v19 funcional
+- Cron "Hermes Agent al día": prompt reescrito + deliver telegram:8357148621 + toolset search
+
+Estado: ✅ v0.14.0 | ✅ Gateway activo | ✅ Holographic memory | ✅ SOUL.md 113 líneas | ✅ doctor sin errores críticos
 ## 2026-05-18 — QA OptiFierro V2: 9/9 PASS + fixes post-entrega Gustavo
 
 ### Contexto

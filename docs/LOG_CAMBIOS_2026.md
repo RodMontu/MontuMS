@@ -1,3 +1,15 @@
+## 2026-05-17 — Actualización Hermes/Clawdio Rabín a v0.14.0 + fixes de confiabilidad
+
+### Cambios aplicados
+- Hermes Agent: v0.12.0 → v0.14.0 "The Foundation Release" (1693 commits, 545 issues cerrados, 12 P0)
+- Fix nativo bug cron output (código Python crudo en Telegram) — resuelto en v0.13+
+- Secret redaction: ON por defecto (corrige bug de patch corruption de v0.12)
+- SOUL.md: 3 reglas técnicas canónicas agregadas (comunicación proactiva, protocolo SSH write_file→scp→ssh, formato cron)
+- Memory provider: holographic activado (SQLite FTS5 + HRR local, sin cloud)
+- Cron "Hermes Agent al día": prompt reescrito + deliver explícito telegram:8357148621
+
+### Estado post-cambios
+✅ Hermes v0.14.0 activo | ✅ Gateway corriendo | ✅ Holographic memory | ✅ SOUL.md 113 líneas limpio
 ## 2026-05-17 — Hermes v0.14.0 + fixes confiabilidad Rabín
 
 - Hermes Agent: v0.12.0 → v0.14.0 "The Foundation Release" (1693 commits, 545 issues, 12 P0)

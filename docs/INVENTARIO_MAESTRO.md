@@ -347,7 +347,7 @@ volume)]
 
 # 4. Cloudflare Tunnel – Configuración Activa
 
-- Túnel ID: `0e4cee29-dc5c-43a3-9db2-6a4208336050`
+- Túnel ID: `[TUNNEL-ID-PRIVADO]`
 - Protocolo: `http2`
 - Config: `/srv/cloudflared/config.yml`
 

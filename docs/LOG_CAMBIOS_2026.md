@@ -1,3 +1,16 @@
+## 2026-05-24 — Biblioteca de Prompts MS v3.0 — Bloque A
+
+**Contexto:** Primera versión de la biblioteca de prompts reutilizables de la MS v3.0, construida aplicando códigos de prompt engineering de la infografía "100 Códigos" (01 XML Maestro, 04 Primero Piensa, 08 Paso a Paso, 15 Motor de Disparo, 44 SOP).
+
+**Cambios:**
+- Archivo nuevo: `docs/BIBLIOTECA_PROMPTS_MS.md` (292 líneas)
+- Sección 1: Inicio de sesión — 4 templates con Motor de Disparo (trigger phrase ACTIVAR_MS_V3)
+- Sección 2: Delegación CCa — templates base, RCA y deploy con estructura Paso a Paso
+- Sección 3: Delegación Gemini — templates análisis, frontend, documentación y Abogado del Diablo
+- Sección 4: Actualización docs vía Rabín — SOP estándar y template cambio infra
+- Código 12 (Contrarian) integrado como template de revisión arquitectónica
+
+---
 ## 2026-05-17 — Actualización Hermes/Clawdio Rabín a v0.14.0 + fixes de confiabilidad
 
 ### Cambios aplicados

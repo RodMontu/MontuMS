@@ -1008,3 +1008,33 @@ Miaude (Claude.ai Desktop) vía Desktop Commander — verificación cruzada en t
 
 ### Agente ejecutor
 Miaude (Claude.ai Desktop) via Desktop Commander — verificacion cruzada en todos los nodos post-implementacion OK
+
+
+---
+## 2026-05-24 — Fix SSH Clawdio-v2 (container) → serverX
+
+**Contexto:** Rabín (Hermes en container clawdio-v2) no podia hacer SSH a serverX. Detectado al intentar documentar el LOG de optimizacion de tokens.
+
+### Root Cause Analysis
+- El container clawdio-v2 tiene un volumen Docker en /opt/data (home del user hermes, uid 10000)
+- Las llaves SSH existian en /opt/data/.ssh/ pero con ownership root:root
+- SSH rechaza llaves con ownership incorrecto — autenticacion fallaba silenciosamente
+- Ademas, faltaba ssh config y known_hosts para serverX
+
+### Acciones ejecutadas (en container clawdio-v2 via docker exec)
+- chown hermes:hermes /opt/data/.ssh/ y los archivos id_ed25519, id_ed25519.pub
+- chmod 600 /opt/data/.ssh/id_ed25519
+- Creado /opt/data/.ssh/config con entradas para Host serverx y 192.168.1.111 (User x, IdentityFile correcto)
+- ssh-keyscan 192.168.1.111 >> /opt/data/.ssh/known_hosts
+- La llave publica clawdio-v2@serveri3 ya estaba en authorized_keys de serverX (no requirio cambio en serverX)
+
+### Verificacion
+- docker exec -u hermes clawdio-v2 ssh x@192.168.1.111 echo OK -> CONEXION_OK
+- docker restart clawdio-v2 + test post-restart -> POST_RESTART_OK
+- Persistencia confirmada: /opt/data esta en volumen Docker clawdio-v2_clawdio_data
+
+### Persistencia
+Los cambios persisten en reinicios y recreaciones del container porque /opt/data es un volumen Docker nombrado (no un layer efimero del container).
+
+### Agente ejecutor
+Miaude (Claude.ai Desktop) via Desktop Commander — fix completo sin intervencion de Montu

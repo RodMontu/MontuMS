@@ -1,3 +1,73 @@
+---
+
+## 2026-05-24 — Rabín 2.0 instalado en Docker + fixes de confiabilidad
+
+### Contexto
+Rabín 1.x (Hermes systemd nativo) reemplazado por Rabín 2.0 en Docker
+por problemas de confiabilidad: crons incompletos, drift de skills,
+tool use frágil con Gemini 2.5 Flash.
+
+### Cambios aplicados
+- Hermes Agent migrado de systemd nativo → Docker (contenedor: clawdio-v2)
+- Directorio base host: /home/i3/clawdio-v2/ en serveri3
+- Path interno contenedor: /opt/data/ (no /root/.hermes/)
+- Crons en: /opt/data/cron/jobs.json (no en config.yaml)
+- Modelo: gemini-3-flash-preview vía Gemini API directa
+  (reemplaza gemini-2.5-flash-preview vía OpenRouter)
+- 9 skills creadas:
+  - Cotidianas: deberes-ideas, google-workspace, supermercado
+  - Infra: infra-monitor, infra-docker-check
+  - MS: ms-canal-miaude-a-rabin, ms-canal-rabin-a-miaude,
+        ms-protocolo-comunicacion, ms-doc-updater, ms-handoff-reader
+- DB migrada desde Rabín 1.x: 23 deberes + 1 idea
+- Tabla miaude_inbox agregada a clawdio_db.sqlite (canal asíncrono Miaude↔Rabín)
+- SSH key contenedor→serverX: /opt/data/.ssh/id_ed25519
+  Fix: symlink /root/.ssh → /opt/data/.ssh (permisos hermes/root)
+  Fix monitor.sh: ssh con -F /dev/null -i /root/.ssh/id_ed25519
+- briefing-manana: retry automático ante HTTP 503 Gemini
+- MCP bridge v2: ~/hermes-mcp-bridge-v2 activo en Claude Desktop
+- /sethome configurado: canal home = Rodrigo Montuschi (8357148621)
+
+### Pendientes registrados
+- BACKLOG-RABIN-01: webhook HTTP para canal Miaude→Rabín autónomo
+  (hoy MCP solo permite Miaude→Montu, no instrucciones directas a Rabín)
+- BACKLOG-SERVERX-01: CERRADO (ver entrada siguiente)
+
+### Equipos afectados
+- serveri3 (192.168.1.211) — contenedor clawdio-v2 nuevo
+- MacBook Pro — bridge MCP v2 activo en Claude Desktop
+
+---
+
+## 2026-05-24 — Fix NVML serverX: driver/library version mismatch
+
+### Contexto
+nvidia-smi reportaba "Failed to initialize NVML: Driver/library version mismatch"
+Detectado en reporte monitor.sh de Rabín 2.0.
+
+### RCA
+Actualización de paquetes nvidia-driver-580-server 580.126.09 → 580.159.03
+ejecutada sin reboot. Módulo viejo (580.126.09) quedó cargado en RAM
+mientras librerías en disco pasaron a 580.159.03. NVML detecta mismatch
+y se niega a inicializar. Sin daño de hardware.
+
+### Fix aplicado
+Reboot controlado con cierre previo de Ollama:
+sudo systemctl stop ollama && sudo reboot
+
+### Estado post-reboot
+- nvidia-smi: 580.159.03 ✅ (módulo y librería sincronizados)
+- GPU P104-100: 34°C, 0MiB usados, operativa
+- CUDA display 13.0 en nvidia-smi = versión máxima del driver,
+  no versión runtime. Ollama usa CUDA 12.x internamente. Sin impacto.
+- Todos los contenedores up en ~54s post-reboot:
+  ollama, pegas_v2, visual-voice, cutx-app, retroassembly, portainer ✅
+
+### Equipos afectados
+- serverX (192.168.1.111)
+
+---
+
 ## 2026-05-24 — Biblioteca de Prompts MS v3.0 — Bloque A
 
 **Contexto:** Primera versión de la biblioteca de prompts reutilizables de la MS v3.0, construida aplicando códigos de prompt engineering de la infografía "100 Códigos" (01 XML Maestro, 04 Primero Piensa, 08 Paso a Paso, 15 Motor de Disparo, 44 SOP).

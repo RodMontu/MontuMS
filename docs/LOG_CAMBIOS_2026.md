@@ -928,3 +928,83 @@ Contenedores detenidos (stop sin rm, volúmenes preservados):
 - [ ] Ubicar compose de searxng y qdrant standalone y levantar
 - [ ] Evaluar disco PUSKILL: diagnóstico con smartctl antes de cualquier uso
 - [ ] Documentar nuevo disco de sistema (WDC) en INVENTARIO_MAESTRO
+---
+## 2026-05-24 — Optimización de Tokens — Stack Claude (toda la infra)
+
+**Contexto:** Consumo elevado de tokens detectado por Montu. Mi TI (Miaude) ejecutó implementación autónoma vía protocolo Miaude-sin-Montu en los 4 nodos de la infraestructura.
+
+### Cambios aplicados
+
+**MacBook (user: montu)**
+- : agregado  y 
+- : creado — excluye , , , , , , , , binarios
+
+**serverX (192.168.1.111, user: x)**
+- : agregado  y  (preservando hooks SessionStart/PostToolUse/Notification)
+- : creado (patrón global)
+-  creado en proyectos: , , , 
+
+**serveri3 (192.168.1.211, user: i3)**
+- : CREADO desde cero (no existía) — , 
+- : creado
+
+**TO — PROMETHEUS-AI-CORE (192.168.1.65, user: OptiFierro)**
+- : , 
+- Plugins CC reducidos de **11 → 2** (solo  y  — críticos OptiFierro; eliminados 9 plugins de overhead puro)
+- : creado
+
+### Protocolos operacionales establecidos (no requieren archivo)
+-  al llegar al 40% de contexto
+-  en cambio de proyecto, no al final del día
+- Referencias a archivos específicos, no a directorios (ahorro 10k-25k tokens/sesión)
+- /Gemini para coding rutinario;  solo para arquitectura y RCA
+
+### Impacto estimado
+- : reducción 30-50% tokens por respuesta compleja
+- : elimina indexación de cachés, SQLite, logs, modelos pesados
+- Plugins TO 11→2: ~30.000-50.000 tokens menos por sesión en PROMETHEUS
+- : elimina telemetría y tráfico de fondo no esencial
+
+### Agente ejecutor
+Miaude (Claude.ai Desktop) vía Desktop Commander — verificación cruzada en todos los nodos post-implementación ✅
+
+
+---
+## 2026-05-24 — Optimización de Tokens — Stack Claude (toda la infra)
+
+**Contexto:** Consumo elevado de tokens detectado por Montu. Mi TI (Miaude) ejecutó implementación autónoma vía protocolo Miaude-sin-Montu en los 4 nodos de la infraestructura.
+
+### Cambios aplicados
+
+**MacBook (user: montu)**
+- settings.json: agregado MAX_THINKING_TOKENS=10000 y CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+- .claudeignore global: creado — excluye __pycache__, node_modules, *.db, *.sqlite, .git, *.log, *.gguf, .env, binarios
+
+**serverX (192.168.1.111, user: x)**
+- settings.json: agregado MAX_THINKING_TOKENS=10000 y CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 (preservando hooks SessionStart/PostToolUse/Notification existentes)
+- .claudeignore global: creado en ~/.claudeignore
+- .claudeignore por proyecto creado en: optifierro_v2_frontend, scrap_geovictoria, visual-voice, pegas2
+
+**serveri3 (192.168.1.211, user: i3)**
+- settings.json: CREADO desde cero (no existia) — MAX_THINKING_TOKENS=10000, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+- .claudeignore global: creado en ~/.claudeignore
+
+**TO — PROMETHEUS-AI-CORE (192.168.1.65, user: OptiFierro)**
+- settings.json: MAX_THINKING_TOKENS=10000, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+- Plugins CC reducidos de 11 a 2 (solo chrome-devtools-mcp y github — criticos para OptiFierro; 9 plugins de overhead eliminados)
+- .claudeignore en proyecto optifierro: creado
+
+### Protocolos operacionales establecidos
+- /compact con instrucciones al 40% de contexto (Focus on architecture decisions, file paths modified, error messages)
+- /clear en cambio de proyecto, no al final del dia
+- Referenciar archivos especificos en vez de directorios (ahorro 10k-25k tokens/sesion)
+- ccor1/Gemini para coding rutinario; cca solo para arquitectura y RCA
+
+### Impacto estimado
+- MAX_THINKING_TOKENS: reduccion 30-50% tokens por respuesta compleja
+- .claudeignore: elimina indexacion de caches, SQLite, logs, modelos pesados
+- Plugins TO 11 a 2: ~30.000-50.000 tokens menos por sesion en PROMETHEUS
+- NONESSENTIAL_TRAFFIC: elimina telemetria y trafico de fondo no esencial
+
+### Agente ejecutor
+Miaude (Claude.ai Desktop) via Desktop Commander — verificacion cruzada en todos los nodos post-implementacion OK

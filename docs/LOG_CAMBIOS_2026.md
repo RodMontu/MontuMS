@@ -1,3 +1,20 @@
+## 2026-05-24 -- BIBLIOTECA_PROMPTS_MS v1.1 - Bloque B completado
+
+**Contexto:** Meta-prompt iterativo (codigo 61) aplicado a la v1.0. Abogado del Diablo identifico 3 problemas sistemicos y mejoras en 11 de 14 templates.
+
+**Cambios:**
+- Indice rapido de 14 filas por situacion (nuevo)
+- Tiempo de completar en cada template (nuevo, criterio <60s)
+- Placeholders de accion eliminados de campos de dato
+- Campo Servidor agregado en templates 2.1 y 2.2
+- Campo componentes_existentes agregado en template 3.2
+- Campo longitud agregado en output de template 3.1
+- Template 1.3 simplificado: infra como bloque opcional separado
+- Template 1.4 agrega campo Prioridad y Confirmar antes de ejecutar
+- Template 2.3 agrega git log --oneline -3 en pre_deploy
+- Template 3.4 agrega probabilidad estimada y limite de 2 paginas
+- Templates 3.3 y 4.2 validados como APTOS sin cambios
+- Nota operacional agregada en seccion 5: Gemini CLI fuera de directorio raiz
 ## 2026-05-24 — Rabín 2.0 Docker + fixes NVML + diagnóstico SSH
 
 ### Rabín 2.0 — instalación completa

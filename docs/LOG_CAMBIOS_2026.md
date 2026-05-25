@@ -1,3 +1,28 @@
+## 2026-05-24 — Rabín 2.0 Docker + fixes NVML + diagnóstico SSH
+
+### Rabín 2.0 — instalación completa
+- Migrado de systemd nativo a Docker (clawdio-v2 en /home/i3/clawdio-v2/)
+- Path interno: /opt/data/ — Crons en /opt/data/cron/jobs.json
+- Modelo: gemini-3-flash-preview vía Gemini API directa
+- 9 skills: cotidianas (3) + infra (2) + MS (5 incluyendo canal Miaude↔Rabín)
+- DB migrada: 23 deberes + 1 idea + tabla miaude_inbox nueva
+- SSH contenedor→serverX: /opt/data/.ssh/id_ed25519 con fix -F /dev/null
+- briefing-manana: retry automático ante HTTP 503
+- MCP bridge v2 activo en Claude Desktop
+- SOUL.md: limitación SSH a serveri3 documentada (comportamiento esperado)
+- /sethome: canal home = Rodrigo Montuschi (8357148621)
+
+### Fix NVML serverX
+- Causa: apt upgrade nvidia 580.126→580.159 sin reboot
+- Fix: sudo systemctl stop ollama && sudo reboot
+- Post-reboot: GPU P104-100 operativa, todos los contenedores up en 54s
+
+### Pendientes registrados
+- BACKLOG-RABIN-01: webhook HTTP canal Miaude→Rabín autónomo
+
+### Equipos afectados
+- serveri3 (clawdio-v2), serverX (GPU fix), MacBook (bridge MCP v2)
+
 ---
 
 ## 2026-05-24 — Rabín 2.0 instalado en Docker + fixes de confiabilidad

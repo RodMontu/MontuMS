@@ -1,290 +1,278 @@
 # BIBLIOTECA DE PROMPTS MS v3.0
-Version: 1.1 — 2026-05-24
-Mantenida por: Miaude + CCa
-Codigos: 01 XML, 04 Piensa, 08 Paso a Paso, 12 Abogado Diablo, 15 Disparo, 44 SOP
+**Version:** 1.1 - 2026-05-24
+**Mantenida por:** Miaude + CCa
+**Codigos:** 01 XML Maestro, 04 Piensa Primero, 08 Paso a Paso, 12 Abogado Diablo, 15 Motor de Disparo, 44 SOP
 
-Como usar: (1) Identifica la situacion en el indice (2) Copia el template (3) Reemplaza TODO lo que esta en [MAYUSCULAS] (4) Dispara. Si dudas en algun campo: template mal elegido o mal completado.
+> Como usar: (1) Identifica la situacion en el indice (2) Copia el template completo (3) Reemplaza TODO lo que esta en [MAYUSCULAS] (4) Dispara el prompt. Si dudas en algun campo al completar: template mal elegido o mal completado, reporta a Miaude.
 
 ---
 
 ## INDICE RAPIDO
 
-| # | Situacion | Template |
-|---|-----------|----------|
-| 1.1 | Iniciar sesion rapido | Activacion rapida |
-| 1.2 | Pasar contexto entre sesiones | HANDOFF |
-| 1.3 | Relevar a Gemini | Relay a Gemini Lead |
-| 1.4 | Delegar tarea a Rabin | Activacion Rabin |
-| 2.1 | Delegar tarea general a CCa | Delegacion general |
-| 2.2 | Algo esta roto | RCA |
-| 2.3 | Subir a produccion | Deploy |
-| 3.1 | Pedir analisis tecnico a Gemini | Analisis tecnico |
-| 3.2 | Construir frontend React/TSX | Frontend React/TSX |
-| 3.3 | Generar documentacion tecnica | Documentacion tecnica |
-| 3.4 | Revisar plan criticamente | Abogado del Diablo |
-| 4.1 | Actualizar LOG_CAMBIOS | Actualizar LOG |
-| 4.2 | Registrar nuevo servicio | Documentar servicio |
+| Situacion | Template |
+|---|---|
+| Inicio de chat nuevo (proyecto conocido) | 1.1 |
+| Retomar sesion anterior con decisiones tomadas | 1.2 |
+| Claude agoto cuota, pasar a Gemini | 1.3 |
+| Pedir tarea a Rabin | 1.4 |
+| Tarea backend/infra/scripts a CCa (3+ pasos) | 2.1 |
+| Algo esta roto, necesito diagnostico | 2.2 |
+| Deployar o cambiar configuracion de servicio | 2.3 |
+| Analisis tecnico extenso a Gemini | 3.1 |
+| Componente o pagina frontend a Gemini | 3.2 |
+| Documentacion tecnica extensa a Gemini | 3.3 |
+| Revisar plan critico antes de ejecutar | 3.4 |
+| Actualizar LOG_CAMBIOS_2026.md | 4.1 |
+| Documentar nuevo servicio en infra | 4.2 |
 
 ---
 
-## SECCIÓN 1 — INICIO DE SESION (Motor de Disparo)
+## 1. INICIO DE SESION -- Motor de Disparo
 
-### 1.1 Activacion rapida
+### 1.1 -- Activacion rapida
+> Cuando: inicio de chat nuevo sobre proyecto que Miaude conoce. Completar en menos de 30 segundos.
 
-```
-ACTIVAR_MS_V3
-Proyecto: [NOMBRE_PROYECTO]
-Estado: [ESTADO_ACTUAL_EN_UNA_LINEA]
-Sesion de hoy: [QUE_QUIERES_LOGRAR_HOY]
-```
-
----
-
-### 1.2 HANDOFF entre sesiones
-
-```xml
-<handoff>
-  <proyecto>[NOMBRE_PROYECTO]</proyecto>
-  <completado>[LO_QUE_SE_TERMINO_EN_LA_SESION_ANTERIOR]</completado>
-  <decisiones>[DECISIONES_TOMADAS_QUE_NO_SE_PUEDEN_REVERTIR]</decisiones>
-  <pendiente>[PROXIMA_TAREA_CONCRETA]</pendiente>
-  <no_tocar>[ARCHIVOS_O_SISTEMAS_QUE_NO_SE_DEBEN_MODIFICAR]</no_tocar>
-</handoff>
-```
+    ACTIVAR_MS_V3
+    Proyecto: [NOMBRE -- ej: OptiFierro, OP Risk, Pegas V2, Clawdio]
+    Estado: [Una oracion -- que quedo hecho la ultima vez]
+    Sesion de hoy: [Que quiero terminar]
 
 ---
 
-### 1.3 Relay a Gemini Lead
+### 1.2 -- HANDOFF entre sesiones
+> Cuando: retomar trabajo de sesion anterior con decisiones tomadas que no quiero perder. Completar en menos de 60 segundos.
 
-```xml
-<relay_gemini>
-  <rol>[ROL_QUE_DEBE_ASUMIR_GEMINI]</rol>
-  <proyecto>[NOMBRE_PROYECTO]</proyecto>
-  <estado>[ESTADO_ACTUAL]</estado>
-  <pendiente>[TAREA_A_CONTINUAR]</pendiente>
-  <restriccion_critica>[LO_QUE_NO_PUEDE_TOCAR_BAJO_NINGUN_CONCEPTO]</restriccion_critica>
-</relay_gemini>
-
-<!-- OPCIONAL: incluir si la tarea requiere acceso a infra -->
-<infra>
-  <serverX>192.168.1.111 — SSH: ssh x@192.168.1.111</serverX>
-  <serveri3>192.168.1.211 — SSH: ssh i3@192.168.1.211</serveri3>
-  <TO>192.168.1.65 — SSH: ssh OptiFierro@192.168.1.65 (requiere VPN)</TO>
-</infra>
-```
+    <handoff_inicio>
+      <proyecto>[NOMBRE]</proyecto>
+      <completado>[Que quedo listo -- lista o parrafo]</completado>
+      <decisiones>[Decisiones tomadas y por que -- una por linea, las que apliquen]</decisiones>
+      <pendiente>[Proxima accion concreta -- verbo + objeto]</pendiente>
+      <no_tocar>[Archivos, IPs o reglas que no cambian en esta sesion]</no_tocar>
+    </handoff_inicio>
 
 ---
 
-### 1.4 Activacion Rabin
+### 1.3 -- Relay a Gemini Lead (Claude agoto cuota)
+> Cuando: Claude se queda sin cuota en medio de una tarea. Pegar en Antigravity o Gemini CLI. Completar en menos de 60 segundos.
 
-```
-Titulo: [TITULO_BREVE_DE_LA_TAREA]
-Prioridad: [URGENTE | cuando puedas]
-Tarea: [DESCRIPCION_EXACTA_DE_LO_QUE_HAY_QUE_HACER]
-Path: [RUTA_COMPLETA_DEL_ARCHIVO_O_DIRECTORIO]
-Confirmar antes: [SI | NO]
-Al terminar: [QUE_DEBE_REPORTAR_RABIN]
-```
+    <handoff_gemini>
+      <rol>Eres el Gemini Lead de la MS v3.0. No tomas decisiones de arquitectura sin Montu. No tocas .env ni credenciales. No haces push a GitHub sin revision de Montu.</rol>
+      <proyecto>[NOMBRE]</proyecto>
+      <estado>[Pegar contenido de handoff_actual.md -- o describir estado actual en detalle]</estado>
+      <pendiente>[Proxima accion concreta -- verbo + objeto]</pendiente>
+      <restriccion_critica>[La regla mas importante de este proyecto -- ej: mapeo _BODSUC_MAP nunca cambia]</restriccion_critica>
+    </handoff_gemini>
 
----
-
-## SECCIÓN 2 — DELEGACION A CCa (Paso a Paso)
-
-### 2.1 Delegacion general
-
-```
-MISION CCa
-
-Servidor: [serverX | serveri3 | TO | local]
-Path: [RUTA_ABSOLUTA_DEL_PROYECTO]
-
-ANTES DE EJECUTAR:
-- [VERIFICACION_1]
-- [VERIFICACION_2]
-
-TAREA:
-1. [PASO_1]
-2. [PASO_2]
-3. [PASO_N]
-
-RESTRICCIONES:
-- [RESTRICCION_1]
-- [RESTRICCION_2]
-
-CRITERIO DE EXITO:
-[COMO_SE_VE_CUANDO_ESTA_BIEN_HECHO]
-
-AL TERMINAR:
-[QUE_DEBE_REPORTAR_CCa]
-```
+    Infra de referencia (copiar solo si la tarea involucra servidores):
+    - serverX: ssh x@192.168.1.111 -- computo, Docker, GPU P104-100
+    - serveri3: ssh i3@192.168.1.211 -- gateway, Cloudflare, Clawdio
+    - TO: ssh OptiFierro@192.168.1.65 -- cliente, OptiFierro V2
 
 ---
 
-### 2.2 RCA (algo esta roto)
+### 1.4 -- Activacion Rabin (Telegram)
+> Cuando: delegar tarea a Clawdio Rabin -- docs, SSH, notificaciones. Completar en menos de 30 segundos.
 
-```
-Servidor: [serverX | serveri3 | TO]
-Sintoma: [DESCRIPCION_EXACTA_DEL_ERROR_O_COMPORTAMIENTO_INESPERADO]
-
-1. Solo evidencia: muéstrame logs, status, errores — sin tocar nada.
-2. Hipotesis: lista las 3 causas mas probables ordenadas por probabilidad.
-3. Verificar: dime que comandos ejecutar para confirmar la causa raiz.
-4. Fix minimo: propone el cambio mas pequeño posible que resuelva el problema.
-
-RESTRICCION CARDINAL: no tocar produccion hasta que Montu apruebe el fix.
-```
+    Rabin -- [TITULO DE LA TAREA]
+    Prioridad: [URGENTE / cuando puedas]
+    Tarea: [Que hacer -- concreto y accionable]
+    Path: [~/MontuMS o ruta especifica en serverX]
+    Confirmar antes de ejecutar: [SI / NO]
+    Al terminar: reporta resultado [y hash de commit si aplica]
 
 ---
 
-### 2.3 Deploy
+## 2. DELEGACION A CCa -- Paso a Paso
 
-```xml
-<mision_cca>
-  <objetivo>[QUE_SE_VA_A_DEPLOYAR_Y_POR_QUE]</objetivo>
-  <servidor>[serverX | serveri3 | TO]</servidor>
-  <path>[RUTA_ABSOLUTA_DEL_PROYECTO]</path>
-  <pre_deploy>
-    git log -3
-    git status
-    docker ps
-    df -h
-  </pre_deploy>
-  <pasos>
-    <paso>1. [PASO_1]</paso>
-    <paso>2. [PASO_2]</paso>
-    <paso>3. [PASO_N]</paso>
-  </pasos>
-  <rollback>[COMANDO_O_PROCEDIMIENTO_PARA_REVERTIR]</rollback>
-  <criterio_exito>[COMO_SE_VERIFICA_QUE_EL_DEPLOY_FUNCIONO]</criterio_exito>
-</mision_cca>
-```
+### 2.1 -- Delegacion general
+> Cuando: cualquier tarea de backend, scripts, configuracion o infra con 3 o mas pasos. Completar en menos de 60 segundos.
 
----
+    MISION CCa -- [NOMBRE DE LA TAREA]
+    Servidor: [serverX | serveri3 | TO | Mac local]
+    Path: [ruta absoluta del proyecto]
 
-## SECCIÓN 3 — DELEGACION A GEMINI (XML Maestro)
+    ANTES DE EJECUTAR:
+    Lee el estado actual con: [comando -- ej: docker ps, git status, cat archivo.log]
+    Escribe tu plan completo (pasos numerados) ANTES de tocar nada.
 
-### 3.1 Analisis tecnico
+    TAREA:
+    [Descripcion detallada de que hacer]
 
-```xml
-<mision_gemini tipo="analisis">
-  <rol>[ROL_EXPERTO_QUE_DEBE_ASUMIR]</rol>
-  <tarea>[PREGUNTA_O_TAREA_CONCRETA]</tarea>
-  <proyecto>[NOMBRE_Y_CONTEXTO_DEL_PROYECTO]</proyecto>
-  <material>[CODIGO_LOGS_DOCS_O_REFERENCIA_AL_MATERIAL]</material>
-  <output>
-    <formato>Markdown</formato>
-    <longitud>[CORTO | MEDIO | EXTENSO]</longitud>
-    <secciones>[SECCION_1, SECCION_2, SECCION_N]</secciones>
-  </output>
-  <restriccion>[LO_QUE_NO_DEBE_HACER_O_ASUMIR]</restriccion>
-</mision_gemini>
-```
+    RESTRICCIONES:
+    - [Regla inamovible 1]
+    - [Regla inamovible 2]
+
+    CRITERIO DE EXITO:
+    [Como se ve el resultado correcto -- observable y verificable]
+
+    AL TERMINAR:
+    Reporta que hiciste y el resultado exacto. Si algo fallo: muestra el error exacto, no supongas. No hagas push a GitHub.
 
 ---
 
-### 3.2 Frontend React/TSX
+### 2.2 -- RCA (algo esta roto)
+> Cuando: un servicio falla o hay error inesperado. Usar SIEMPRE antes de tocar nada. Completar en menos de 45 segundos.
 
-```xml
-<mision_gemini tipo="frontend">
-  <rol>Arquitecto frontend senior especializado en React accesible</rol>
-  <tarea>[DESCRIPCION_DEL_COMPONENTE_O_PANTALLA_A_CONSTRUIR]</tarea>
-  <stack>React + Vite + TypeScript + Tailwind v4</stack>
-  <ui_perfil>TEA + TDAH + AACC — alta densidad informativa, sin decoracion innecesaria, jerarquia clara</ui_perfil>
-  <paleta>
-    <primario>naranja #f97316</primario>
-    <sidebar>#111827</sidebar>
-  </paleta>
-  <componentes_existentes>[LISTA_DE_COMPONENTES_YA_CREADOS_O_NINGUNO]</componentes_existentes>
-  <referencia_visual>[URL_O_DESCRIPCION — OPCIONAL]</referencia_visual>
-  <restricciones>
-    - [RESTRICCION_1]
-    - [RESTRICCION_2]
-  </restricciones>
-</mision_gemini>
-```
+    MISION CCa -- RCA
+    Servidor: [serverX | serveri3 | TO]
+    Sintoma: [Error exacto -- pegar el mensaje textual si existe]
+
+    PASO 1 -- Solo recolecta evidencia, no toques nada:
+    - Log: [journalctl -u SERVICIO -n 50 / docker logs CONTENEDOR -n 50 / cat archivo.log]
+    - Estado: [systemctl status SERVICIO / docker ps]
+    - Ultimos cambios: git log --oneline -3
+
+    PASO 2 -- Lista 3 hipotesis de causa raiz con la evidencia que las soporta.
+    PASO 3 -- Verifica cada hipotesis antes de proponer fix.
+    PASO 4 -- Propone el fix minimo. No refactorices nada adicional.
+
+    Si el fix toca produccion: detente y reporta a Montu primero.
 
 ---
 
-### 3.3 Documentacion tecnica
+### 2.3 -- Deploy / modificacion de servicio
+> Cuando: deployar codigo nuevo o cambiar configuracion de un contenedor o servicio. Completar en menos de 60 segundos.
 
-```xml
-<mision_gemini tipo="documentacion">
-  <tarea>[QUE_DOCUMENTAR — nuevo modulo, cambio de arquitectura, SOP, etc.]</tarea>
-  <cambios>[DESCRIPCION_DE_LOS_CAMBIOS_O_CONTENIDO_A_DOCUMENTAR]</cambios>
-  <formato>Markdown GitHub</formato>
-  <instruccion>[INSTRUCCION_ADICIONAL — ej: insertar al inicio del archivo, reemplazar seccion X]</instruccion>
-</mision_gemini>
-```
-
----
-
-### 3.4 Abogado del Diablo
-
-```xml
-<mision_gemini tipo="revision_critica">
-  <rol>Abogado del Diablo tecnico — eres escéptico, no destructivo</rol>
-  <plan>[DESCRIPCION_COMPLETA_DEL_PLAN_A_REVISAR]</plan>
-  <instruccion>
-    1. Identifica los 3 riesgos principales con probabilidad estimada (alta/media/baja).
-    2. Lista las asunciones criticas que si fallan hunden el plan.
-    3. Formula 3 preguntas que Montu deberia responder antes de ejecutar.
-    Formato: max 2 paginas. Prefiere false positives sobre false negatives.
-  </instruccion>
-</mision_gemini>
-```
+    <mision_cca tipo="deploy">
+      <objetivo>[Que deployar o cambiar -- concreto]</objetivo>
+      <servidor>[serverX | serveri3 | TO]</servidor>
+      <path>[ruta absoluta del proyecto o compose]</path>
+      <pre_deploy>
+        git log --oneline -3
+        git status
+        docker ps
+        df -h /
+      </pre_deploy>
+      <pasos>[Lista numerada de pasos -- o pedir a CCa que los proponga antes de ejecutar]</pasos>
+      <rollback>[Comando exacto de rollback si falla -- ej: git revert HEAD y docker compose up -d]</rollback>
+      <criterio_exito>[Como verificar que funciono -- curl, docker ps, log limpio]</criterio_exito>
+    </mision_cca>
 
 ---
 
-## SECCIÓN 4 — DOCS VIA RABIN
+## 3. DELEGACION A GEMINI -- XML Maestro
 
-### 4.1 Actualizar LOG_CAMBIOS
+### 3.1 -- Analisis tecnico / segunda opinion
+> Cuando: analisis extenso de codigo, arquitectura o logs. Output esperado mayor a 500 tokens. Completar en menos de 60 segundos.
 
-```
-Path: [RUTA_ABSOLUTA_DEL_LOG — ej: /home/x/MontuMS/docs/LOG_CAMBIOS.md]
-Instruccion: insertar al INICIO del archivo (despues del header) el siguiente bloque:
-
-## [YYYY-MM-DD] [TITULO_DEL_CAMBIO]
-Contexto: [POR_QUE_SE_HIZO_ESTE_CAMBIO]
-Cambios:
-- [CAMBIO_1]
-- [CAMBIO_2]
-
-Luego ejecuta:
-cd [RUTA_REPO] && git add [ARCHIVO] && git commit -m "docs: [YYYY-MM-DD] [TITULO]" && git push
-
-Reporta el hash del commit.
-```
+    <mision_gemini tipo="analisis">
+      <rol>Eres el Gemini Lead de la MS v3.0. Analista tecnico senior.</rol>
+      <tarea>[Que analizar -- una oracion clara]</tarea>
+      <proyecto>[Nombre del proyecto]</proyecto>
+      <material>[Pegar el contenido relevante -- codigo, logs, config. Si son paths de archivos, aclararlo explicitamente.]</material>
+      <output>
+        Formato: Markdown.
+        Longitud: [CORTO=1 pagina | MEDIO=3 paginas | EXTENSO=sin limite]
+        Secciones: hallazgos principales, riesgos identificados, recomendaciones (maximo 5).
+      </output>
+      <restriccion>Solo analiza y propone. No ejecutes comandos.</restriccion>
+    </mision_gemini>
 
 ---
 
-### 4.2 Documentar nuevo servicio
+### 3.2 -- Frontend React/TSX
+> Cuando: construir o modificar componentes o paginas React con Tailwind v4. Completar en menos de 60 segundos.
 
-```
-Servicio: [NOMBRE_DEL_SERVICIO]
-Host: [serverX | serveri3 | TO | otro]
-Puerto: [PUERTO]
-Compose path: [RUTA_AL_DOCKER_COMPOSE_O_NINGUNO]
-Funcion: [QUE_HACE_ESTE_SERVICIO_EN_UNA_LINEA]
-Estado: [OPERATIVO | EN PRUEBA | DEPRECADO]
-
-Acciones:
-1. INVENTARIO — agrega entrada al inventario de servicios del host correspondiente.
-2. LOG — inserta entrada en LOG_CAMBIOS.md con fecha de hoy.
-3. git add + git commit -m "docs: [YYYY-MM-DD] add [NOMBRE_SERVICIO]" + git push
-
-Reporta el hash del commit.
-```
+    <mision_gemini tipo="frontend">
+      <rol>Eres el Gemini Lead especialista en React/TypeScript/Tailwind v4.</rol>
+      <tarea>[Componente o pagina a construir -- nombre y funcion]</tarea>
+      <stack>React + Vite + TypeScript + Tailwind v4</stack>
+      <ui_perfil>Usuarios TEA+TDAH+AACC: jerarquia visual fuerte, colores con significado semantico, densidad de informacion controlada, patrones predecibles sin sorpresas de navegacion.</ui_perfil>
+      <paleta>Naranja: #f97316 | Sidebar: #111827 | Fondo: blanco o gris claro</paleta>
+      <componentes_existentes>[Listar lo que no debe romper -- ej: Sidebar.tsx, useAuth.ts, rutas en App.tsx]</componentes_existentes>
+      <referencia_visual>[Descripcion o path de screenshot -- OPCIONAL, dejar vacio si no hay]</referencia_visual>
+      <restricciones>
+        Codigo completo y funcional, no fragmentos.
+        Sin dependencias nuevas sin avisar primero.
+        No romper rutas ni componentes existentes.
+      </restricciones>
+    </mision_gemini>
 
 ---
 
-## SECCIÓN 5 — NOTAS DE USO
+### 3.3 -- Documentacion tecnica
+> Cuando: generar o actualizar documentos tecnicos de mas de 50 lineas. Completar en menos de 30 segundos.
 
-**Regla de oro:** si el template tiene campos que no sabes como rellenar, el template esta mal elegido o la tarea no esta suficientemente definida. Define primero, dispara despues.
+    <mision_gemini tipo="documentacion">
+      <tarea>[Generar | Actualizar]: [nombre del documento]</tarea>
+      <cambios>[Lista de cambios a documentar -- uno por linea]</cambios>
+      <formato>Markdown compatible con GitHub. Headers ##, tablas, code blocks.</formato>
+      <instruccion>Entrega el bloque exacto listo para insertar o reemplazar. Texto definitivo y completo, no resumen.</instruccion>
+    </mision_gemini>
 
-**Campos opcionales:** solo `referencia_visual` en el template 3.2 es estrictamente opcional. Todos los demas campos son obligatorios.
+---
 
-**Formato de fecha:** siempre `YYYY-MM-DD`. Sin excepciones.
+### 3.4 -- Abogado del Diablo
+> Cuando: antes de ejecutar un plan importante o decision arquitectonica. Completar en menos de 30 segundos (solo pegar el plan).
 
-**RCA primero:** si algo falla en produccion, usa siempre 2.2 antes de cualquier otra accion. No improvisar fixes directamente en produccion.
+    <mision_gemini tipo="revision_critica">
+      <rol>Eres el revisor critico. Tu trabajo es encontrar problemas del plan, no validarlo.</rol>
+      <plan>[Pegar el plan, arquitectura o decision a revisar]</plan>
+      <instruccion>
+        Output en lista numerada. Maximo 2 paginas.
+        1. Los 3 riesgos mas probables de falla (con probabilidad estimada)
+        2. Asunciones no verificadas que podrian invalidar el plan
+        3. Las 3 preguntas que Montu debe responder antes de ejecutar
+        No suavices las criticas. False positives son preferibles a false negatives.
+      </instruccion>
+    </mision_gemini>
 
-**Proceso de actualizacion:** esta biblioteca se actualiza via Rabin (template 4.1). No editar manualmente. Toda actualizacion debe quedar registrada en el LOG_CAMBIOS.md del repo MontuMS.
+---
+
+## 4. ACTUALIZACION DE DOCS VIA RABIN
+
+### 4.1 -- Actualizar LOG_CAMBIOS
+> Cuando: despues de cualquier cambio relevante en codigo, infra o configuracion. Completar en menos de 45 segundos.
+
+    RABIN -- Actualizar LOG_CAMBIOS_2026.md
+    Path: ~/MontuMS/docs/LOG_CAMBIOS_2026.md en serverX
+    Accion: insertar al INICIO del archivo este bloque exacto:
+
+    ---
+    ## [YYYY-MM-DD] -- [TITULO DEL CAMBIO]
+    **Contexto:** [Una oracion]
+    **Cambios:**
+    - [Cambio 1]
+    - [Cambio 2]
+    ---
+
+    Commit: git add docs/LOG_CAMBIOS_2026.md && git commit -m "docs: [YYYY-MM-DD] [TITULO]" && git push
+    Reporta el hash del commit.
+
+---
+
+### 4.2 -- Documentar nuevo servicio en infra
+> Cuando: se agrega, modifica o depreca un servicio en serverX, serveri3 o TO. Completar en menos de 45 segundos.
+
+    RABIN -- Documentar cambio de infra
+    Servicio: [NOMBRE]
+    Host: [serverX | serveri3 | TO]
+    Puerto: [PUERTO]
+    Compose path: [PATH]
+    Funcion: [Una oracion]
+    Estado: [OPERATIVO | EN PRUEBA | DEPRECADO]
+
+    Acciones:
+    1. Actualizar seccion correspondiente en ~/MontuMS/docs/INVENTARIO_MAESTRO.md
+    2. Insertar entrada en ~/MontuMS/docs/LOG_CAMBIOS_2026.md (usar formato de template 4.1)
+    3. git add -A && git commit -m "docs: [YYYY-MM-DD] infra [NOMBRE]" && git push
+    Reporta el hash del commit.
+
+---
+
+## 5. NOTAS DE USO
+
+**Regla de oro:** Si dudas en algun campo al completar el template, para. O el template esta mal elegido o necesita mejora. Reporta a Miaude para iterarlo.
+
+**Unico campo opcional:** referencia_visual en template 3.2. Todos los demas campos son obligatorios.
+
+**Formato de fecha:** siempre YYYY-MM-DD. Es la fecha del dia en que usas el template.
+
+**RCA es siempre el primer paso** cuando algo falla en produccion -- antes de cualquier otra accion.
+
+**Gemini CLI:** ejecutar siempre desde un directorio de proyecto acotado, no desde la raiz del sistema. Evita que use el filesystem completo como contexto.
+
+**Actualizacion de esta biblioteca:** cuando un template genere friccion o el tiempo de completar supere 60 segundos, reportar a Miaude. Rabin hace el commit de la mejora.
+
+---
+*BIBLIOTECA_PROMPTS_MS.md -- v1.1 -- MS v3.0 -- Montuschi Consultores SpA -- 2026-05-24*

@@ -2,7 +2,7 @@
 ## Documentación Técnica Completa
 
 **Archivo:** `/mnt/extra/DOCUMENTOS_TECNICOS/CLAWDIO_ASISTENTE_PERSONAL.md`
-**Última actualización:** 2026-05-24
+**Última actualización:** 2026-05-27
 **Mantenedor:** Montu (Rodrigo Montuschi)
 
 ---
@@ -117,12 +117,12 @@ NOTA: stt-proxy.service sigue corriendo como servicio systemd nativo en serveri3
 
 | Paquete | Versión | Rol |
 |---|---|---|
-| Hermes Agent | v0.12.0 (2026.4.30) | Framework core |
-| Python | 3.11.15 | Runtime |
+| Hermes Agent | v0.14.0 | Framework core |
+| Python | 3.13.5 | Runtime (contenedor) |
 | OpenAI SDK | 2.32.0 | Capa API |
 | faster-whisper | 1.2.1 | STT local |
-| google-api-python-client | 2.194.0 | Google Workspace |
-| google-auth | 2.49.2 | OAuth2 Google |
+| google-api-python-client | 2.196.0 | Google Workspace (venv_google) |
+| google-auth | — | OAuth2 Google (venv_google) |
 | requests | 2.33.1 | HTTP |
 | Node.js | 20.x | Camofox browser automation |
 
@@ -143,6 +143,8 @@ NOTA: stt-proxy.service sigue corriendo como servicio systemd nativo en serveri3
 | write_result.py | /opt/data/agent_results/write_result.py | — | Helper resultados |
 | id_ed25519 | /opt/data/.ssh/id_ed25519 | — | SSH key contenedor→serverX |
 | skills/ | /opt/data/skills/ | — | 9 skills (cotidianas/infra/ms) |
+| venv_google/ | /opt/data/venv_google/ | — | venv Python con dependencias Google (python3.13-venv) |
+| google_api.py | /opt/data/skills/productivity/google-workspace/scripts/google_api.py | — | Script Google Calendar + Gmail |
 
 CRÍTICO — Crons en jobs.json, NO en config.yaml:
 ```bash
@@ -162,7 +164,7 @@ import sys; sys.path.insert(0, '/opt/data'); from init_db import *
 ### 3.1 Terminal tool
 Ejecuta comandos shell en serveri3. Se usa para:
 - Correr `bash /opt/data/scripts/monitor.sh`
-- Llamar a `python3 /opt/data/skills/cotidianas/google_api.py`
+- Llamar a `/opt/data/venv_google/bin/python3 /opt/data/skills/productivity/google-workspace/scripts/google_api.py`
 - Leer archivos con `cat`
 
 ### 3.2 File read/write
@@ -200,26 +202,26 @@ Tres cuentas OAuth2 autenticadas. Cada una tiene su propio `HERMES_HOME`:
 ```bash
 # Listar eventos — rodrigo@montuschi.cl
 HERMES_HOME=/opt/data \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   calendar list --start YYYY-MM-DDTHH:MM:SS --end YYYY-MM-DDTHH:MM:SS
 
 # Listar eventos — ce3wkc@gmail.com (personal Montu)
 HERMES_HOME=/opt/data/accounts/montu \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   calendar list --start YYYY-MM-DDTHH:MM:SS --end YYYY-MM-DDTHH:MM:SS
 
 # Listar eventos — rivera.melgarejo@gmail.com (Pecas)
 HERMES_HOME=/opt/data/accounts/pecas \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   calendar list --start YYYY-MM-DDTHH:MM:SS --end YYYY-MM-DDTHH:MM:SS
 
 # Crear evento
 HERMES_HOME=/opt/data \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   calendar create \
   --summary "Título del evento" \
   --start YYYY-MM-DDTHH:MM:SS \
@@ -232,20 +234,20 @@ HERMES_HOME=/opt/data \
 ```bash
 # Buscar no leídos — rodrigo@montuschi.cl
 HERMES_HOME=/opt/data \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   gmail search "is:unread" --max 10
 
 # Buscar no leídos — ce3wkc@gmail.com
 HERMES_HOME=/opt/data/accounts/montu \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   gmail search "is:unread" --max 10
 
 # Buscar no leídos — rivera.melgarejo@gmail.com (Pecas)
 HERMES_HOME=/opt/data/accounts/pecas \
-  python3 \
-  /opt/data/skills/cotidianas/google_api.py \
+  /opt/data/venv_google/bin/python3 \
+  /opt/data/skills/productivity/google-workspace/scripts/google_api.py \
   gmail search "is:unread" --max 10
 ```
 
@@ -745,10 +747,10 @@ ssh i3@192.168.1.211 "docker restart clawdio-v2"
 
 ```bash
 # Test calendario rodrigo@montuschi.cl
-ssh i3@192.168.1.211 "docker exec clawdio-v2 bash -c 'HERMES_HOME=/opt/data python3 /opt/data/skills/cotidianas/google_api.py calendar list --start $(date -u +%Y-%m-%dT00:00:00) --end $(date -u -d \"+7 days\" +%Y-%m-%dT00:00:00)'"
+ssh i3@192.168.1.211 "docker exec clawdio-v2 bash -c 'HERMES_HOME=/opt/data /opt/data/venv_google/bin/python3 /opt/data/skills/productivity/google-workspace/scripts/google_api.py calendar list --start \$(date -u +%Y-%m-%dT00:00:00) --end \$(date -u -d \"+7 days\" +%Y-%m-%dT00:00:00)'"
 
 # Test calendario ce3wkc@gmail.com
-ssh i3@192.168.1.211 "docker exec clawdio-v2 bash -c 'HERMES_HOME=/opt/data/accounts/montu python3 /opt/data/skills/cotidianas/google_api.py calendar list --start $(date -u +%Y-%m-%dT00:00:00) --end $(date -u -d \"+7 days\" +%Y-%m-%dT00:00:00)'"
+ssh i3@192.168.1.211 "docker exec clawdio-v2 bash -c 'HERMES_HOME=/opt/data/accounts/montu /opt/data/venv_google/bin/python3 /opt/data/skills/productivity/google-workspace/scripts/google_api.py calendar list --start \$(date -u +%Y-%m-%dT00:00:00) --end \$(date -u -d \"+7 days\" +%Y-%m-%dT00:00:00)'"
 ```
 
 ### 12.8 Backup manual de la DB
@@ -854,7 +856,6 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 | Prioridad | ID | Pendiente | Contexto |
 |---|---|---|---|
 | Alta | BACKLOG-RABIN-01 | Webhook HTTP canal Miaude→Rabín autónomo | MCP actual solo permite Miaude→Montu. Para instrucciones directas a Rabín se necesita endpoint HTTP en serveri3 que inyecte mensajes en Hermes |
-| Media | — | Re-autenticar Google OAuth en contenedor | Las credenciales se migraron desde Rabín 1.x. Pueden expirar — re-autenticar si falla Calendar/Gmail |
 | Baja | — | Login manual Lider.cl via Camofox | Camofox instalado en serveri3 pero requiere sesión autenticada inicial |
 | Baja | — | Agregar productos habituales a supermercado.json | Lista de productos pendiente de cargar |
 | Baja | — | WARP enrollment Mac Pecas | Requiere acceso físico |
@@ -862,6 +863,16 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 ---
 
 ## 16. Historial de cambios relevantes
+
+### 2026-05-27 — Fix dependencias Google Workspace en contenedor
+
+- `python3-venv` no incluido en imagen base → instalado `python3.13-venv` via apt
+- Creado `/opt/data/venv_google/` con `google-api-python-client 2.196.0` + auth libs
+- PEP 668 (externally managed): pip global bloqueado — venv es la solución correcta
+- Ruta real de `google_api.py` descubierta: `skills/productivity/google-workspace/scripts/` (no `cotidianas/`)
+- `google-workspace.md` (skill) corregida con venv y ruta real
+- Test autenticación `rodrigo@montuschi.cl` verificado OK (tokens OAuth vigentes)
+- Pendiente "Re-autenticar Google OAuth" eliminado de backlog
 
 ### 2026-05-17 al 2026-05-24 — Rabín 2.0: migración a Docker
 
@@ -903,4 +914,4 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 
 ---
 
-*Fin del documento — act. 2026-05-24 — Rabín 2.0 Docker*
+*Fin del documento — act. 2026-05-27 — Rabín 2.0 Docker*

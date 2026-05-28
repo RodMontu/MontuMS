@@ -2,7 +2,7 @@
 ## Documentación Técnica Completa
 
 **Archivo:** `/mnt/extra/DOCUMENTOS_TECNICOS/CLAWDIO_ASISTENTE_PERSONAL.md`
-**Última actualización:** 2026-05-01
+**Última actualización:** 2026-05-24
 **Mantenedor:** Montu (Rodrigo Montuschi)
 
 ---
@@ -11,12 +11,12 @@
 
 Clawdio es el asistente personal IA de Rodrigo Montuschi (Montu) y Anastasia Rivera (Pecas), operando como bot Telegram (`@pantero_bot`) sobre la infraestructura privada en **serveri3** (192.168.1.211). No es un servicio en la nube: corre localmente, tiene acceso a los calendarios y correos de ambos usuarios, gestiona una base de datos de deberes e ideas, lleva la lista del supermercado Lider, transcribe voz, y monitorea la infraestructura TI del hogar.
 
-**Framework:** Hermes Agent v0.12.0 (2026.4.30)
+**Framework:** Hermes Agent v0.14.0 — Docker (contenedor: clawdio-v2)
 **Bot Telegram:** @pantero_bot
-**Modelo principal:** gemini-2.5-flash (Gemini API key directa, ~$3/mes)
+**Modelo principal:** gemini-3-flash-preview (Gemini API key directa, ~$3/mes)
 **Usuarios autorizados:** Montu (ID: 8357148621) + Pecas (ID: 8328037199)
-**Hosting:** serveri3 — 192.168.1.211, usuario `i3`
-**Directorio raíz:** `/home/i3/.hermes/`
+**Hosting:** serveri3 — 192.168.1.211, Docker (imagen: nousresearch/hermes-agent:latest)
+**Directorio host:** `/home/i3/clawdio-v2/` | Path interno contenedor: `/opt/data/`
 **Estado:** OPERATIVO
 
 ---
@@ -26,53 +26,54 @@ Clawdio es el asistente personal IA de Rodrigo Montuschi (Montu) y Anastasia Riv
 ### 2.1 Diagrama de componentes
 
 ```
-Telegram (usuarios) ─── @pantero_bot ─────────────────────────────────────────┐
-                                                                                │
-serveri3 (192.168.1.211)                                                        │
-├── hermes-gateway.service  (systemd user service, PID python)  ◄───────────────┘
-│   ├── Terminal backend: SSH → serverX (192.168.1.111)
-│   ├── Hermes Agent v0.11.0
-│   ├── HERMES_HOME=/home/i3/.hermes
-│   ├── Modelo: gemini-2.5-flash  (Gemini API)
-│   ├── Fallback 1: nvidia/nemotron-3-super-120b-a12b:free  (OpenRouter)
-│   └── Fallback 2: llama3.1:8b  (Ollama en serverX :11434)
+Telegram (usuarios) ─── @pantero_bot ──────────────────────────────────────┐
+                                                                             │
+serveri3 (192.168.1.211)                                                     │
+├── Docker: contenedor clawdio-v2  ◄────────────────────────────────────────┘
+│   ├── Imagen: nousresearch/hermes-agent:latest
+│   ├── Hermes Agent v0.14.0
+│   ├── Path interno: /opt/data/
+│   ├── Modelo: gemini-3-flash-preview (Gemini API directa)
+│   ├── Terminal backend: local (dentro del contenedor)
+│   ├── SSH → serverX: /opt/data/.ssh/id_ed25519 (fix: -F /dev/null)
+│   ├── Fallback 1: nvidia/nemotron-3-super-120b-a12b:free (OpenRouter)
+│   └── Fallback 2: llama3.1:8b (Ollama en serverX :11434)
 │
-├── stt-proxy.service  (Flask, puerto 9877)
+├── stt-proxy.service (Flask, puerto 9877) — servicio nativo en serveri3
 │   └── Endpoint OpenAI-compat para transcripción de voz
 │
-├── stt-local.sh  ──────► faster-whisper (modelo small, CPU, int8)
+├── /home/i3/clawdio-v2/           ← directorio host
+│   ├── docker-compose.yml
+│   └── .env                       ← GEMINI_API_KEY + secrets
 │
-├── /home/i3/.hermes/
-│   ├── config.yaml          — configuración principal
-│   ├── SOUL.md              — personalidad y reglas
-│   ├── MEMORY.md            — manual operativo y herramientas
-│   ├── USER.md              — perfil de Montu
-│   ├── supermercado.json    — lista Lider
-│   ├── clawdio_db.sqlite    — DB deberes e ideas
-│   ├── init_db.py           — funciones CRUD Python
-│   ├── monitor.sh           — script monitoreo infraestructura
-│   ├── stt-local.sh         — wrapper faster-whisper
-│   └── scripts/
-│       └── monitor.sh       — copia del script de monitoreo
+├── Volúmenes Docker nombrados:
+│   ├── clawdio_home → /opt/data/
+│   ├── clawdio_skills → /opt/data/skills/
+│   └── clawdio_memory → /opt/data/memory/
 │
 └── Google Workspace credentials
-    ├── accounts/montu/      — ce3wkc@gmail.com
-    ├── accounts/pecas/      — rivera.melgarejo@gmail.com
-    └── (default)            — rodrigo@montuschi.cl
+    ├── /opt/data/accounts/montu/   — ce3wkc@gmail.com
+    ├── /opt/data/accounts/pecas/   — rivera.melgarejo@gmail.com
+    └── /opt/data/ (default)        — rodrigo@montuschi.cl
 
 serverX (192.168.1.111)
 └── ollama :11434 ── llama3.1:8b  (fallback LLM para Clawdio)
+
+MacBook Pro (Montu)
+└── ~/hermes-mcp-bridge-v2  → SSH → docker exec -i -u hermes clawdio-v2 hermes mcp serve
+    └── Claude Desktop MCP server "clawdio" — estado: RUNNING
 ```
 
 ### 2.2 Stack de modelos
 
 | Slot | Modelo | Proveedor | Costo est. | Cuándo activa |
 |---|---|---|---|---|
-| Principal | `gemini-2.5-flash` | Gemini API key directa | ~$3/mes | Siempre (default) |
+| Principal | `gemini-3-flash-preview` | Gemini API key directa | ~$3/mes | Siempre (default) |
 | Fallback 1 | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | $0 | Si Gemini falla |
 | Fallback 2 | `llama3.1:8b` | Ollama en serverX :11434 | $0 | Si OpenRouter falla |
 
-Nota (2026-05-02): Hermes v0.12.0 activo. busy_input_mode: steer. terminal.backend: ssh → serverX.
+Nota (2026-05-24): Migrado de gemini-2.5-flash-preview a gemini-3-flash-preview.
+Provider: Gemini API directa (no OpenRouter). Model ID sin prefijo google/.
 
 Config en `config.yaml`:
 ```yaml
@@ -87,26 +88,30 @@ fallback_providers:
     base_url: http://192.168.1.111:11434/v1
 ```
 
-### 2.3 Servicios systemd
+### 2.3 Servicios
+
+Rabín 2.0 corre como contenedor Docker, no como servicio systemd.
 
 ```bash
-# Ver estado
-systemctl --user -M i3@ status hermes-gateway.service
-systemctl --user -M i3@ status stt-proxy.service
+# Ver estado del contenedor
+ssh i3@192.168.1.211 "docker ps --filter name=clawdio-v2 --format '{{.Names}} {{.Status}}'"
 
-# Reiniciar
-systemctl --user -M i3@ restart hermes-gateway.service
-systemctl --user -M i3@ restart stt-proxy.service
+# Ver logs en tiempo real
+ssh i3@192.168.1.211 "docker logs clawdio-v2 --tail 50 --follow --no-color"
 
-# Ver logs
-journalctl --user -M i3@ -u hermes-gateway.service -f --no-pager
-journalctl --user -M i3@ -u stt-proxy.service -n 50 --no-pager
+# Reiniciar (aplica cambios de config)
+ssh i3@192.168.1.211 "docker restart clawdio-v2 && sleep 15 && docker ps --filter name=clawdio-v2"
+
+# Detener / iniciar
+ssh i3@192.168.1.211 "cd /home/i3/clawdio-v2 && docker compose down"
+ssh i3@192.168.1.211 "cd /home/i3/clawdio-v2 && docker compose up -d"
+
+# Health check
+ssh i3@192.168.1.211 "docker inspect clawdio-v2 --format '{{.State.Health.Status}}'"
 ```
 
-Archivos de unidad:
-- `/home/i3/.config/systemd/user/hermes-gateway.service`
-- `/home/i3/.config/systemd/user/hermes-gateway.service.d/stt.conf`
-- `/home/i3/.config/systemd/user/stt-proxy.service`
+NOTA: stt-proxy.service sigue corriendo como servicio systemd nativo en serveri3
+(no dockerizado). Comandos de gestión sin cambios.
 
 ### 2.4 Versiones de dependencias clave
 
@@ -123,20 +128,26 @@ Archivos de unidad:
 
 ### 2.5 Archivos clave
 
-| Archivo | Ruta | Descripción |
-|---|---|---|
-| config.yaml | /home/i3/.hermes/config.yaml | Config principal Hermes |
-| SOUL.md | /home/i3/.hermes/SOUL.md | Personalidad y reglas de comportamiento |
-| MEMORY.md | /home/i3/.hermes/memories/MEMORY.md | Memoria de infraestructura y proyectos activos (creado 2026-05-02) |
-| USER.md | /home/i3/.hermes/USER.md | Perfil de Montu |
-| supermercado.json | /home/i3/.hermes/supermercado.json | 61 productos habituales Lider |
-| clawdio_db.sqlite | /home/i3/.hermes/clawdio_db.sqlite | DB deberes e ideas (SQLite) |
-| init_db.py | /home/i3/.hermes/init_db.py | Funciones Python para DB |
-| monitor.sh | /home/i3/.hermes/scripts/monitor.sh | Script monitoreo infraestructura |
-| stt-local.sh | /home/i3/.hermes/stt-local.sh | Wrapper faster-whisper STT |
-| agent_results/ | /home/i3/.hermes/agent_results/ | Canal de retorno Claude↔Clawdio: resultados de agentes externos |
-| write_result.py | /home/i3/.hermes/agent_results/write_result.py | Helper Python para escribir resultados en formato estándar |
-| agent_results.md | /home/i3/.hermes/skills/desarrollo/agent_results.md | Skill: instrucciones del canal de retorno para Clawdio |
+| Archivo | Ruta (contenedor) | Ruta (host via docker cp) | Descripción |
+|---|---|---|---|
+| config.yaml | /opt/data/config.yaml | — | Config principal Hermes |
+| SOUL.md | /opt/data/SOUL.md | — | Personalidad y reglas |
+| USER.md | /opt/data/USER.md | — | Perfil de Montu |
+| MEMORY.md | /opt/data/memories/MEMORY.md | — | Manual operativo |
+| supermercado.json | /opt/data/supermercado.json | — | Lista Lider |
+| clawdio_db.sqlite | /opt/data/clawdio_db.sqlite | — | DB deberes+ideas+miaude_inbox |
+| init_db.py | /opt/data/init_db.py | — | Funciones CRUD Python |
+| monitor.sh | /opt/data/scripts/monitor.sh | — | Script monitoreo infra |
+| jobs.json | /opt/data/cron/jobs.json | — | Crons (NO en config.yaml) |
+| agent_results/ | /opt/data/agent_results/ | — | Canal retorno Miaude↔Rabín |
+| write_result.py | /opt/data/agent_results/write_result.py | — | Helper resultados |
+| id_ed25519 | /opt/data/.ssh/id_ed25519 | — | SSH key contenedor→serverX |
+| skills/ | /opt/data/skills/ | — | 9 skills (cotidianas/infra/ms) |
+
+CRÍTICO — Crons en jobs.json, NO en config.yaml:
+```bash
+ssh i3@192.168.1.211 "docker exec clawdio-v2 cat /opt/data/cron/jobs.json"
+```
 
 ---
 
@@ -145,23 +156,23 @@ Archivos de unidad:
 Clawdio tiene acceso a las siguientes herramientas mediante el agente Hermes. Para usarlas internamente desde Python:
 
 ```python
-import sys; sys.path.insert(0, '/home/i3/.hermes'); from init_db import *
+import sys; sys.path.insert(0, '/opt/data'); from init_db import *
 ```
 
 ### 3.1 Terminal tool
 Ejecuta comandos shell en serveri3. Se usa para:
-- Correr `monitor.sh`
-- Llamar a `google_api.py`
+- Correr `bash /opt/data/scripts/monitor.sh`
+- Llamar a `python3 /opt/data/skills/cotidianas/google_api.py`
 - Leer archivos con `cat`
 
 ### 3.2 File read/write
-- Leer: `read_file /home/i3/.hermes/supermercado.json`
+- Leer: `read_file /opt/data/supermercado.json`
 - Escribir: vía `write_file` o `edit_file`
 
 ### 3.3 Code execution (execute_code)
 Ejecuta Python en el entorno Hermes. Patrón de importación obligatorio:
 ```python
-import sys; sys.path.insert(0, '/home/i3/.hermes'); from init_db import *
+import sys; sys.path.insert(0, '/opt/data'); from init_db import *
 ```
 
 ### 3.4 Web search / Web fetch
@@ -171,13 +182,16 @@ Búsqueda y scraping web. Disponible para Montu y Pecas desde Telegram.
 
 ## 4. Cuentas Google configuradas
 
+⚠️ NUNCA usar el argumento --account — NO EXISTE en google_api.py.
+SIEMPRE usar HERMES_HOME switching para cambiar de cuenta.
+
 Tres cuentas OAuth2 autenticadas. Cada una tiene su propio `HERMES_HOME`:
 
 | Cuenta | Titular | HERMES_HOME | Uso |
 |---|---|---|---|
-| `rodrigo@montuschi.cl` | Montu | `/home/i3/.hermes` | Workspace, calendario laboral |
-| `ce3wkc@gmail.com` | Montu | `/home/i3/.hermes/accounts/montu` | Gmail personal, calendario personal |
-| `rivera.melgarejo@gmail.com` | Pecas | `/home/i3/.hermes/accounts/pecas` | Gmail y calendario de Pecas |
+| `rodrigo@montuschi.cl` | Montu | `/opt/data` | Workspace, calendario laboral |
+| `ce3wkc@gmail.com` | Montu | `/opt/data/accounts/montu` | Gmail personal, calendario |
+| `rivera.melgarejo@gmail.com` | Pecas | `/opt/data/accounts/pecas` | Gmail y calendario Pecas |
 
 **Regla crítica:** cuando Montu pregunta por su agenda sin especificar cuenta, Clawdio consulta AMBAS cuentas de Montu y consolida.
 
@@ -185,27 +199,27 @@ Tres cuentas OAuth2 autenticadas. Cada una tiene su propio `HERMES_HOME`:
 
 ```bash
 # Listar eventos — rodrigo@montuschi.cl
-HERMES_HOME=/home/i3/.hermes \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   calendar list --start YYYY-MM-DDTHH:MM:SS --end YYYY-MM-DDTHH:MM:SS
 
 # Listar eventos — ce3wkc@gmail.com (personal Montu)
-HERMES_HOME=/home/i3/.hermes/accounts/montu \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data/accounts/montu \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   calendar list --start YYYY-MM-DDTHH:MM:SS --end YYYY-MM-DDTHH:MM:SS
 
 # Listar eventos — rivera.melgarejo@gmail.com (Pecas)
-HERMES_HOME=/home/i3/.hermes/accounts/pecas \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data/accounts/pecas \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   calendar list --start YYYY-MM-DDTHH:MM:SS --end YYYY-MM-DDTHH:MM:SS
 
 # Crear evento
-HERMES_HOME=/home/i3/.hermes \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   calendar create \
   --summary "Título del evento" \
   --start YYYY-MM-DDTHH:MM:SS \
@@ -217,21 +231,21 @@ HERMES_HOME=/home/i3/.hermes \
 
 ```bash
 # Buscar no leídos — rodrigo@montuschi.cl
-HERMES_HOME=/home/i3/.hermes \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   gmail search "is:unread" --max 10
 
 # Buscar no leídos — ce3wkc@gmail.com
-HERMES_HOME=/home/i3/.hermes/accounts/montu \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data/accounts/montu \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   gmail search "is:unread" --max 10
 
 # Buscar no leídos — rivera.melgarejo@gmail.com (Pecas)
-HERMES_HOME=/home/i3/.hermes/accounts/pecas \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
+HERMES_HOME=/opt/data/accounts/pecas \
+  python3 \
+  /opt/data/skills/cotidianas/google_api.py \
   gmail search "is:unread" --max 10
 ```
 
@@ -251,8 +265,8 @@ HERMES_HOME=/home/i3/.hermes/accounts/pecas \
 ## 5. Base de datos deberes e ideas
 
 **Motor:** SQLite
-**Archivo:** `/home/i3/.hermes/clawdio_db.sqlite`
-**Módulo Python:** `/home/i3/.hermes/init_db.py`
+**Archivo:** `/opt/data/clawdio_db.sqlite`
+**Módulo Python:** `/opt/data/init_db.py`
 
 ### 5.1 Esquema
 
@@ -283,10 +297,26 @@ CREATE TABLE ideas (
 );
 ```
 
+**Tabla `miaude_inbox` (canal asíncrono Rabín→Miaude):**
+```sql
+CREATE TABLE miaude_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tarea TEXT NOT NULL,
+    resultado TEXT NOT NULL,
+    estado TEXT DEFAULT 'completado',
+    leido INTEGER DEFAULT 0,
+    fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Funciones nuevas:
+- `guardar_para_miaude(tarea, resultado, estado)` — Rabín escribe resultado entre sesiones
+- `leer_inbox_miaude()` — Miaude lee pendientes al inicio de sesión (marca como leído)
+
 ### 5.2 Funciones disponibles
 
 ```python
-import sys; sys.path.insert(0, '/home/i3/.hermes'); from init_db import *
+import sys; sys.path.insert(0, '/opt/data'); from init_db import *
 
 # Agregar deber
 agregar_deber(
@@ -348,7 +378,7 @@ actualizar_idea(
 
 ## 6. Lista supermercado Lider
 
-**Archivo:** `/home/i3/.hermes/supermercado.json`
+**Archivo:** `/opt/data/supermercado.json`
 **Lectura:** siempre con `read_file` con esa ruta exacta (nunca `search_files`)
 
 ### 6.1 Estructura del JSON
@@ -461,7 +491,7 @@ stt:
 
 ### 8.1 Script de monitoreo
 
-**Ruta:** `/home/i3/.hermes/monitor.sh` (también en `scripts/monitor.sh`)
+**Ruta:** `/opt/data/scripts/monitor.sh`
 
 ```bash
 #!/bin/bash
@@ -496,89 +526,103 @@ Métricas recopiladas por servidor:
 
 ### 8.2 Crons configurados
 
+⚠️ Los crons NO están en config.yaml. Están en `/opt/data/cron/jobs.json`
+
+```bash
+ssh i3@192.168.1.211 "docker exec clawdio-v2 cat /opt/data/cron/jobs.json"
+```
+
 | ID | Schedule | Timezone | Acción |
 |---|---|---|---|
 | monitor-manana | 0 8 * * * | America/Santiago | Reporte infra a Montu |
 | monitor-noche | 0 20 * * * | America/Santiago | Reporte infra a Montu |
-| briefing-manana | 0 9 * * * | America/Santiago | Correos + agenda + pendientes del día |
-| ideas-pendientes | 0 17 * * 1-5 | America/Santiago | Recordatorio ideas captured esta semana (lun-vie) |
-| resumen-semanal | 0 10 * * 5 | America/Santiago | Resumen viernes: infra + productividad + agenda |
-
-Config en `config.yaml`:
-```yaml
-cron:
-  wrap_response: true
-  jobs:
-    - id: monitor-manana
-      schedule: 0 8 * * *
-      timezone: America/Santiago
-      prompt: 'Ejecuta /home/i3/.hermes/monitor.sh usando el terminal tool y enviame
-        el reporte de infraestructura por Telegram al usuario Montu (Telegram ID: 8357148621).
-        Formatea el reporte de forma clara y concisa.'
-      platforms: [telegram]
-      channel: '8357148621'
-    - id: monitor-noche
-      schedule: 0 20 * * *
-      timezone: America/Santiago
-      prompt: 'Ejecuta /home/i3/.hermes/monitor.sh ...'
-      platforms: [telegram]
-      channel: '8357148621'
-```
+| briefing-manana | 0 9 * * * | America/Santiago | Correos + agenda + pendientes (con retry 503) |
+| ideas-pendientes | 0 17 * * 1-5 | America/Santiago | Recordatorio ideas semana (lun-vie) |
+| resumen-semanal | 0 10 * * 5 | America/Santiago | Resumen viernes completo |
+| inbox-miaude-check | 0 9 * * * | America/Santiago | Verifica resultados pendientes para Miaude |
 
 ### 8.3 Ejecución manual
 
 ```bash
-# Desde serveri3
-/home/i3/.hermes/monitor.sh
+# Desde dentro del contenedor
+bash /opt/data/scripts/monitor.sh
 
 # Desde cualquier host con SSH
-ssh i3@192.168.1.211 '/home/i3/.hermes/monitor.sh'
+ssh i3@192.168.1.211 "docker exec clawdio-v2 bash /opt/data/scripts/monitor.sh"
 ```
 
 ---
 
-## 9. Personalidad y comportamiento (SOUL.md)
+## 9. Skills disponibles (Rabín 2.0)
 
-**Archivo:** `/home/i3/.hermes/SOUL.md`
+Rabín 2.0 tiene 9 skills organizadas en tres capas:
+
+### Cotidianas (/opt/data/skills/cotidianas/)
+| Skill | Archivo | Función |
+|---|---|---|
+| Deberes e Ideas | deberes-ideas.md | CRUD DB SQLite, captura automática, resumen_dia |
+| Google Workspace | google-workspace.md | Gmail + Calendar 3 cuentas con HERMES_HOME switching |
+| Supermercado | supermercado.md | Lista Lider, productos habituales, lista_mes_actual |
+
+### Infraestructura (/opt/data/skills/infra/)
+| Skill | Archivo | Función |
+|---|---|---|
+| Monitor Infra | infra-monitor.md | monitor.sh serveri3 + serverX, prompts imperativos |
+| Docker Check | infra-docker-check.md | Estado y logs de contenedores vía SSH a serverX |
+
+### Metodología Sinérgica (/opt/data/skills/ms/)
+| Skill | Archivo | Función |
+|---|---|---|
+| Canal Miaude→Rabín | ms-canal-miaude-a-rabin.md | Protocolo recepción instrucciones de Claude |
+| Canal Rabín→Miaude | ms-canal-rabin-a-miaude.md | Escritura en agent_results/ y miaude_inbox |
+| Protocolo MS | ms-protocolo-comunicacion.md | Jerarquía agentes, reglas cardinales MS v3.0 |
+| Doc Updater | ms-doc-updater.md | Actualizar LOG_CAMBIOS + INVENTARIO vía SSH+git |
+| Handoff Reader | ms-handoff-reader.md | Leer handoff_actual.md desde GitHub raw |
+
+---
+
+## 10. Personalidad y comportamiento (SOUL.md)
+
+**Archivo:** `/opt/data/SOUL.md`
 **Cargado como:** `system_prompt` en `config.yaml` + personalidad `clawdio`
 
-### 9.1 Identidad core
+### 10.1 Identidad core
 
 Clawdio es un colaborador inteligente con criterio propio, no un bot servil. Opera en infraestructura privada de la pareja. Cuando no sabe algo, lo dice sin rodeos.
 
-### 9.2 Idioma y tono
+### 10.2 Idioma y tono
 
 - **Idioma:** Español chileno culto-informal siempre (incluso si el usuario escribe en otro idioma)
 - **Prohibido:** "puta", "cacho", "brigido", "pifia", "condoro", "al tiro"
 - **Sin:** emojis celebratorios, adulación, "¡Claro que sí!", inventar información
 
-### 9.3 Con Montu
+### 10.3 Con Montu
 - Lo llama "Montu" (nunca "Rodrigo" ni "jefe")
 - Tono: directo, técnico, sin relleno — como colega que sabe lo que hace
 - Captura automáticamente tareas e ideas mencionadas al pasar → "Capturado: [X]."
 - Revisión de agenda proactiva al inicio de jornada cuando Montu lo indica
 
-### 9.4 Con Pecas
+### 10.4 Con Pecas
 - La llama "Pecas" (nunca "Anastasia")
 - Tono: directo, cercano, cariñoso — sin tecnicismos
 - Explicaciones muy breves por defecto; amplía si ella pide
 - Apoyo proactivo en búsqueda de empleo: recordatorios de postulaciones, seguimiento
 - Respeta que es más organizada que Montu
 
-### 9.5 Captura de información
+### 10.5 Captura de información
 - Tareas, ideas, recordatorios, compromisos: captura siempre, sin que se lo pidan
 - Confirma con mensaje breve: "Anotado: [X]."
 - Nunca pierde información mencionada al pasar
 
-### 9.6 Espacio compartido
+### 10.6 Espacio compartido
 - Lista supermercado, agenda familiar, compromisos comunes: gestionados para ambos
 - Cuando cualquiera menciona algo para el hogar, lo registra en el espacio compartido
 
 ---
 
-## 10. Memoria operativa (MEMORY.md / USER.md)
+## 11. Memoria operativa (MEMORY.md / USER.md)
 
-### 10.1 MEMORY.md (`/home/i3/.hermes/MEMORY.md`)
+### 11.1 MEMORY.md (`/opt/data/memories/MEMORY.md`)
 
 Manual operativo completo cargado en el contexto del agente. Contiene:
 - Reglas de tono y comunicación
@@ -589,7 +633,7 @@ Manual operativo completo cargado en el contexto del agente. Contiene:
 - Instrucciones del script de monitoreo
 - Cuentas configuradas
 
-### 10.2 USER.md (`/home/i3/.hermes/USER.md`)
+### 11.2 USER.md (`/opt/data/USER.md`)
 
 Perfil de Montu:
 - Ingeniero Civil Industrial, consultor en IA/automatización
@@ -599,7 +643,7 @@ Perfil de Montu:
 - Vive en Santiago de Chile con su esposa Pecas (Anastasia Rivera)
 - Proyectos activos: OptiFierro, Pegas V2, Visual-Voice, OP RISK
 
-### 10.3 Config de memoria en Hermes
+### 11.3 Config de memoria en Hermes
 
 ```yaml
 memory:
@@ -617,134 +661,134 @@ session_reset:
 
 ---
 
-## 11. Comandos de operación y mantención
+## 12. Comandos de operación y mantención
 
-### 11.1 Estado del sistema
+### 12.1 Estado del sistema
 
 ```bash
-# Estado de servicios (desde cualquier host con SSH)
-ssh i3@192.168.1.211 'systemctl --user status hermes-gateway.service stt-proxy.service --no-pager'
+# Estado del contenedor (desde cualquier host con SSH)
+ssh i3@192.168.1.211 "docker ps --filter name=clawdio-v2 --format '{{.Names}} {{.Status}}'"
 
-# Desde serveri3 directamente
-systemctl --user status hermes-gateway.service --no-pager
-systemctl --user status stt-proxy.service --no-pager
+# Estado del stt-proxy (servicio nativo)
+ssh i3@192.168.1.211 "systemctl --user status stt-proxy.service --no-pager"
 ```
 
-### 11.2 Logs
+### 12.2 Logs
 
 ```bash
-# Log en tiempo real del gateway
-ssh i3@192.168.1.211 'journalctl --user -u hermes-gateway.service -f --no-pager'
+# Log en tiempo real del contenedor
+ssh i3@192.168.1.211 "docker logs clawdio-v2 --tail 100 --follow --no-color"
 
-# Últimas 100 líneas
-ssh i3@192.168.1.211 'journalctl --user -u hermes-gateway.service -n 100 --no-pager'
+# Últimas 50 líneas
+ssh i3@192.168.1.211 "docker logs clawdio-v2 --tail 50 --no-color"
 
 # Log del STT proxy
-ssh i3@192.168.1.211 'journalctl --user -u stt-proxy.service -n 50 --no-pager'
+ssh i3@192.168.1.211 "journalctl --user -u stt-proxy.service -n 50 --no-pager"
 ```
 
-### 11.3 Reinicio de servicios
+### 12.3 Reinicio de servicios
 
 ```bash
-# Reiniciar gateway (aplica cambios en config.yaml)
-ssh i3@192.168.1.211 'systemctl --user restart hermes-gateway.service'
+# Reiniciar contenedor (aplica cambios en config)
+ssh i3@192.168.1.211 "docker restart clawdio-v2 && sleep 15 && docker ps --filter name=clawdio-v2"
 
 # Reiniciar STT proxy
-ssh i3@192.168.1.211 'systemctl --user restart stt-proxy.service'
+ssh i3@192.168.1.211 "systemctl --user restart stt-proxy.service"
 
-# Reload sin reinicio (si soportado)
-ssh i3@192.168.1.211 'systemctl --user kill -s USR1 hermes-gateway.service'
+# Detener y levantar desde compose
+ssh i3@192.168.1.211 "cd /home/i3/clawdio-v2 && docker compose down && docker compose up -d"
 ```
 
-### 11.4 Edición de archivos clave
+### 12.4 Edición de archivos clave
 
 ```bash
-# Editar personalidad/reglas
-nano /home/i3/.hermes/SOUL.md
-
-# Editar config principal (modelos, crons, STT, etc.)
-nano /home/i3/.hermes/config.yaml
+# Editar personalidad/reglas (dentro del contenedor)
+ssh i3@192.168.1.211 "docker exec -it clawdio-v2 nano /opt/data/SOUL.md"
 
 # Editar manual operativo
-nano /home/i3/.hermes/MEMORY.md
+ssh i3@192.168.1.211 "docker exec -it clawdio-v2 nano /opt/data/memories/MEMORY.md"
 
 # Editar perfil usuario
-nano /home/i3/.hermes/USER.md
+ssh i3@192.168.1.211 "docker exec -it clawdio-v2 nano /opt/data/USER.md"
 
 # Ver DB SQLite directamente
-sqlite3 /home/i3/.hermes/clawdio_db.sqlite
-  .tables
-  SELECT * FROM deberes ORDER BY fecha_creacion DESC LIMIT 10;
-  SELECT * FROM ideas ORDER BY fecha_creacion DESC LIMIT 10;
-  .quit
+ssh i3@192.168.1.211 "docker exec -it clawdio-v2 sqlite3 /opt/data/clawdio_db.sqlite"
+# .tables
+# SELECT * FROM deberes ORDER BY fecha_creacion DESC LIMIT 10;
+# SELECT * FROM ideas ORDER BY fecha_creacion DESC LIMIT 10;
+# .quit
 ```
 
-### 11.5 Actualización de Hermes
+### 12.5 Actualización de Hermes
 
 ```bash
 # Ver versión actual
-ssh i3@192.168.1.211 '/home/i3/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --version'
+ssh i3@192.168.1.211 "docker exec clawdio-v2 hermes --version"
 
-# Actualizar (nota: 307 commits detrás al 2026-05-01)
-ssh i3@192.168.1.211 'cd /home/i3/.hermes/hermes-agent && hermes update'
-
-# Tras actualizar, reiniciar
-ssh i3@192.168.1.211 'systemctl --user restart hermes-gateway.service'
+# Actualizar imagen
+ssh i3@192.168.1.211 "cd /home/i3/clawdio-v2 && docker compose pull && docker compose up -d"
 ```
 
-### 11.6 Gestión de crons
+### 12.6 Gestión de crons
 
 ```bash
-# Ver crons activos en config.yaml
-ssh i3@192.168.1.211 'grep -A10 "^cron:" /home/i3/.hermes/config.yaml'
+# Ver crons activos en jobs.json
+ssh i3@192.168.1.211 "docker exec clawdio-v2 cat /opt/data/cron/jobs.json"
 
-# Añadir/modificar crons: editar config.yaml y reiniciar gateway
-nano /home/i3/.hermes/config.yaml
-systemctl --user restart hermes-gateway.service
+# Editar crons
+ssh i3@192.168.1.211 "docker exec -it clawdio-v2 nano /opt/data/cron/jobs.json"
+# Reiniciar para aplicar
+ssh i3@192.168.1.211 "docker restart clawdio-v2"
 ```
 
-### 11.7 Verificar Google Auth
+### 12.7 Verificar Google Auth
 
 ```bash
 # Test calendario rodrigo@montuschi.cl
-HERMES_HOME=/home/i3/.hermes \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
-  calendar list \
-  --start $(date -u +%Y-%m-%dT00:00:00) \
-  --end $(date -u -d '+7 days' +%Y-%m-%dT00:00:00)
+ssh i3@192.168.1.211 "docker exec clawdio-v2 bash -c 'HERMES_HOME=/opt/data python3 /opt/data/skills/cotidianas/google_api.py calendar list --start $(date -u +%Y-%m-%dT00:00:00) --end $(date -u -d \"+7 days\" +%Y-%m-%dT00:00:00)'"
 
 # Test calendario ce3wkc@gmail.com
-HERMES_HOME=/home/i3/.hermes/accounts/montu \
-  /home/i3/.hermes/hermes-agent/venv/bin/python \
-  /home/i3/.hermes/skills/productivity/google-workspace/scripts/google_api.py \
-  calendar list \
-  --start $(date -u +%Y-%m-%dT00:00:00) \
-  --end $(date -u -d '+7 days' +%Y-%m-%dT00:00:00)
+ssh i3@192.168.1.211 "docker exec clawdio-v2 bash -c 'HERMES_HOME=/opt/data/accounts/montu python3 /opt/data/skills/cotidianas/google_api.py calendar list --start $(date -u +%Y-%m-%dT00:00:00) --end $(date -u -d \"+7 days\" +%Y-%m-%dT00:00:00)'"
 ```
 
-### 11.8 Backup manual de la DB
+### 12.8 Backup manual de la DB
 
 ```bash
-# Backup SQLite
-cp /home/i3/.hermes/clawdio_db.sqlite \
-   /home/i3/.hermes/clawdio_db.sqlite.bak.$(date +%Y%m%d)
+# Backup SQLite desde contenedor a host
+ssh i3@192.168.1.211 "docker cp clawdio-v2:/opt/data/clawdio_db.sqlite /home/i3/backups/clawdio_db.sqlite.$(date +%Y%m%d)"
 
-# Copiar a serverX (Miau-Nube)
-scp /home/i3/.hermes/clawdio_db.sqlite \
-    x@192.168.1.111:/mnt/extra/backups/clawdio_db.sqlite.$(date +%Y%m%d)
+# Copiar a serverX
+ssh i3@192.168.1.211 "scp /home/i3/backups/clawdio_db.sqlite.$(date +%Y%m%d) x@192.168.1.111:/mnt/extra/backups/"
 ```
+
+### 12.9 SSH key del contenedor a serverX
+
+La key se genera dentro del contenedor y persiste en el volumen clawdio_home.
+
+```bash
+# Ver key pública
+ssh i3@192.168.1.211 "docker exec clawdio-v2 cat /opt/data/.ssh/id_ed25519.pub"
+
+# Verificar que está en authorized_keys de serverX
+ssh x@192.168.1.111 "grep clawdio ~/.ssh/authorized_keys"
+
+# Test de conexión (debe funcionar sin password)
+ssh i3@192.168.1.211 "docker exec clawdio-v2 ssh -F /dev/null -i /opt/data/.ssh/id_ed25519 -o StrictHostKeyChecking=no x@192.168.1.111 'echo OK'"
+```
+
+NOTA: SSH desde el contenedor hacia serveri3 (su propio host 192.168.1.211)
+NO está disponible y NO es necesario. Comportamiento esperado — no reportar como falla.
 
 ---
 
-## 12. Guía de uso para Montu
+## 13. Guía de uso para Montu
 
-### 12.1 Acceso
+### 13.1 Acceso
 - **Bot Telegram:** `@pantero_bot`
 - **ID Telegram:** 8357148621
 - **Voz:** Graba audio en Telegram — faster-whisper transcribe automáticamente
 
-### 12.2 Comandos y frases de uso frecuente
+### 13.2 Comandos y frases de uso frecuente
 
 **Agenda:**
 - "¿Qué tengo mañana?" → consulta ambas cuentas de calendario
@@ -765,18 +809,18 @@ scp /home/i3/.hermes/clawdio_db.sqlite \
 **Infraestructura:**
 - "Cómo está la infra?" → ejecuta monitor.sh y reporta
 
-### 12.3 Captura automática
+### 13.3 Captura automática
 Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversación y notifica brevemente: "Anotado: [X]."
 
 ---
 
-## 13. Guía de uso para Pecas
+## 14. Guía de uso para Pecas
 
-### 13.1 Acceso
+### 14.1 Acceso
 - **Bot Telegram:** `@pantero_bot`
 - **ID Telegram:** 8328037199
 
-### 13.2 Comandos y frases de uso frecuente
+### 14.2 Comandos y frases de uso frecuente
 
 **Agenda:**
 - "¿Qué tengo esta semana?" → consulta calendario rivera.melgarejo@gmail.com
@@ -797,7 +841,7 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 - "¿Cuándo debo hacer seguimiento de mis postulaciones?"
 - Clawdio puede recordarle hacer seguimiento de postulaciones activas
 
-### 13.3 Estilo de interacción
+### 14.3 Estilo de interacción
 - Las respuestas son breves por defecto
 - Sin tecnicismos
 - Si necesita más detalle, pedirlo explícitamente
@@ -805,22 +849,33 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 
 ---
 
-## 14. Pendientes técnicos
+## 15. Pendientes técnicos
 
-| Prioridad | Pendiente | Contexto |
-|---|---|---|
-| Alta | Login manual en Lider.cl via Camofox | Camofox (browser automation Node.js) está instalado pero requiere sesión inicial autenticada en lider.cl para persistirla |
-| Media | Cron monitoreo de precios para Pecas | Artículo/URL de Lider a monitorear aún sin definir |
-| Media | Fix hooks en `~/.claude/settings.json` en serverX | Hooks de Claude Code en serverX requieren corrección |
-| Baja | Actualizar Hermes Agent | 307 commits detrás al 2026-05-01 — evaluar antes de actualizar |
-| Baja | Agregar productos habituales a supermercado.json | La lista de 61 productos habituales está pendiente de cargar en el JSON |
-| Baja | WARP enrollment en Mac Pecas | Requiere acceso físico al equipo para enrolar Cloudflare WARP |
-| N/A | Claude Desktop conectado | Cliente MCP de Clawdio (bridge SSH activo, estado: RUNNING) |
-| N/A | Canal de retorno Claude↔Clawdio | Implementado (Opción A: archivos en agent_results/) |
+| Prioridad | ID | Pendiente | Contexto |
+|---|---|---|---|
+| Alta | BACKLOG-RABIN-01 | Webhook HTTP canal Miaude→Rabín autónomo | MCP actual solo permite Miaude→Montu. Para instrucciones directas a Rabín se necesita endpoint HTTP en serveri3 que inyecte mensajes en Hermes |
+| Media | — | Re-autenticar Google OAuth en contenedor | Las credenciales se migraron desde Rabín 1.x. Pueden expirar — re-autenticar si falla Calendar/Gmail |
+| Baja | — | Login manual Lider.cl via Camofox | Camofox instalado en serveri3 pero requiere sesión autenticada inicial |
+| Baja | — | Agregar productos habituales a supermercado.json | Lista de productos pendiente de cargar |
+| Baja | — | WARP enrollment Mac Pecas | Requiere acceso físico |
 
 ---
 
-## 15. Historial de cambios relevantes
+## 16. Historial de cambios relevantes
+
+### 2026-05-17 al 2026-05-24 — Rabín 2.0: migración a Docker
+
+- Hermes v0.12.0 (systemd) → v0.14.0 (Docker, contenedor clawdio-v2)
+- Directorio host: /home/i3/clawdio-v2/ | Path contenedor: /opt/data/
+- Modelo: gemini-2.5-flash → gemini-3-flash-preview (Gemini API directa)
+- 9 skills creadas: cotidianas (3) + infra (2) + MS (5)
+- Tabla miaude_inbox agregada a SQLite (canal asíncrono Miaude↔Rabín)
+- SSH key contenedor→serverX con fix -F /dev/null (permisos hermes/root)
+- briefing-manana: retry automático ante HTTP 503
+- MCP bridge v2 activo: ~/hermes-mcp-bridge-v2 en Claude Desktop
+- /sethome configurado: canal home = Rodrigo Montuschi (8357148621)
+- Crons en /opt/data/cron/jobs.json (descubierto en producción — no en config.yaml)
+- SOUL.md: limitación SSH a serveri3 documentada
 
 ### 2026-04-25 al 2026-05-01 — Implementación completa
 
@@ -848,4 +903,4 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 
 ---
 
-*Fin del documento — act. 2026-05-02*
+*Fin del documento — act. 2026-05-24 — Rabín 2.0 Docker*

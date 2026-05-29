@@ -18,7 +18,7 @@
 
 ---
 
-## FLUJO DE 7 PASOS (v2.0)
+## FLUJO DE 7 PASOS (MS v3.0 — Harness Engineering)
 
 ### PASO 0 — Carga del Harness [NUEVO en v3.0]
 - **Quién:** SessionStart hook de CCa

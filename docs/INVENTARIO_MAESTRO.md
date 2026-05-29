@@ -798,4 +798,76 @@ Montu deja de ser el canal de comunicación entre Claude y los agentes. Clawdio 
 - **OpenRouter (Carga):** $15 USD
 - **Total:** ~$65 USD/mes
 
-**Fin del documento (act 2026-05-02)**
+---
+
+# 16. Metodología Sinérgica v3.0 — Harness Engineering
+
+**Versión adoptada:** 3.0
+**Fecha:** Mayo 2026
+**Referencia:** Harness Engineering (Mitchell Hashimoto / OpenAI Codex team, febrero 2026)
+**Documento de flujo:** `docs/REGLAS_CARDINALES_FLUJO_ORQUESTADO.md` v2.0
+
+## 16.1 Fórmula Core
+**Agente = Modelo + Harness**
+El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas puede usar y qué ocurre cuando algo sale mal.
+
+## 16.2 Los Tres Pilares
+
+| Pilar | Descripción | Estado en MS |
+|---|---|---|
+| **Context Engineering** | El agente tiene la info correcta en el momento correcto | Activo: CLAUDE.md + INVENTARIO_MAESTRO + SessionStart hook |
+| **Architectural Constraints** | Las reglas se verifican mecánicamente, no por prompts | Activo: HARNESS.md por proyecto (ver §16.4) |
+| **Entropy Management** | Agentes periódicos mantienen coherencia docs/código/infra | Manual a demanda — automático pendiente |
+
+## 16.3 Cambios MS v2.0 → v3.0
+
+| Elemento | MS v2.0 | MS v3.0 |
+|---|---|---|
+| Flujo | 5 pasos (A→E) | 7 pasos (0,A,B,C,D1+Gate+D2,E,F) |
+| Evaluación de output | Manual (Montu) | D2: Gemini CLI como Evaluator adversarial |
+| Restricciones de agente | En documentos (prompts) | En HARNESS.md + PreToolUse hooks (mecánico) |
+| Registro de fallos | Post-mortem informal | FAILURE_LOG en HARNESS.md por proyecto |
+| Mantenimiento infra | Reactivo | Entropy Scheduler (manual a demanda, meta: semanal) |
+
+## 16.4 Harness Files por Proyecto
+
+| Proyecto | Archivo Harness | Estado |
+|---|---|---|
+| OptiFierro V2 | `harness/optifierro/HARNESS.md` | Activo — seeded con bugs QA sesiones #7/#8 |
+| Clawdio/Hermes | `harness/clawdio/HARNESS.md` | Activo |
+| OP Risk | `harness/oprisk/HARNESS.md` | Pendiente (proyecto en fase inicial) |
+| Pegas V2 | `harness/pegas/HARNESS.md` | Pendiente |
+| Template | `harness/HARNESS_TEMPLATE.md` | Disponible |
+
+## 16.5 FAILURE_LOG Global (Cross-Proyecto)
+> Fallos que afectan la arquitectura general o múltiples proyectos.
+> Los fallos específicos de proyecto van en su HARNESS.md respectivo.
+
+| Fecha | Proyecto | Error | Regla generada |
+|---|---|---|---|
+| 2026-05 | OptiFierro | Docker containers usando localhost para comunicación inter-servicio | FP-001 en harness/optifierro/HARNESS.md |
+| 2026-05 | OptiFierro | Filtro >=1500kg ocultaba 55% de OCs de Coronel | FP-003 en harness/optifierro/HARNESS.md |
+| 2026-04 | Clawdio | SOUL.md editado sin validación YAML → gateway crash | FP-002 en harness/clawdio/HARNESS.md |
+
+## 16.6 Entropy Scheduler
+> Frecuencia actual: **manual a demanda** (automatización cuando Clawdio esté estabilizado).
+> Invocar con: `[miaude]: ejecuta entropy check`
+
+| Agente | Tarea | Comando base |
+|---|---|---|
+| doc-drift | Compara INVENTARIO_MAESTRO vs estado real de servidores vía SSH | `ssh x@192.168.1.111 "docker ps --format table"` + diff manual |
+| harness-updater | Revisa FAILURE_LOGs de todos los proyectos → propone actualizaciones HARNESS.md | Lectura de harness/*/HARNESS.md |
+| constraint-scanner | Detecta violaciones arquitectónicas en repos activos | Grep de patrones FP en código |
+
+## 16.7 Rol de Gemini CLI como Evaluator (Paso D2)
+- **Cuándo:** Tras cada ejecución de CCa/agente en tarea de desarrollo
+- **Tarea:** Revisar output del Generator con perspectiva adversarial
+- **Criterio:** Buscar violaciones de FORBIDDEN_PATTERNS, inconsistencias, bugs no capturados
+- **Invocación:** `node ~/.nvm/versions/node/v24.13.0/bin/gemini --skip-trust -p "[prompt evaluador]"`
+- **Threshold:** Si Evaluator encuentra fallos → retorno a D1. Si aprueba → avanzar a PASO E.
+
+**Actualización:** 2026-05-29
+
+---
+
+**Fin del documento (act 2026-05-29)**

@@ -1,3 +1,41 @@
+---
+## 2026-05-29 — Fix Rabín: modelo principal + eliminación de crons
+
+**Contexto:** Créditos Gemini agotados. Fallo del switch /model session-only con
+sufijo :free (RuntimeError: No LLM provider configured). Se migra OpenRouter como
+provider primario. Se eliminan 10 crons (5 no documentados descubiertos en log).
+
+**Cambios en /home/i3/.hermes/config.yaml (serveri3):**
+- model.provider: gemini → openrouter
+- model.default: gemini-2.5-flash → openrouter/owl-alpha
+- fallback_providers reordenados:
+  1. openrouter/nousresearch/hermes-3-llama-3.1-405b:free (nuevo, del equipo Hermes)
+  2. gemini/gemini-2.5-flash (degradado a fallback 2)
+  3. openrouter/nvidia/nemotron-3-super-120b-a12b:free (degradado a fallback 3)
+- cron: [] — eliminados 10 crons (5 documentados + 5 no documentados)
+
+**RCA del fallo /model:free:**
+El comando /model en Hermes es session-only. El sufijo :free en OpenRouter
+falla cuando el provider primario en config.yaml es gemini, porque el switch
+de sesión no hereda el contexto del proveedor fallback.
+Solución definitiva: OpenRouter como provider primario en config.yaml.
+
+**Bug Hermes v0.14.0 detectado:**
+NameError: _pool_may_recover_from_rate_limit en contexto de ejecución de crons.
+Afecta: Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube,
+Hermes Agent al día. Regresión del framework, no de config.
+
+**Crons no documentados encontrados:**
+Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube,
+inbox-miaude-check, Hermes Agent al día.
+
+**Archivos modificados:**
+- /home/i3/.hermes/config.yaml — MODIFICADO
+- /home/i3/.hermes/config.yaml.bak.20260529 — BACKUP creado
+- INVENTARIO_MAESTRO.md — secciones Clawdio actualizadas
+- LOG_CAMBIOS_2026.md — este registro
+---
+
 ## 2026-05-24 -- BIBLIOTECA_PROMPTS_MS v1.1 - Bloque B completado
 
 **Contexto:** Meta-prompt iterativo (codigo 61) aplicado a la v1.0. Abogado del Diablo identifico 3 problemas sistemicos y mejoras en 11 de 14 templates.

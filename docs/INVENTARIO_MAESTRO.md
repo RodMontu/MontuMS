@@ -683,9 +683,10 @@ NO levantar en serverX bajo ninguna circunstancia.
 ### Stack de modelos
 | Slot | Modelo | Proveedor | Costo est. |
 |---|---|---|---|
-| Principal | gemini-2.5-flash | Gemini (API key directa) | ~$3/mes |
-| Fallback 1 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | $0 |
-| Fallback 2 | llama3.1:8b | Ollama serverX :11434 | $0 |
+| Principal | openrouter/owl-alpha | OpenRouter | Free |
+| Fallback 1 | nousresearch/hermes-3-llama-3.1-405b:free | OpenRouter | Free |
+| Fallback 2 | gemini-2.5-flash | Gemini (API key directa) | ~$3/mes |
+| Fallback 3 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | Free |
 
 ### Archivos clave
 | Archivo | Ruta | Descripción |
@@ -720,11 +721,12 @@ NO levantar en serverX bajo ninguna circunstancia.
 ### Crons activos
 | ID | Nombre | Horario | Función |
 |---|---|---|---|
-| monitor-manana | Monitor Mañana | 0 8 * * * | Reporte infra a Montu |
-| monitor-noche | Monitor Noche | 0 20 * * * | Reporte infra a Montu |
-| briefing-manana | Briefing Mañana | 0 9 * * * | Correos + agenda + pendientes del día |
-| ideas-pendientes | Ideas Pendientes | 0 17 * * 1-5 | Recordatorio ideas capturadas esta semana (lun-vie) |
-| resumen-semanal | Resumen Semanal | 0 10 * * 5 | Resumen viernes: infra + productividad + agenda |
+| — | TODOS ELIMINADOS | — | 2026-05-29: 10 crons eliminados (5 documentados + 5 no documentados) |
+
+> **Nota técnica (2026-05-29):** Se encontraron 10 crons activos (5 no estaban documentados:
+> Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube, inbox-miaude-check,
+> Hermes Agent al día). Bug detectado en Hermes v0.14.0: NameError _pool_may_recover_from_rate_limit
+> en contexto de ejecución de crons — regresión del framework, no de config.
 
 ### Dependencias instaladas en serveri3
 - Node.js 22.x (para @askjo/camofox-browser)

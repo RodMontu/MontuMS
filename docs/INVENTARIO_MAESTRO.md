@@ -674,19 +674,20 @@ NO levantar en serverX bajo ninguna circunstancia.
 ## 8. CLAWDIO — Asistente Personal IA
 
 **Host:** serveri3 (192.168.1.211, usuario i3)
-**Framework:** Hermes Agent v0.12.0
+**Framework:** Hermes Agent v0.14.0
 **Bot Telegram:** @pantero_bot (Alias: **"Clawdio Rabín"** o "Rabín")
 **Bot Alertas TI:** @clawdio_dev_local_bot (Alias: **"Clawdio Dev"**)
 **Nombre del Sistema:** Clawdio (Alias fonético Mi TI: **"Miaude"**)
 **Usuarios:** Montu (ID: 8357148621) + Pecas (ID: 8328037199)
 
 ### Stack de modelos
-| Slot | Modelo | Proveedor | Costo est. |
+| Slot | Modelo | Proveedor | Costo |
 |---|---|---|---|
-| Principal | openrouter/owl-alpha | OpenRouter | Free |
+| Principal | deepseek/deepseek-v4-flash | OpenRouter | ~$0,10/M tokens |
 | Fallback 1 | nousresearch/hermes-3-llama-3.1-405b:free | OpenRouter | Free |
-| Fallback 2 | gemini-2.5-flash | Gemini (API key directa) | ~$3/mes |
-| Fallback 3 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | Free |
+| Fallback 2 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | Free |
+
+> **2026-05-30:** Migrado de openrouter/owl-alpha (identidad propia alterada: "Soy OWL de ZOO company") y gemini-2.5-flash (créditos agotados + NameError bug Hermes v0.14.0). Nuevo stack completamente sobre OpenRouter.
 
 ### Archivos clave
 | Archivo | Ruta | Descripción |
@@ -708,8 +709,38 @@ NO levantar en serverX bajo ninguna circunstancia.
 ### Servicios systemd (usuario i3)
 | Servicio | Descripción |
 |---|---|---|
-| hermes-gateway.service | Gateway principal Clawdio |
+| hermes-gateway.service | Gateway principal Clawdio (DeepSeek V4 Flash / OpenRouter) |
 | stt-proxy.service | Proxy STT Flask (puerto 9877) |
+
+### Cambios en config.yaml (2026-05-29/30)
+| Parámetro | Valor anterior | Valor actual |
+|---|---|---|
+| model.provider | gemini | openrouter |
+| model.default | gemini-2.5-flash → openrouter/owl-alpha | deepseek/deepseek-v4-flash |
+| browser.engine | (no configurado) | disabled |
+| compression.enabled | true | false |
+| auxiliary.*.provider | auto (→ Gemini = 429) | openrouter |
+| cron | 10 jobs activos | vacío [] |
+| Backups | — | config.yaml.bak.20260529 |
+
+### Bugs documentados (Hermes v0.14.0)
+| Bug | Lugar | Síntoma | Causa |
+|---|---|---|---|
+| NameError | _pool_may_recover_from_rate_limit | Crons fallan al usar Gemini | Regresión del framework, no de config |
+| Gemini hardcodeado | auxiliary_client.py línea 427 | provider:auto usa Gemini aunque no se quiera | _OPENROUTER_MODEL = "google/gemini-2.5-flash" como fallback |
+
+### Docker clawdio-v2
+| Ítem | Estado |
+|---|---|
+| Contenedor clawdio-v2 | DETENIDO (docker stop) — corría con config antiguo (gemini-2.5-flash) |
+| Problema | Competía por polling de Telegram con el gateway nativo |
+| Pendiente | `docker rm clawdio-v2` para eliminar permanentemente |
+
+### Modelos descartados
+| Modelo | Motivo |
+|---|---|
+| openrouter/owl-alpha | Identidad propia alterada: respondía como "Soy OWL de ZOO company", no respetaba SOUL.md |
+| gemini-2.5-flash | Doble falla: NameError bug + créditos Gemini agotados (HTTP 429) |
 
 ### Cuentas Google autenticadas
 | Cuenta | Perfil | HERMES_HOME |
@@ -723,10 +754,17 @@ NO levantar en serverX bajo ninguna circunstancia.
 |---|---|---|---|
 | — | TODOS ELIMINADOS | — | 2026-05-29: 10 crons eliminados (5 documentados + 5 no documentados) |
 
-> **Nota técnica (2026-05-29):** Se encontraron 10 crons activos (5 no estaban documentados:
-> Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube, inbox-miaude-check,
-> Hermes Agent al día). Bug detectado en Hermes v0.14.0: NameError _pool_may_recover_from_rate_limit
-> en contexto de ejecución de crons — regresión del framework, no de config.
+> **Nota técnica (2026-05-29/30):**
+> - 10 crons eliminados (5 no documentados: Monitor Mañana, Monitor Noche, Recordatorio Terminal
+>   Miau-Nube, inbox-miaude-check, Hermes Agent al día)
+> - Bugs Hermes v0.14.0 detectados:
+>   1. NameError: _pool_may_recover_from_rate_limit — al usar Gemini como provider en crons/tareas auxiliares
+>   2. auxiliary_client.py línea 427: _OPENROUTER_MODEL = "google/gemini-2.5-flash" hardcodeado como
+>      fallback de tareas auxiliares — causa que provider:auto use Gemini si hay GOOGLE_API_KEY en .env
+> - Modelos descartados: openrouter/owl-alpha (identidad propia no respetaba SOUL.md),
+>   gemini-2.5-flash (doble falla: NameError + créditos agotados)
+> - Docker clawdio-v2: detenido (docker stop). Estaba corriendo con config antiguo (gemini-2.5-flash)
+>   y competía por el polling de Telegram. PENDIENTE: docker rm clawdio-v2.
 
 ### Dependencias instaladas en serveri3
 - Node.js 22.x (para @askjo/camofox-browser)

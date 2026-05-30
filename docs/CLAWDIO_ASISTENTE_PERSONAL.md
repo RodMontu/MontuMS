@@ -11,13 +11,16 @@
 
 Clawdio es el asistente personal IA de Rodrigo Montuschi (Montu) y Anastasia Rivera (Pecas), operando como bot Telegram (`@pantero_bot`) sobre la infraestructura privada en **serveri3** (192.168.1.211). No es un servicio en la nube: corre localmente, tiene acceso a los calendarios y correos de ambos usuarios, gestiona una base de datos de deberes e ideas, lleva la lista del supermercado Lider, transcribe voz, y monitorea la infraestructura TI del hogar.
 
-**Framework:** Hermes Agent v0.14.0 — Docker (contenedor: clawdio-v2)
+**Framework:** Hermes Agent v0.14.0 — systemd (servicio nativo en serveri3)
 **Bot Telegram:** @pantero_bot
-**Modelo principal:** gemini-3-flash-preview (Gemini API key directa, ~$3/mes)
+**Modelo principal:** deepseek/deepseek-v4-flash (OpenRouter, ~$0,10/M tokens)
 **Usuarios autorizados:** Montu (ID: 8357148621) + Pecas (ID: 8328037199)
-**Hosting:** serveri3 — 192.168.1.211, Docker (imagen: nousresearch/hermes-agent:latest)
-**Directorio host:** `/home/i3/clawdio-v2/` | Path interno contenedor: `/opt/data/`
+**Hosting:** serveri3 — 192.168.1.211, servicio systemd hermes-gateway.service
+**Directorio base:** `/home/i3/.hermes/`
 **Estado:** OPERATIVO
+
+> **2026-05-30:** Migrado de Docker (clawdio-v2, detenido) a sistema nativo systemd.
+> Stack completamente sobre OpenRouter. Gemini eliminado por créditos agotados + bugs v0.14.0.
 
 ---
 
@@ -33,11 +36,11 @@ serveri3 (192.168.1.211)                                                     │
 │   ├── Imagen: nousresearch/hermes-agent:latest
 │   ├── Hermes Agent v0.14.0
 │   ├── Path interno: /opt/data/
-│   ├── Modelo: gemini-3-flash-preview (Gemini API directa)
-│   ├── Terminal backend: local (dentro del contenedor)
-│   ├── SSH → serverX: /opt/data/.ssh/id_ed25519 (fix: -F /dev/null)
-│   ├── Fallback 1: nvidia/nemotron-3-super-120b-a12b:free (OpenRouter)
-│   └── Fallback 2: llama3.1:8b (Ollama en serverX :11434)
+│   ├── Modelo: deepseek/deepseek-v4-flash (OpenRouter)
+│   ├── Terminal backend: local
+│   ├── SSH → serverX: ~/.ssh/id_ed25519
+│   ├── Fallback 1: nousresearch/hermes-3-llama-3.1-405b:free (OpenRouter)
+│   └── Fallback 2: nvidia/nemotron-3-super-120b-a12b:free (OpenRouter)
 │
 ├── stt-proxy.service (Flask, puerto 9877) — servicio nativo en serveri3
 │   └── Endpoint OpenAI-compat para transcripción de voz
@@ -66,27 +69,44 @@ MacBook Pro (Montu)
 
 ### 2.2 Stack de modelos
 
-| Slot | Modelo | Proveedor | Costo est. | Cuándo activa |
-|---|---|---|---|---|
-| Principal | `gemini-3-flash-preview` | Gemini API key directa | ~$3/mes | Siempre (default) |
-| Fallback 1 | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | $0 | Si Gemini falla |
-| Fallback 2 | `llama3.1:8b` | Ollama en serverX :11434 | $0 | Si OpenRouter falla |
+| Slot | Modelo | Proveedor | Costo |
+|---|---|---|---|
+| Principal | `deepseek/deepseek-v4-flash` | OpenRouter | ~$0,10/M tokens |
+| Fallback 1 | `nousresearch/hermes-3-llama-3.1-405b:free` | OpenRouter | Free |
+| Fallback 2 | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | Free |
 
-Nota (2026-05-24): Migrado de gemini-2.5-flash-preview a gemini-3-flash-preview.
-Provider: Gemini API directa (no OpenRouter). Model ID sin prefijo google/.
+> **2026-05-30:** Migración completa a OpenRouter como provider único.
+> - openrouter/owl-alpha descartado: identidad propia alterada (respondía como "Soy OWL de ZOO company")
+> - gemini-2.5-flash / gemini-3-flash-preview eliminados: créditos agotados (HTTP 429) + NameError bug v0.14.0
+> - Todos los auxiliary providers: auto → openrouter (elimina intentos a Gemini)
 
 Config en `config.yaml`:
 ```yaml
 model:
-  default: gemini-2.5-flash
-  provider: gemini
+  default: deepseek/deepseek-v4-flash
+  provider: openrouter
 fallback_providers:
   - provider: openrouter
+    model: nousresearch/hermes-3-llama-3.1-405b:free
+  - provider: openrouter
     model: nvidia/nemotron-3-super-120b-a12b:free
-  - provider: ollama
-    model: llama3.1:8b
-    base_url: http://192.168.1.111:11434/v1
 ```
+
+### 2.2.1 Bugs documentados (Hermes v0.14.0)
+
+| Bug | Lugar | Síntoma | Causa raíz |
+|---|---|---|---|
+| NameError | `_pool_may_recover_from_rate_limit` | Crons fallan al usar Gemini como provider | Regresión del framework, no de config |
+| Gemini hardcodeado | `auxiliary_client.py` línea 427 | `provider:auto` usa Gemini aunque no se quiera | `_OPENROUTER_MODEL = "google/gemini-2.5-flash"` como fallback estático |
+
+### 2.2.2 Modelos descartados
+
+| Modelo | Fecha | Motivo |
+|---|---|---|
+| `openrouter/owl-alpha` | 2026-05-30 | No respetaba SOUL.md: respondía "Soy OWL de ZOO company" |
+| `gemini-2.5-flash` | 2026-05-30 | Créditos agotados + NameError Hermes v0.14.0 |
+| `gemini-3-flash-preview` | 2026-05-30 | Misma familia, mismo problema de créditos |
+| `llama3.1:8b` (Ollama serverX) | 2026-05-30 | Latencia alta, reemplazado por fallbacks OpenRouter free |
 
 ### 2.3 Servicios
 
@@ -855,10 +875,24 @@ Clawdio captura tareas e ideas mencionadas al pasar durante cualquier conversaci
 
 | Prioridad | ID | Pendiente | Contexto |
 |---|---|---|---|
-| Alta | BACKLOG-RABIN-01 | Webhook HTTP canal Miaude→Rabín autónomo | MCP actual solo permite Miaude→Montu. Para instrucciones directas a Rabín se necesita endpoint HTTP en serveri3 que inyecte mensajes en Hermes |
+| Media | BACKLOG-RABIN-01 | Webhook HTTP canal Miaude→Rabín autónomo | MCP actual solo permite Miaude→Montu. Para instrucciones directas a Rabín se necesita endpoint HTTP en serveri3 que inyecte mensajes en Hermes |
+| Alta | DOCKER-CLEANUP | Eliminar contenedor clawdio-v2 | `docker rm clawdio-v2` en serveri3. Detenido, corriendo config antiguo (gemini-2.5-flash). Competía por polling Telegram con gateway nativo |
 | Baja | — | Login manual Lider.cl via Camofox | Camofox instalado en serveri3 pero requiere sesión autenticada inicial |
 | Baja | — | Agregar productos habituales a supermercado.json | Lista de productos pendiente de cargar |
 | Baja | — | WARP enrollment Mac Pecas | Requiere acceso físico |
+
+### 15.1 Bugs Hermes v0.14.0 — monitoreo
+
+| Bug | Tracking | Acción requerida |
+|---|---|---|
+| NameError: _pool_may_recover_from_rate_limit | No reportado aún upstream | Evaluar si persiste con OpenRouter como provider único (sin Gemini). Si no aparece más, documentar como cerrado |
+| auxiliary_client.py línea 427: Gemini hardcodeado | No reportado aún upstream | Si provider:auto ya no usa Gemini (todos en openrouter), no debería activarse. Monitorear |
+
+### 15.2 Modelos descartados — no reintentar
+
+- **openrouter/owl-alpha:** No respeta SOUL.md — identidad propia alterada. No usar.
+- **gemini-2.5-flash / gemini-3-flash-preview:** Créditos agotados + NameError. No usar hasta nuevo aviso.
+- **llama3.1:8b (Ollama serverX):** Latencia alta. No necesario con fallbacks OpenRouter free.
 
 ---
 

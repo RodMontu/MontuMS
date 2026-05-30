@@ -1,4 +1,51 @@
 ---
+## 2026-05-30 — Rabín: migración definitiva a DeepSeek V4 Flash + fixes estructurales
+
+**Contexto:** openrouter/owl-alpha presentaba identidad propia alterada (respondía como "OWL de ZOO company"
+en vez de Clawdio Rabín — no respetaba SOUL.md). gemini-2.5-flash con créditos agotados (HTTP 429).
+Migración completa a OpenRouter como provider único.
+
+**Stack de modelos (nuevo):**
+| Slot | Modelo | Provider | Costo |
+|---|---|---|---|
+| Principal | deepseek/deepseek-v4-flash | OpenRouter | ~$0,10/M tokens |
+| Fallback 1 | nousresearch/hermes-3-llama-3.1-405b:free | OpenRouter | Free |
+| Fallback 2 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | Free |
+
+**Cambios en /home/i3/.hermes/config.yaml (serveri3):**
+- model.provider: gemini → openrouter
+- model.default: openrouter/owl-alpha → deepseek/deepseek-v4-flash
+- browser.engine: disabled (fix HTTP 404 "No endpoints found that support tool use")
+- compression.enabled: false
+- Todos los auxiliary providers: auto → openrouter (elimina intentos a Gemini → 429)
+- cron: [] — 10 crons eliminados
+- Backup: config.yaml.bak.20260530 creado
+
+**Crons eliminados (los 10):**
+- Documentados: monitor-manana, monitor-noche, briefing-manana, ideas-pendientes, resumen-semanal
+- No documentados (descubiertos en log): Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube,
+  inbox-miaude-check, Hermes Agent al día
+
+**Docker clawdio-v2:** DETENIDO (docker stop). Corría con config antiguo (gemini-2.5-flash) y competía
+por polling de Telegram con el gateway nativo. PENDIENTE: docker rm clawdio-v2.
+
+**Bugs documentados (Hermes v0.14.0):**
+1. NameError: _pool_may_recover_from_rate_limit — crons fallan al usar Gemini. Regresión del framework.
+2. auxiliary_client.py línea 427: _OPENROUTER_MODEL = "google/gemini-2.5-flash" hardcodeado como
+   fallback — causa que provider:auto intente Gemini si hay GOOGLE_API_KEY en .env.
+
+**Modelos descartados:**
+- openrouter/owl-alpha: identidad propia alterada ("Soy OWL de ZOO company")
+- gemini-2.5-flash: doble falla (NameError + créditos agotados)
+
+**Archivos modificados en este repo:**
+- docs/INVENTARIO_MAESTRO.md — sección 8 actualizada
+- docs/LOG_CAMBIOS_2026.md — este registro (nuevo)
+- docs/CLAWDIO_ASISTENTE_PERSONAL.md — Stack modelos + Pendientes actualizados
+
+---
+
+---
 ## 2026-05-29 — Fix Rabín: modelo principal + eliminación de crons
 
 **Contexto:** Créditos Gemini agotados. Fallo del switch /model session-only con

@@ -1,4 +1,30 @@
 ---
+## 2026-06-01 — Setup escritorio virtual serverX + fix bridge Clawdio Mac
+
+**serverX — Nuevas instalaciones:**
+- Google Chrome stable (repo oficial Google, apt)
+- Claude Desktop v1.9255.2 (aaddrick/claude-desktop-debian, apt)
+- Antigravity CLI → /home/x/.local/bin/agy
+- Antigravity IDE → /home/x/.local/share/antigravity-ide/ (Electron, launcher en .local/bin)
+- Extensión cafetechne.antigravity-link-extension-1.0.16-universal
+
+**MCPs configurados en serverX (~/.config/Claude/claude_desktop_config.json):**
+- clawdio: /home/x/bin/hermes-mcp-bridge → SSH a i3@192.168.1.211 (hermes mcp serve)
+- desktop-commander: npx @wonderwhy-er/desktop-commander
+- antigravity-link: node ~/.antigravity-ide/extensions/cafetechne.antigravity-link-extension-1.0.16-universal/mcp-server.mjs
+
+**SSH key nueva:** x@serverX → i3@serveri3
+- Archivo: ~/.ssh/id_ed25519_serveri3
+- Agregada a authorized_keys de serveri3 ✅
+
+**Mac — Fix bridge Clawdio:**
+- Archivo: /Users/montu/hermes-mcp-bridge-v2
+- Problema: apuntaba a docker exec clawdio-v2 (contenedor ya no existe)
+- Fix: reemplazado por SSH directo a /home/i3/.hermes/hermes-agent/venv/bin/hermes mcp serve --accept-hooks
+- Estado: running ✅
+
+**Pendiente:** Rotar API key OpenRouter expuesta en sesión de hoy
+
 ## 2026-05-30 — Rabín: migración definitiva a DeepSeek V4 Flash + fixes estructurales
 
 **Contexto:** openrouter/owl-alpha presentaba identidad propia alterada (respondía como "OWL de ZOO company"
@@ -1248,3 +1274,33 @@ Los cambios persisten en reinicios y recreaciones del container porque /opt/data
 
 ### Agente ejecutor
 Miaude (Claude.ai Desktop) via Desktop Commander — fix completo sin intervencion de Montu
+
+
+---
+## 2026-06-01 — Claude Desktop + Antigravity IDE en serverX
+
+**Contexto:** Setup de entorno de trabajo gráfico en serverX (KDE/NoMachine) con Claude Desktop, Antigravity IDE y MCPs locales.
+
+### Instalaciones
+- **Google Chrome** — repo oficial Google (apt)
+- **Claude Desktop linux v1.9255.2** — via aaddrick/claude-desktop-debian (apt)
+- **Antigravity CLI** → `/home/x/.local/bin/agy`
+- **Antigravity IDE** → `/home/x/.local/share/antigravity-ide/` + symlink en `.local/bin`
+- **Extensión MCP bridge:** `cafetechne.antigravity-link-extension-1.0.16-universal`
+
+### MCPs configurados en Claude Desktop
+Config: `~/.config/Claude/claude_desktop_config.json`
+
+| MCP | Comando | Notas |
+|-----|---------|-------|
+| clawdio | `/home/x/bin/hermes-mcp-bridge` | SSH → i3@192.168.1.211 → `hermes mcp serve` |
+| desktop-commander | `npx @wonderwhy-er/desktop-commander` | Control escritorio |
+| antigravity-link | `node mcp-server.mjs` | Bridge extensión Antigravity IDE |
+
+### SSH key nueva
+- **Key:** `~/.ssh/id_ed25519_serveri3`
+- **Ruta:** x@serverx → i3@192.168.1.211
+- **Estado:** agregada a authorized_keys de serveri3 ✅
+
+### Pendiente
+- Rotar API key OpenRouter expuesta en sesión (prefijo `sk-or-v1-856c...`) — invalidar y generar nueva en OpenRouter dashboard.

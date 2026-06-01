@@ -292,6 +292,16 @@ volume)]
 
 ---
 
+
+## 2.13 Claude Desktop (serverX)
+
+### Claude Desktop (serverX)
+- Versión: 1.9255.2 (aaddrick/claude-desktop-debian)
+- Config: ~/.config/Claude/claude_desktop_config.json
+- MCPs: clawdio (running), desktop-commander (running), antigravity-link (running)
+- Antigravity IDE: ~/.local/share/antigravity-ide/
+- Antigravity CLI (agy): ~/.local/bin/agy
+
 ## 2.12 visual-voice
 **visual-voice**
 - Compose: `/home/x/visual-voice` (serverX)

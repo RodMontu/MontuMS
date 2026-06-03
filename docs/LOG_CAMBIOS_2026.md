@@ -1247,6 +1247,46 @@ Miaude (Claude.ai Desktop) via Desktop Commander — verificacion cruzada en tod
 
 
 ---
+## 2026-06-03 — Arquitectura Multi-Agente Hermes: Espinita + Risko
+
+**Autor:** Miaude (autónomo, Protocolo Miaude-sin-Montu)
+**Sesión:** ~6 horas nocturnas (Montu durmiendo)
+
+### Contexto
+Montu propuso separar responsabilidades de Clawdio en agentes especializados independientes, cada uno con su propio HERMES_HOME, personalidad, modelo y canal de comunicación. Espinita y Risko fueron los primeros en desplegarse.
+
+### Espinita — hermes-espinita (NUEVO)
+- **Imagen:** nousresearch/hermes-agent:latest
+- **Compose:** /home/i3/espinita/docker-compose.yml
+- **HERMES_HOME:** /home/i3/espinita/data/ (bind mount)
+- **Docs edificio:** /home/i3/espinita/docs/
+- **Bot Telegram:** @Espinita1010_bot (token creado por Montu en @BotFather al retorno)
+- **WhatsApp:** número prepago pareado (Baileys nativo Hermes, bridge en port 3000)
+- **Modelo:** deepseek/deepseek-v4-flash vía OpenRouter
+- **Personalidad:** Conserje virtual Edificio Los Espinos, culto-formal, **masculino** (referencia al personaje televisivo chileno de los 80s + coincidencia con nombre del edificio)
+- **Comportamiento grupos WA:** group_mentions_only=true (invocar con @espinita)
+
+#### Fixes aplicados durante despliegue
+1. `user: "1000:1000"` en compose → removido: el init script de hermes-agent requiere root para instalar bridge npm en `/opt/hermes/`
+2. Chown recursivo a UID 10000 vía alpine: `docker run --rm -v ./data:/data alpine chown -R 10000:10000 /data`
+3. Lock files obsoletos en `.local/state/hermes/gateway-locks/` → eliminados en caliente para desbloquear reconexión Telegram
+
+### Risko — hermes-risko (REACTIVADO como Docker)
+- **Imagen:** nousresearch/hermes-agent:latest
+- **Compose:** /srv/risko/docker-compose.yml (reemplaza setup OpenClaw obsoleto)
+- **HERMES_HOME:** /home/i3/.risko/ (bind mount, directorio preexistente)
+- **Bot Telegram:** @Risko_OP_bot (token preexistente en .env)
+- **Modelo:** actualizado gemini-2.5-flash → **deepseek/deepseek-v4-flash vía OpenRouter**
+- **Auxiliares:** todos migrados a OpenRouter (eliminado Gemini trap — provider auto detectaba GOOGLE_API_KEY)
+- **Fix aplicado:** `user: "1000:1000"` en compose (HERMES_HOME preexistente compatible con UID 1000)
+- Telegram only, sin WhatsApp
+
+### Backlog generado en sesión
+- **BACKLOG-ESPINITA-01:** Agrupar docs edificio desde MacBook → /home/i3/espinita/docs/ + fix Samba
+- **AGENTE-CARLITOS:** Coordinador MS, vive en serverX, config TBD
+- **AGENTE-AURORA:** Documentadora técnica, modelo local, femenino, honra *La Aurora de Chile*
+
+---
 ## 2026-05-24 — Fix SSH Clawdio-v2 (container) → serverX
 
 **Contexto:** Rabín (Hermes en container clawdio-v2) no podia hacer SSH a serverX. Detectado al intentar documentar el LOG de optimizacion de tokens.

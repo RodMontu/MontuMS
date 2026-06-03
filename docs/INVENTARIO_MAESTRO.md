@@ -681,14 +681,32 @@ NO levantar en serverX bajo ninguna circunstancia.
 
 ---
 
-## 8. CLAWDIO — Asistente Personal IA
+## 8. CLAWDIO — Ecosistema Multi-Agente IA
+
+**Host principal:** serveri3 (192.168.1.211, usuario i3)
+**Framework:** Hermes Agent v0.14.0
+**Nombre del Sistema:** Clawdio (Alias fonético Mi TI: **"Miaude"**)
+
+### Arquitectura Multi-Agente (desde 2026-06-03)
+| Agente | Alias | Container | HERMES_HOME | Bot Telegram | WhatsApp | Rol |
+|---|---|---|---|---|---|---|
+| **Rabín** | @pantero_bot | systemd hermes-gateway | /home/i3/.hermes/ | @pantero_bot | ✅ (número personal) | Asistente personal Montu + Pecas |
+| **Risko** | @Risko_OP_bot | hermes-risko (Docker) | /home/i3/.risko/ | @Risko_OP_bot | — | Asistente ejecutivo OP Risk |
+| **Espinita** | @Espinita1010_bot | hermes-espinita (Docker) | /home/i3/espinita/data/ | @Espinita1010_bot | ✅ (número prepago edificio) | Conserje virtual Edificio Los Espinos |
+| **Carlitos** | TBD | serverX (pendiente) | TBD | TBD | — | Coordinador Metodología Sinérgica |
+| **Aurora** | TBD | serverX (pendiente) | TBD | TBD | — | Documentadora técnica (modelo local) |
+
+> **Nota arquitectónica:** Containers Docker sin `user:` override para compatibilidad con hermes-agent init script (chown targeted a UID 10000). Edición de config vía docker exec o scripts Python sobre bind mount.
+
+---
+
+### 8.1 Rabín — Asistente Personal
 
 **Host:** serveri3 (192.168.1.211, usuario i3)
-**Framework:** Hermes Agent v0.14.0
-**Bot Telegram:** @pantero_bot (Alias: **"Clawdio Rabín"** o "Rabín")
+**Framework:** Hermes Agent v0.14.0**Bot Telegram:** @pantero_bot (Alias: **"Clawdio Rabín"** o "Rabín")
 **Bot Alertas TI:** @clawdio_dev_local_bot (Alias: **"Clawdio Dev"**)
-**Nombre del Sistema:** Clawdio (Alias fonético Mi TI: **"Miaude"**)
 **Usuarios:** Montu (ID: 8357148621) + Pecas (ID: 8328037199)
+**Despliegue:** systemd `hermes-gateway.service` (no Docker)
 
 ### Stack de modelos
 | Slot | Modelo | Proveedor | Costo |
@@ -698,7 +716,6 @@ NO levantar en serverX bajo ninguna circunstancia.
 | Fallback 2 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | Free |
 
 > **2026-05-30:** Migrado de openrouter/owl-alpha (identidad propia alterada: "Soy OWL de ZOO company") y gemini-2.5-flash (créditos agotados + NameError bug Hermes v0.14.0). Nuevo stack completamente sobre OpenRouter.
-
 ### Archivos clave
 | Archivo | Ruta | Descripción |
 |---|---|---|
@@ -716,11 +733,61 @@ NO levantar en serverX bajo ninguna circunstancia.
 | write_result.py | /home/i3/.hermes/agent_results/write_result.py | Helper resultados agentes |
 | agent_results.md | /home/i3/.hermes/skills/desarrollo/agent_results.md | Skill canal retorno |
 
+---
+
+### 8.2 Risko — Asistente Ejecutivo OP Risk
+
+**Bot Telegram:** @Risko_OP_bot
+**Despliegue:** Docker `hermes-risko` (compose: `/srv/risko/docker-compose.yml`)
+**HERMES_HOME:** `/home/i3/.risko/` (bind mount)
+**Usuarios:** Montu (8357148621), Yerko Molina, Rodrigo Sepúlveda (Chepu)
+**Lenguaje:** INCULTO-FORMAL
+**Plataformas:** Telegram únicamente
+
+#### Archivos clave
+| Archivo | Ruta | Descripción |
+|---|---|---|
+| config.yaml | /home/i3/.risko/config.yaml | Config Hermes Risko |
+| SOUL.md | /home/i3/.risko/SOUL.md | Personalidad Risko |
+| MEMORY.md | /home/i3/.risko/MEMORY.md | Contexto proyecto OP Risk |
+| knowledge/ | /home/i3/.risko/knowledge/ | Docs OP Risk (HTML, MD, reuniones) |
+| docker-compose.yml | /srv/risko/docker-compose.yml | Despliegue Docker |
+
+---
+
+### 8.3 Espinita — Conserje Virtual Edificio Los Espinos
+
+**Bot Telegram:** @Espinita1010_bot
+**Despliegue:** Docker `hermes-espinita` (compose: `/home/i3/espinita/docker-compose.yml`)
+**HERMES_HOME:** `/home/i3/espinita/data/` (bind mount)
+**Docs edificio:** `/home/i3/espinita/docs/` (bind mount RO en container)
+**Usuarios:** Montu (admin sistema) + comunidad edificio (WhatsApp)
+**Lenguaje:** CULTO-FORMAL. Masculino ("el Conserje", no "la conserje")
+**Plataformas:** Telegram + WhatsApp (número prepago, pareado con Baileys nativo)
+**Comportamiento grupos WA:** `group_mentions_only: true` — responde solo cuando invocan con @espinita
+
+#### Archivos clave
+| Archivo | Ruta | Descripción |
+|---|---|---|
+| config.yaml | /home/i3/espinita/data/config.yaml | Config Hermes Espinita |
+| SOUL.md | /home/i3/espinita/data/SOUL.md | Identidad y reglas Espinita |
+| MEMORY.md | /home/i3/espinita/data/MEMORY.md | Contactos edificio, normas, pendientes |
+| USER.md | /home/i3/espinita/data/USER.md | Perfil usuarios (Montu + comunidad) |
+| .env | /home/i3/espinita/.env | Tokens y API keys |
+| docker-compose.yml | /home/i3/espinita/docker-compose.yml | Despliegue Docker |
+| docs/ | /home/i3/espinita/docs/ | Repositorio documentación edificio (5GB aprox.) |
+
+#### Pendientes
+- Gmail OAuth comunidad — credenciales desde administración del edificio
+- Carga documentación edificio (reglamento, normas, etc.) → `/home/i3/espinita/docs/`
+- Fix Samba MacBook para acceso directo a `/home/i3/espinita/docs/` (BACKLOG-ESPINITA-01)
+
+---
+
 ### Servicios systemd (usuario i3)
 | Servicio | Descripción |
 |---|---|---|
-| hermes-gateway.service | Gateway principal Clawdio (DeepSeek V4 Flash / OpenRouter) |
-| stt-proxy.service | Proxy STT Flask (puerto 9877) |
+| hermes-gateway.service | Gateway principal Clawdio (DeepSeek V4 Flash / OpenRouter) || stt-proxy.service | Proxy STT Flask (puerto 9877) |
 
 ### Cambios en config.yaml (2026-05-29/30)
 | Parámetro | Valor anterior | Valor actual |

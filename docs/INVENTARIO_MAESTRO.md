@@ -552,6 +552,22 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
 - Geovictoria API: `0.0.0.0:8002->8002`
 - Geovictoria UI RRHH: `0.0.0.0:8020->80`
 
+## 11.1 Nuevos Endpoints Backend (puerto 8001) — act. 2026-06-05
+- `GET /api/tiempos-maquina?id_forma&diametro&sucursal_id&meses`
+  → estadísticas DeltaT por (IdForma, Diámetro, Máquina) desde PIEZA_PRODUCCION
+- `GET /api/its/detalle/{it_id}`
+  → detalle IT desde Cubigest READ-ONLY (piezas, diámetros, calidades, toneladas)
+
+### Modificados
+- `/api/compromisos-semanales` → ahora retorna `bolsa` + `compromisos` + `fecha_comprometida` por item
+
+## 11.2 Componentes Frontend Nuevos — act. 2026-06-05
+- `TiemposPorMaquina.tsx` → NavItem "Tiempos por Máquina" en sidebar
+- Modal detalle IT en `ProximasSemanas`
+
+### Modificados
+- `CompromisosFuturos` → incorpora bolsa de trabajos draggable + filtros
+
 # 12. Topología de Sucursales Operativas y Mapeo (CRÍTICO)
 - Calama: `sucursal_id=1` (Cubigest=1, SQLite=1)
 - Cerrillos/Vista Clara: `sucursal_id=10` (Cubigest=4, SQLite=10)
@@ -564,6 +580,22 @@ Aclara explícitamente que estos corren en TO, NO en serverX.
   - Entrega formal a Gustavo Godoy: 2026-05-13
   - QA post-entrega Gustavo: 9/9 PASS — 2026-05-18 (ver LOG_CAMBIOS_2026.md)
   - BACKLOG-MP01-ROBERTO: CERRADO — Roberto confirmó que permisos Cubigest Calama/Coronel ya existen
+
+## 13.1 Backlogs Abiertos OptiFierro V2 — act. 2026-06-05
+
+**BACKLOG-OF-02: Validación estadística ratios dotación**
+- Hipótesis actual hardcodeada: +1=75%, +2=55%
+- Validación propuesta: análisis de clusters en distribución DeltaT
+  de formas complejas y frecuentes (>300 registros)
+- Si distribución muestra 3 tendencias → ratios reales extraíbles
+- Condición: sesión dedicada de análisis exploratorio offline
+
+**BACKLOG ESTRATÉGICO: Motor de aprendizaje plan vs real**
+- Estado actual: DeltaT estático (CSV generado una vez, offline)
+- Objetivo: cruzar plan motor vs PIEZA_PRODUCCION real →
+  actualizar medianas rodantes en SQLite
+- Motor lee SQLite en vez de CSV congelado
+- Estado: diseño conceptual definido, implementación pendiente
 
 # 14. Repositorios GitHub
 - `https://github.com/RodMontu/scrap-geovictoria` (privado). Stack: Python, Playwright, SQLite, FastAPI. Despliegue en TO.

@@ -1385,3 +1385,6 @@ Config: `~/.config/Claude/claude_desktop_config.json`
 - serveri3: 192.168.1.211, Ubuntu 24.04, Cloudflare tunnels, Hermes agents
 - Proyectos: OptiFierro V2, OP Risk, Hermes Hub, Visual-Voice, CutX, Pegas V2
 - Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora
+
+## TEST-TRANSCRIPCION
+Este texto debe aparecer identico en el archivo, sin reinterpretacion.

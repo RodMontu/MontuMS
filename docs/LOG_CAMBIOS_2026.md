@@ -1367,3 +1367,21 @@ Config: `~/.config/Claude/claude_desktop_config.json`
 - Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora
 
 ---
+
+
+---
+## 2026-06-15 — Endpoint REST Hermes Hub mejorado
+
+**Proyecto:** Hermes Hub
+**Estado:** 🔄 Mejora en endpoint
+
+### Cambios
+- Actualización de la documentación del endpoint POST /api/chat/{agent_id}
+- Mejoras en el manejo de errores y validaciones
+- Nuevos tests unitarios: CARLITOS_REST_ERR + AURORA_REST_ERR
+
+**Infraestructura de referencia**
+- serverX: 192.168.1.111, Ubuntu 24.04, Docker, Ollama, GPU P104-100
+- serveri3: 192.168.1.211, Ubuntu 24.04, Cloudflare tunnels, Hermes agents
+- Proyectos: OptiFierro V2, OP Risk, Hermes Hub, Visual-Voice, CutX, Pegas V2
+- Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora

@@ -1031,3 +1031,18 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 | serverX | Ubuntu 24.04 + Ollama + GPU P104-100 | Risko | Activo |
 | serveri3 | Ubuntu 24.04 + Hermes Agents | Carlitos | Activo |
 | serverX | Ubuntu 24.04 + Docker + Aurora | Aurora | Activo |
+
+```markdown
+## Agentes Hermes Hub (actualizado 2026-06-10)
+
+| Agente | Host | Framework | Modelo | Rol | Estado |
+|---|---|---|---|---|---|
+| Rabín | serveri3 (192.168.1.211) | Hermes Agent v0.12.0 | Gemini 2.5 Flash | Asistente personal Montu + Pecas, Telegram @pantero_bot | ✅ online |
+| Espinita | serveri3 (192.168.1.211) | Hermes Agent (Docker) | Gemini 2.5 Flash | Conserje IA Edificio Los Espinos | ✅ online |
+| Risko | serveri3 (192.168.1.211) | Hermes Agent (Docker) | Gemini 2.5 Flash | Asistente OP Risk, prevención de riesgos | ✅ online |
+| Carlitos | serverX (192.168.1.111) | ollama_local (Hermes Hub) | qwen2.5-coder:7b | Coordinador MS, orquestación técnica serverX | ✅ online |
+| Aurora | serverX (192.168.1.111) | ollama_local (Hermes Hub) | qwen2.5-coder:7b | Documentación técnica, escritura autónoma MontuMS | ✅ online |
+
+ARCHIVO DESTINO: INVENTARIO_MAESTRO.md
+ÚLTIMAS LÍNEAS DEL ARCHIVO (para que respetes el formato):
+```

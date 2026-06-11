@@ -1391,3 +1391,6 @@ Este texto debe aparecer identico en el archivo, sin reinterpretacion.
 
 ## TEST-TRANSCRIPCION
 Este texto debe aparecer identico en el archivo, sin reinterpretacion.
+
+## TEST-TRANSCRIPCION
+Este texto debe aparecer identico en el archivo, sin reinterpretacion.

@@ -1020,3 +1020,14 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 ---
 
 **Fin del documento (act 2026-05-29)**
+
+
+## Agentes del Hermes Hub
+
+| Host | Modelo | Rol | Estado |
+|---|---|---|---|
+| serverX | Ubuntu 24.04 + Docker | Rabín | Activo |
+| serveri3 | Ubuntu 24.04 + Cloudflare Tunnels | Espinita | Activo |
+| serverX | Ubuntu 24.04 + Ollama + GPU P104-100 | Risko | Activo |
+| serveri3 | Ubuntu 24.04 + Hermes Agents | Carlitos | Activo |
+| serverX | Ubuntu 24.04 + Docker + Aurora | Aurora | Activo |

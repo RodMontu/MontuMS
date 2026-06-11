@@ -1397,3 +1397,37 @@ Este texto debe aparecer identico en el archivo, sin reinterpretacion.
 
 ## TEST-BYPASS-LLM 2026-06-10
 Este texto debe aparecer identico. Sin reinterpretacion.
+
+---
+## 2026-06-10 — Hermes Hub: Carlitos, Aurora, REST endpoint y autonomía Miaude
+
+**Proyecto:** Hermes Hub (serverX :8750)
+**Estado:** Operativo
+
+### Cambios implementados
+
+**Nuevos agentes activos:**
+- Carlitos: ollama_local, qwen2.5-coder:7b, rol Coordinador MS
+- Aurora: ollama_local, qwen2.5-coder:7b, rol Documentación técnica
+
+**Aurora — escritura autónoma en MontuMS:**
+- Funciones aurora_read_file, aurora_write_file, aurora_git_commit en routers/agents.py
+- Volumen /home/x/MontuMS montado en container /app/montums:rw
+- SSH key id_ed25519_github en /app/ssh_host:ro
+- Git identity: Aurora (Hermes Hub) / aurora@montuschi.cl
+- Aurora v3: bypass LLM con aurora_extract_exact_block()
+  Patrón con este bloque exacto: escribe sin pasar por el modelo
+
+**Endpoint REST síncrono:**
+- POST /api/chat/{agent_id} en main.py
+- Body: {content, agent_id} — Response: {agent_id, agent, response}
+- Puerto: 8750 nginx, accesible desde LAN y SSH
+
+**Miaude-sin-Montu — control directo:**
+- Miaude invoca Carlitos y Aurora via osascript SSH serverX curl REST
+- Sin intervención de Montu para documentar o consultar agentes
+
+**Documentación generada:**
+- HERMES_HUB_GUIA_OPERACION.md creado en MontuMS (98 líneas)
+- Keywords Aurora ampliados: guia/guia_operacion activos
+- Protocolo Carlitos y Aurora documentado para retomar en cualquier chat

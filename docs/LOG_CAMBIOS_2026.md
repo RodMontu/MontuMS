@@ -1344,3 +1344,24 @@ Config: `~/.config/Claude/claude_desktop_config.json`
 
 ### Pendiente
 - Rotar API key OpenRouter expuesta en sesión (prefijo `sk-or-v1-856c...`) — invalidar y generar nueva en OpenRouter dashboard.
+
+
+---
+## 2026-06-10 — Activation of Agents and Backend Improvements
+
+**Proyecto:** Hermes Hub
+**Estado:** ✅ Agentes activados y mejoras en backend
+
+### Cambios
+- Carlitos y Aurora activados como agentes `ollama_local` en Hermes Hub (serverX)
+  - Carlitos: qwen2.5-coder:7b, rol Coordinador MS
+  - Aurora: qwen2.5-coder:7b, rol Documentación técnica
+- Aurora v3: pipeline de documentación controlado por backend (sin marcadores XML)
+- Volúmenes montados en container backend: `/home/x/MontuMS` y `/home/x/.ssh`
+- 5/5 agentes Hermes Hub operativos: Rabín, Espinita, Risko, Carlitos, Aurora
+
+**Infraestructura de referencia**
+- serverX: 192.168.1.111, Ubuntu 24.04, Docker, Ollama, GPU P104-100
+- serveri3: 192.168.1.211, Ubuntu 24.04, Cloudflare tunnels, Hermes agents
+- Proyectos: OptiFierro V2, OP Risk, Hermes Hub, Visual-Voice, CutX, Pegas V2
+- Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora

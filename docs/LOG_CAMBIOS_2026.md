@@ -1394,3 +1394,6 @@ Este texto debe aparecer identico en el archivo, sin reinterpretacion.
 
 ## TEST-TRANSCRIPCION
 Este texto debe aparecer identico en el archivo, sin reinterpretacion.
+
+## TEST-BYPASS-LLM 2026-06-10
+Este texto debe aparecer identico. Sin reinterpretacion.

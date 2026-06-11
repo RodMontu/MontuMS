@@ -1365,3 +1365,61 @@ Config: `~/.config/Claude/claude_desktop_config.json`
 - serveri3: 192.168.1.211, Ubuntu 24.04, Cloudflare tunnels, Hermes agents
 - Proyectos: OptiFierro V2, OP Risk, Hermes Hub, Visual-Voice, CutX, Pegas V2
 - Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora
+
+---
+## 2026-06-10 — Hermes Hub GUIA_OPERACION.md
+
+**Creado:** 2026-06-10  
+**Propósito:** Referencia operativa para usar Carlitos y Aurora desde cualquier ventana de chat con Miaude.
+
+---
+
+## Estado del ecosistema (2026-06-10)
+
+5 agentes operativos en Hermes Hub (serverX :8750):
+
+| Agente | Host | Modelo | Rol |
+|---|---|---|---|
+| Rabín | serveri3 | Gemini 2.5 Flash | Asistente personal Montu+Pecas, Telegram @pantero_bot |
+| Espinita | serveri3 | Gemini 2.5 Flash | Conserje IA Edificio Los Espinos |
+| Risko | serveri3 | Gemini 2.5 Flash | Asistente OP Risk |
+| Carlitos | serverX | qwen2.5-coder:7b | Coordinador MS, análisis técnico serverX |
+| Aurora | serverX | qwen2.5-coder:7b | Documentación técnica, escritura autónoma MontuMS |
+
+---
+
+## Aurora — Protocolo de uso
+
+### Regla de oro
+Aurora es un escribano, no un analista. Darle el texto ya formateado. Ella lo escribe y commitea.
+Nunca pedirle que "decida" qué documentar — siempre darle el contenido exacto.
+
+### Keywords de detección de archivo
+| Keyword en el prompt | Archivo destino |
+|---|---|
+| log / log_cambios | docs/LOG_CAMBIOS_2026.md |
+| inventario / inventario_maestro | docs/INVENTARIO_MAESTRO.md |
+| clawdio | docs/CLAWDIO_ASISTENTE_PERSONAL.md |
+| reglas | docs/REGLAS_CARDINALES_FLUJO_ORQUESTADO.md |
+| biblioteca | docs/BIBLIOTECA_PROMPTS_MS.md |
+
+### Formato de prompt correcto
+
+ARCHIVO DESTINO: LOG_CAMBIOS_2026.md
+ÚLTIMAS LÍNEAS DEL ARCHIVO (para que respetes el formato):
+```
+00 /opt/data/.ssh/id_ed25519
+- Creado /opt/data/.ssh/config con entradas para Host serverx y 192.168.1.111 (User x, IdentityFile correcto)
+- ssh-keyscan 192.168.1.111 >> /opt/data/.ssh/known_hosts
+- La llave publica clawdio-v2@serveri3 ya estaba en authorized_keys de serverX (no requirio cambio en serverX)
+
+### Verificacion
+- docker exec -u hermes clawdio-v2 ssh x@192.168.1.111 echo OK -> CONEXION_OK
+- docker restart clawdio-v2 + test post-restart -> POST_RESTART_OK
+- Persistencia confirmada: /opt/data esta en volumen Docker clawdio-v2_clawdio_data
+
+### Persistencia
+Los cambios persisten en reinicios y recreaciones del container porque /opt/data es un volumen Docker nombrado (no un layer efimero del container).
+
+### Agente ejecutor
+Miaude (Claude.ai Desktop) via Desktop Commander — fix completo sin intervencion de Montu

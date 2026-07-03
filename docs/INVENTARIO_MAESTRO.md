@@ -293,6 +293,77 @@ volume)]
 ---
 
 
+## 2.14 Virtualización KVM — VM windows11
+
+### Stack de Virtualización (serverX)
+- Hipervisor: KVM/QEMU + libvirt
+- Gestión: virsh vía `virsh -c qemu:///system` — usuario `x` pertenece de forma
+  permanente al grupo `libvirt`, NO requiere sudo para operar VMs.
+- Red virtual: default (virbr0, 192.168.122.0/24, NAT)
+
+### VM: windows11
+- Nombre virsh: windows11
+- OS: Windows 11 Pro — instalación 2026-07-02 (reemplaza builds de abril/mayo,
+  perdidas por falla de SSD del sistema host)
+- Nombre de PC (dentro de Windows): WindowsVM
+- vCPU: 8 / RAM: 16 GB
+- Disco: /dev/sdb (Kingston SA400S3, raw block device, no qcow2)
+- IP interna VM: 192.168.122.210 (red NAT libvirt, MAC 52:54:00:79:1a:c1)
+- Usuario local Windows: montu
+- Teclado: Español (España) ISO — OBLIGATORIO, no Latinoamericano
+  (hardware físico Logitech K380 es layout España; usar LatAm rompe
+  el mapeo de \, @, - vía VNC)
+- Firmware: UEFI + TPM 2.0 emulado (swtpm)
+- Graphics VNC: puerto 5900, listen 127.0.0.1 (NO expuesto a LAN por diseño)
+- Estado por defecto: apagada (on_poweroff libvirt default = destroy,
+  se apaga sola al hacer shutdown desde dentro de Windows)
+- Comando inicio: virsh -c qemu:///system start windows11
+- Comando apagado: virsh -c qemu:///system shutdown windows11
+- Comando estado: virsh -c qemu:///system domstate windows11
+
+### Acceso visual (instalación/mantención — NO uso diario)
+- Cliente: RealVNC Viewer.app (macOS) — Screen Sharing.app nativo de macOS
+  es INCOMPATIBLE con el handshake VNC de QEMU (se cuelga en prompt de
+  password aunque el server no tenga auth configurada). No usar.
+- Acceso: túnel SSH obligatorio (VNC no expuesto a LAN):
+  ssh -L 5900:127.0.0.1:5900 x@192.168.1.111
+  luego RealVNC Viewer → 127.0.0.1:5900
+- Este estándar aplica a cualquier VM KVM/QEMU futura en serverX o TO.
+
+### Acceso RDP (uso diario — recomendado)
+- Escritorio remoto habilitado dentro de Windows (Configuración → Sistema →
+  Escritorio remoto → Activado)
+- Acceso desde LAN/Mac: 192.168.1.111:3389
+- Método: socat port-forward, SIN sudo (puerto 3389 no privilegiado para bind local)
+  Comando: socat TCP-LISTEN:3389,fork,reuseaddr TCP:192.168.122.210:3389
+- Persistencia: crontab de usuario `x` en serverX, entrada @reboot
+  (reemplaza el rdp-forward.service systemd de abril 2026, perdido en
+  falla de SSD — este método no depende de sudo ni de /etc/systemd/system)
+- Cliente recomendado: Windows App (macOS) — conexión PC: 192.168.1.111:3389,
+  usuario: montu
+- Validado end-to-end 2026-07-02: nc -zv 192.168.122.210 3389 (interno) y
+  nc -zv 127.0.0.1 3389 (forward) exitosos; conexión real por Windows App
+  confirmada por el usuario.
+
+### Automatización toggle encendido/apagado (MacBook)
+- App: /Applications/Windows 11.app (Automator, workflow sin cambios)
+- Script: /Users/montu/vm-windows11.sh
+- Lógica: detecta estado vía domstate, diálogo de confirmación, ejecuta
+  start/shutdown según corresponda
+- Fix 2026-07-02: reemplazado `sudo virsh` por `virsh -c qemu:///system`
+  (dependía de sudoers.d perdido en falla de SSD; grupo libvirt es
+  permanente y no requiere ese fix)
+
+### Software instalado en VM
+- Pendiente: Microsoft Office
+- Pendiente: Power BI Desktop
+- Pendiente: Activación licencia Windows 11 (backlog, no bloqueante)
+
+### Backlog abierto — Passthrough GPU P104-100 → VM windows11
+- Ver sección BACKLOG-VM-WIN-GPU al final de este documento
+
+---
+
 ## 2.13 Claude Desktop (serverX)
 
 ### Claude Desktop (serverX)
@@ -1019,20 +1090,6 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 ---
 
-**Fin del documento (act 2026-05-29)**
-
-
-## Agentes del Hermes Hub
-
-| Host | Modelo | Rol | Estado |
-|---|---|---|---|
-| serverX | Ubuntu 24.04 + Docker | Rabín | Activo |
-| serveri3 | Ubuntu 24.04 + Cloudflare Tunnels | Espinita | Activo |
-| serverX | Ubuntu 24.04 + Ollama + GPU P104-100 | Risko | Activo |
-| serveri3 | Ubuntu 24.04 + Hermes Agents | Carlitos | Activo |
-| serverX | Ubuntu 24.04 + Docker + Aurora | Aurora | Activo |
-
-```markdown
 ## Agentes Hermes Hub (actualizado 2026-06-10)
 
 | Agente | Host | Framework | Modelo | Rol | Estado |
@@ -1043,6 +1100,32 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 | Carlitos | serverX (192.168.1.111) | ollama_local (Hermes Hub) | qwen2.5-coder:7b | Coordinador MS, orquestación técnica serverX | ✅ online |
 | Aurora | serverX (192.168.1.111) | ollama_local (Hermes Hub) | qwen2.5-coder:7b | Documentación técnica, escritura autónoma MontuMS | ✅ online |
 
-ARCHIVO DESTINO: INVENTARIO_MAESTRO.md
-ÚLTIMAS LÍNEAS DEL ARCHIVO (para que respetes el formato):
-```
+---
+
+## BACKLOG-VM-WIN-GPU: Passthrough GPU P104-100 → VM windows11
+- Contexto: Mac Studio M1 Max 96GB RAM compartida (usado) en camino,
+  llegada estimada ~5 días desde 2026-07-02. Ollama + Visual-Voice v2
+  migran completos al Mac Studio, liberando la P104-100 en serverX de
+  toda carga IA.
+- Objetivo: asignar la P104-100 por VFIO/PCI passthrough a la VM
+  windows11, entregando GPU real (motor de cómputo, no display —
+  la mining card no tiene salida de video pero el compute está intacto)
+  para mejorar experiencia de Power BI / Office vía RDP.
+- Pre-requisitos a verificar antes de ejecutar (NO verificados aún):
+  1. VT-d/IOMMU habilitado en BIOS del Xeon E5-2673 v3.
+  2. Agrupación IOMMU de la GPU aislada (grupo propio).
+  3. Confirmar migración 100% completa de Ollama y Visual-Voice al
+     Mac Studio antes de ejecutar — passthrough es EXCLUSIVO, no
+     compartido; serverX pierde la GPU por completo mientras la VM
+     esté encendida.
+- Workaround conocido: NVIDIA Code 43 (bloqueo anti-passthrough en
+  drivers consumer) → agregar <kvm hidden state='on'/> al XML del dominio.
+- Bloqueado por: llegada de hardware Mac Studio + migración completa
+  de cargas IA locales (Ollama, Visual-Voice v2).
+- Prioridad: baja — GPU hoy sirve cargas activas, sin urgencia de cambio.
+- Chat de referencia: retomar en el mismo hilo donde se diseñó este
+  backlog una vez la migración esté al 100%.
+
+---
+
+**Fin del documento (act 2026-07-02)**

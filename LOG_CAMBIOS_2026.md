@@ -1,6 +1,61 @@
 
 ---
 
+## 2026-07-02 — Reconstrucción completa VM windows11 (serverX) tras falla SSD abril
+
+### Contexto
+La instalación de abril 2026 (VM windows11, usuario "consultor", sudoers.d,
+rdp-forward.service) se perdió íntegramente con la falla del SSD del sistema
+en serverX. La reinstalación de mayo 2026 quedó a medio camino, atascada en
+validación de cuenta Microsoft (OOBE). Esta sesión cierra esa reinstalación
+y reconstruye la cadena de acceso remoto completa.
+
+### OOBE / Instalación
+- Bypass de cuenta Microsoft: `start ms-cxh:localonly` (CMD vía Shift+F10) —
+  método alternativo a `oobe\bypassnro`, funcionó donde el otro no.
+- Usuario local creado: montu (reemplaza "consultor" de abril).
+- Nombre de PC dentro de Windows: WindowsVM.
+
+### RCA — Teclado
+- Causa raíz: layout seleccionado en Windows era "Latinoamericano" pero el
+  teclado físico (Logitech K380) es Español (España) ISO — confirmado por
+  tecla º/ª/\ y doble tecla de tilde (junto a P y junto a Ñ).
+- Fix: seleccionar "Español (España)" en el instalador.
+
+### RCA — Cliente VNC
+- macOS Screen Sharing.app (nativo) queda pegado en prompt de password
+  contra servidor VNC de QEMU sin auth configurada (security type "None").
+  Incompatibilidad de handshake, no es tema de credenciales.
+- Fix: usar RealVNC Viewer.app vía túnel SSH local
+  (ssh -L 5900:127.0.0.1:5900 x@192.168.1.111 → 127.0.0.1:5900).
+
+### Automatización toggle VM (MacBook)
+- /Users/montu/vm-windows11.sh (invocado por /Applications/Windows 11.app)
+- RCA: dependía de sudo virsh + sudoers.d perdido en falla de SSD.
+- Fix: reemplazado por `virsh -c qemu:///system` — usuario x pertenece de
+  forma permanente al grupo libvirt, no requiere sudo.
+
+### Acceso remoto — RDP
+- RDP habilitado dentro de Windows.
+- IP interna VM: 192.168.122.210.
+- Forward reconstruido: socat TCP-LISTEN:3389,fork,reuseaddr
+  TCP:192.168.122.210:3389 en serverX, sin sudo.
+- Persistencia: crontab @reboot de usuario x, sin systemd.
+- Validado end-to-end: nc -zv exitoso (interno y forward), conexión real
+  confirmada por usuario vía Windows App.
+
+### Backlog nuevo abierto
+- BACKLOG-VM-WIN-GPU: passthrough P104-100 → VM windows11, bloqueado por
+  llegada Mac Studio + migración de cargas IA locales. Ver INVENTARIO_MAESTRO.
+
+### Pendiente (no bloqueante)
+- Activación de licencia Windows.
+- Verificar drivers VirtIO completos vía Device Manager.
+- Limpiar devices obsoletos en Windows App del usuario ("consultor",
+  "serverX / No credentials").
+
+---
+
 ## 2026-06-01 — Visual-Voice: Cambio de modelos LLM para generación de minutas
 
 **Archivo modificado:** `/home/x/visual-voice/main.py` (volumen montado, sin rebuild)
@@ -14,6 +69,37 @@
 - Endpoint `/models` verificado: retorna exactamente los 2 modelos nuevos ✓
 
 **Estado post-cambio:** visual-voice Up, puerto 8502→8000 activo
+
+---
+
+## [SESIÓN DE TRABAJO] - 2026-06-29
+**Área:** Estrategia LinkedIn + Conocimiento OP Risk
+**Ejecutado por:** Miaude (Mi TI) + Montu
+
+### Entregables generados
+
+**1. Brújula Estratégica LinkedIn 2026** (`Brujula_LinkedIn_2026_Montuschi.docx`)
+- Documento Word descargable, 9 secciones
+- Cubre: algoritmo LinkedIn 2026 (fuentes primarias: papers arXiv LiGR/Feed SR,
+  datasets Buffer 52M + van der Blom 1.8M + AuthoredUp 3M+), reglas de oro,
+  formatos y rendimiento, cadencia por perfil, funnel de contenido 60/30/10,
+  guía individual para Rodrigo / Pecas / Montuschi Consultores / OP Risk,
+  métricas reales vs vanity, newsletter, checklist de implementación
+- Scope: LinkedIn personal Rodrigo + Pecas + ambas páginas de empresa
+
+**2. Skill `linkedin-strategy`** instalada en MacBook
+- Ruta: `~/.claude/skills/linkedin-strategy/SKILL.md`
+- También subida al Knowledge Base del Proyecto "Mi TI"
+
+### Diagnóstico LinkedIn personal Rodrigo (estado actual)
+- Badge "En busca de empleo" ACTIVO → **desactivar urgente** (no hecho aún)
+- Headline desactualizado → propuesta acordada
+- About orientado a empleador → pendiente reescritura orientada a cliente
+
+### Pendientes LinkedIn (backlog activo)
+- BACKLOG-LI-01: Sección Servicios perfil Rodrigo
+- Textos finales perfil Rodrigo (Headline + About + Experiencia actual)
+- Estrategia LinkedIn OP Risk, perfil Pecas, carrusel PDF, calendario editorial
 
 ---
 

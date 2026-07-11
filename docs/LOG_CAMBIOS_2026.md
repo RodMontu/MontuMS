@@ -1431,3 +1431,68 @@ Este texto debe aparecer identico. Sin reinterpretacion.
 - HERMES_HUB_GUIA_OPERACION.md creado en MontuMS (98 líneas)
 - Keywords Aurora ampliados: guia/guia_operacion activos
 - Protocolo Carlitos y Aurora documentado para retomar en cualquier chat
+
+## 2026-07-10 — Visual-Voice P0: Pass 2 Gemini → Ollama gpt-oss:20b
+
+**Contexto:** Pipeline de minuta two-pass de Visual-Voice estaba completamente roto — Gemini API con créditos prepago agotados (error 429). 4 notas de voz sin minuta (la mayor de 135 min).
+
+**Ejecutor:** CCa (Claude Code autónomo, MacBook Pro 13")
+**Trigger:** 4 notas de voz pendientes de minuta. Pecas es usuaria activa.
+
+### Cambios en serverX (/home/x/visual-voice/main.py)
+- **Funciones modificadas:** `_do_analyze()`, `consolidate()`, `analyze()`
+- **Cambio:** Las tres funciones de análisis/redacción de minuta ahora llaman a `gpt-oss:20b` vía Ollama en Mac Studio usando `requests` nativo (sin librería `openai`)
+- **Constantes nuevas:** `_OLLAMA_BASE_URL = "http://192.168.1.102:11434"` y `_OLLAMA_MODEL_PASS2 = "gpt-oss:20b"`
+- **Deploy:** `docker compose build --no-cache && docker compose up -d` ✅
+
+### Estado post-fix
+- Contenedor visual-voice: Up (http://localhost:8502 → HTTP 200) ✅
+- Conectividad serverX → Mac Studio desde contenedor: 200 OK ✅
+- Pass 2 operativo: test E2E con JSON válido recibido desde gpt-oss:20b ✅
+- STT: faster-whisper small (sin cambios, sigue en serverX GPU P104-100)
+
+### Fase 2 STT — diferida
+- mlx-whisper en Mac Studio: instalación diferida (Fase 1 operativa, STT actual funciona)
+- Motivo: sin urgencia inmediata, mlx-whisper requiere sesión dedicada
+
+### Deuda técnica nueva
+- [ ] Evaluar `qwen3.6:27b` vs `gpt-oss:20b` para Pass 2 (calidad de minutas)
+- [ ] Hacer stt-mac.service persistente como servicio launchd en Mac Studio cuando se retome Fase 2
+- [ ] Recargar créditos Gemini API y evaluar rollback si calidad local < Gemini
+
+---
+
+## 2026-07-10/11 — Mac Studio: Limpieza + Mejoras Rabín + Setup Carlitos
+
+**Contexto:** Sesión de migración y optimización del ecosistema de agentes IA. Ejecutado vía protocolo Miaude-sin-Montu (Claude Desktop + Desktop Commander, sin intervención manual de Montu salvo el sudo de timezone).
+
+### Mac Studio — Modelos Ollama
+- **Eliminado:** `qwen3.5:122b-a10b` (81 GB, MoE sin agente asignado desde migración de Risko)
+- **Espacio recuperado:** 81 GB (SSD: 302 GB libres post-limpieza)
+- **Inventario final:** gpt-oss:20b (13GB) + qwen3-coder:30b (18GB) + qwen3.5:9b (6.6GB) + qwen3.6:27b (17GB) + qwen3.6:35b-a3b (23GB) = ~77.6 GB total
+
+### serverX — Timezone
+- **Cambio:** Timezone UTC → America/Santiago
+- **Comandos:** `sudo timedatectl set-timezone America/Santiago && sudo timedatectl set-ntp true`
+- **Estado:** `System clock synchronized: yes`, `NTP service: active` ✅
+- **Motivo:** Rabín obtenía hora UTC y la presentaba como hora de Santiago
+
+### serveri3 — Rabín (Hermes Agent)
+- **Fix 1 — Terminal backend:** `terminal.backend: local → ssh`
+  - Parámetros SSH ya estaban en .env: `TERMINAL_SSH_HOST=192.168.1.111`, `TERMINAL_SSH_USER=x`, `TERMINAL_SSH_PORT=22`
+  - Resultado: Rabín ejecuta comandos en serverX correctamente
+- **Fix 2 — Fallback local:** Agregado `qwen3.5:9b` vía Mac Studio como PRIMERA opción de fallback (antes de los 3 fallbacks OpenRouter que causaron el outage del 2026-07-04)
+  - Configuración: `provider: custom`, `base_url: http://192.168.1.102:11434/v1`, `model: qwen3.5:9b`
+- **Fix 3 — Compresión de contexto:** Habilitada (`enabled: true`, `threshold: 0.6`, `target_ratio: 0.3`, `protect_last_n: 10`)
+- **SOUL.md:** Agregada sección "Información en tiempo real" (instrucción para usar terminal en fecha/hora). Efectividad parcial — modelo ignora instrucción texto; requiere function calling en Semana 3.
+
+### Mac Studio — Carlitos (Claude Code local)
+- **CLAUDE.md creado:** `/Users/montu/.claude/CLAUDE.md` (72 líneas)
+  - Incluye: infraestructura completa (Mac Studio, serverX, serveri3, TO), proyectos activos (OptiFierro V2, Visual-Voice, MontuMS), convenciones de código, reglas cardinales de deploy y seguridad
+- **settings.json:** `effortLevel: low → medium`
+- **Alias verificado:** `Carlitos` en .zshrc funciona correctamente (test: respuesta CARLITOS_OK en 103s cold start)
+
+### Hallazgos sin resolver (backlog)
+- **BACKLOG-RABIN-DATETIME:** gpt-oss:20b responde fecha/hora desde memoria del modelo, ignorando instrucciones SOUL. Fix real: implementar tool `get_datetime(timezone)` con function calling. Semana 3 del plan de optimización.
+- **BACKLOG-WHATSAPP-BRIDGE:** Bridge WhatsApp en Hermes muere con exit code 1 en cada arranque. No afecta Telegram. Relacionado con Espinita (infraestructura parcialmente lista: WHATSAPP_ENABLED=true, 5 números autorizados).
+- **BACKLOG-SEARXNG-UNDOC:** SearXNG local corriendo en serveri3 localhost:8888. No documentado en INVENTARIO_MAESTRO. Agregar en próxima actualización de inventario.

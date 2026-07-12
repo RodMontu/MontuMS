@@ -269,26 +269,31 @@ volume)]
 ---
 
 ## 2.9 NoMachine Server (Acceso Escritorio Remoto)
-- **NoMachine 8.20.1** — operativo ✅
+- **NoMachine 8.20.1** (server) — operativo ✅
   - Protocolo: NX sobre SSH, puerto 4000
-  - Display: virtual (sin display manager activo)
+  - Display: virtual (sin display manager activo), instanciado bajo demanda al conectar
   - Desktop: KDE Plasma 5.27 (startplasma-x11)
   - Xwrapper: allowed_users=anybody, needs_root_rights=yes
   - dbus-x11: instalado ✅
   - xvfb.service: deshabilitado (conflictaba con NoMachine)
-  - Cliente: NoMachine en MacBook Pro 13" 2018
-- **Versión:** 8.20.1
+  - Cliente: **NoMachine 9.8.2 en Mac Studio (192.168.1.102)** — instalado 2026-07-12 vía `brew install --cask nomachine`
+- **Versión servidor:** 8.20.1 / **Versión cliente:** 9.8.2 (compatibles vía protocolo NX)
 - **Puerto:** 4000 (protocolo NX)
 - **Servicio systemd:** `nxserver.service` (enabled, arranca con el sistema)
 - **Config:** `/usr/NX/etc/node.cfg`
   - Parámetro clave: `DefaultDesktopCommand "/usr/bin/startplasma-x11"`
-- **Uso:** Sesión KDE Plasma virtual desde MacBook. serverX corre headless; Mac actúa como motor gráfico.
-- **Resolución activa:** 2560x1440 (configurado desde el cliente macOS)
-- **Cliente macOS:** NoMachine 8.20.1 para macOS (instalado en MacBook Pro 13")
+- **Uso:** Sesión KDE Plasma virtual desde Mac Studio. serverX corre headless; el Mac actúa como motor gráfico.
+- **Resolución activa:** 2560x1440 (panel físico del Mac Studio, 144Hz irrelevante para NX)
+  - ⚠️ **Gotcha confirmado (2026-07-12):** si se conecta en modo ventana (no fullscreen), NoMachine negocia la resolución del display virtual en base al tamaño de la ventana del cliente con el chrome de macOS descontado, NO al monitor físico — resultó en 2560x1320 (120px menos) hasta pasar a fullscreen (`Ctrl+Cmd+F`). **Conectar siempre en fullscreen** para resolución nativa correcta.
+- **Cliente macOS:** NoMachine 9.8.2 para macOS Apple Silicon (Mac Studio)
 - **Acceso:** Solo LAN — `192.168.1.111:4000`. No expuesto a internet ni por Cloudflare Tunnel.
+- **GPU host (AMD Radeon HD 8570, Oland/GCN 1.0):** driver `amdgpu` cargado, VA-API decode disponible (mesa-va-drivers) pero **sin VCE (sin encode por hardware)**. Esto descarta Sunshine/Moonlight como alternativa viable en este host — NoMachine (protocolo NX, no depende de encode HW) se mantiene como la solución correcta dado el hardware disponible.
+- **GPU VM (P104-100):** aislada en vfio-pci, cedida a VM windows11 — sin tocar, sin conflicto con esta implementación.
+- **Latencia:** aceptable en LAN para uso de IDE/terminal/browser (validado 2026-07-12).
 - **Notas operativas:**
   - Si serverX está **headless**: NoMachine levanta sesión KDE virtual directamente.
   - Si serverX tiene **KDE activo en monitor físico**: NoMachine ofrece conectarse a la sesión física o crear una virtual — usar siempre "nueva sesión virtual".
+- **Pendiente (sin implementar, requiere decisión):** acceso externo fuera de LAN. Opciones evaluadas: SSH tunnel vía `ssh.montuschi.cl` (ya funcional), Cloudflare Spectrum (requiere plan Enterprise, descartado), WireGuard/Tailscale. Restricción dura: **nunca abrir puerto 4000 en el router** (ISP GTD sin apertura de puertos).
 
 ---
 

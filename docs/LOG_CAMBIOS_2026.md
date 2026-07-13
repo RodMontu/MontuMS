@@ -1496,3 +1496,22 @@ Este texto debe aparecer identico. Sin reinterpretacion.
 - **BACKLOG-RABIN-DATETIME:** gpt-oss:20b responde fecha/hora desde memoria del modelo, ignorando instrucciones SOUL. Fix real: implementar tool `get_datetime(timezone)` con function calling. Semana 3 del plan de optimización.
 - **BACKLOG-WHATSAPP-BRIDGE:** Bridge WhatsApp en Hermes muere con exit code 1 en cada arranque. No afecta Telegram. Relacionado con Espinita (infraestructura parcialmente lista: WHATSAPP_ENABLED=true, 5 números autorizados).
 - **BACKLOG-SEARXNG-UNDOC:** SearXNG local corriendo en serveri3 localhost:8888. No documentado en INVENTARIO_MAESTRO. Agregar en próxima actualización de inventario.
+## 2026-07-12 — Configuración inicial de Aurora como agente CLI
+
+**Contexto:** Aurora fue configurada como agente de documentación técnica accesible
+desde CLI (Terminal del Mac Studio) y desde Miaude via Claude Desktop. Anteriormente
+existía el HARNESS.md pero Aurora no tenía configuración operativa como agente.
+
+**Cambios:**
+- Creado: /Users/montu/.claude/agents/aurora.md (78 líneas, modelo qwen3.6:27b)
+  Define a Aurora como sub-agente de Claude Code con tools: Read, Write, Edit, Bash, Glob, Grep
+- Agregado en /Users/montu/.zshrc:
+  alias Aurora (y alias aurora en minúscula) apuntando a qwen3.6:27b via Ollama localhost:11434
+- Modelo corregido: HARNESS.md decía qwen3.6:35b-a3b (MoE, tuvo alucinaciones en síntesis
+  larga). Nuevo modelo asignado: qwen3.6:27b (denso, 17GB, sin presión de latencia)
+
+**Hallazgos:**
+- HARNESS.md en ~/MontuMS/harness/aurora/HARNESS.md tenía el modelo incorrecto documentado
+  (qwen3.6:35b-a3b). Corregido en el archivo durante esta misma sesión.
+
+**Siguiente paso:** Validar Aurora con tarea real de documentación y evaluar calidad de output.

@@ -802,7 +802,7 @@ NO levantar en serverX bajo ninguna circunstancia.
 | **Risko** | @Risko_OP_bot | hermes-risko (Docker) | /home/i3/.risko/ | @Risko_OP_bot | — | Asistente ejecutivo OP Risk |
 | **Espinita** | @Espinita1010_bot | hermes-espinita (Docker) | /home/i3/espinita/data/ | @Espinita1010_bot | ✅ (número prepago edificio) | Conserje virtual Edificio Los Espinos |
 | **Carlitos** | TBD | serverX (pendiente) | TBD | TBD | — | Coordinador Metodología Sinérgica |
-| **Aurora** | TBD | serverX (pendiente) | TBD | TBD | — | Documentadora técnica (modelo local) |
+| **Aurora** | aurora / Aurora | Mac Studio (CLI, sub-agente Claude Code) | /Users/montu/.claude/agents/aurora.md | — | — | Documentadora técnica (agente CLI) |
 
 > **Nota arquitectónica:** Containers Docker sin `user:` override para compatibilidad con hermes-agent init script (chown targeted a UID 10000). Edición de config vía docker exec o scripts Python sobre bind mount.
 
@@ -1103,7 +1103,7 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 | Espinita | serveri3 (192.168.1.211) | Hermes Agent (Docker) | Gemini 2.5 Flash | Conserje IA Edificio Los Espinos | ✅ online |
 | Risko | serveri3 (192.168.1.211) | Hermes Agent (Docker) | Gemini 2.5 Flash | Asistente OP Risk, prevención de riesgos | ✅ online |
 | Carlitos | serverX (192.168.1.111) | ollama_local (Hermes Hub) | qwen2.5-coder:7b | Coordinador MS, orquestación técnica serverX | ✅ online |
-| Aurora | serverX (192.168.1.111) | ollama_local (Hermes Hub) | qwen2.5-coder:7b | Documentación técnica, escritura autónoma MontuMS | ✅ online |
+| Aurora | Mac Studio + serverX | Claude Code (sub-agente) | qwen3.6:27b | Documentación técnica (LOG_CAMBIOS, INVENTARIO_MAESTRO) | operativo |
 
 ---
 

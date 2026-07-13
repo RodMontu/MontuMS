@@ -372,3 +372,82 @@ PROYECTO: Migración serveri3 → Mac Studio + Consolidación agentes
 **Próximos items pendientes:**
 - Visual-Voice STT: benchmark mlx-whisper (large-v3 / large-v3-turbo / medium) — aún no ejecutado → documentar resultado + decisión final cuando se corra Fase 4
 - Disco RESPALDO_ARCA: desconectado (no perdido), ubicación fue ambigua en inventario → corregir estado a "desconectado, pendiente reconexión"
+
+---
+
+## Sesión autónoma nocturna — 2026-07-13 (03:54–07:00 aprox.) — Miaude sin Montu
+
+### Objetivo
+Habilitar MTP (Multi-Token Prediction) en agentes locales y hacer trabajo de eficiencia
+paralelo en Hermes (Rabín, Risko, Espinita).
+
+### Hallazgos de diagnóstico
+
+**Ollama 0.31.1:**
+- El binario incluye soporte completo de MTP/speculative decoding (`--spec-type draft-mtp`)
+- Activación: automática cuando el GGUF tiene `nextn_predict_layers > 0` o tensores `mtp.*`
+- `DraftNumPredict=4` por defecto (se activa solo, no requiere config manual)
+- Los modelos `qwen3.6:27b` y `qwen3.6:35b-a3b` instalados NO tenían MTP (GGUFs estándar)
+
+**Variantes MTP disponibles en Ollama registry:**
+- `qwen3.6:27b-mtp-q4_K_M` — para Aurora
+- `qwen3.6:35b-a3b-mtp-q4_K_M` — para Risko (futuro)
+- No hay MTP para: `gpt-oss:20b`, `qwen3-coder:30b`, `qwen3.5:9b`
+
+### Cambios ejecutados
+
+**Mac Studio — Ollama models:**
+- `ollama pull qwen3.6:27b-mtp-q4_K_M` (17GB) — `nextn_predict_layers=1` ✅
+- `ollama pull qwen3.6:35b-a3b-mtp-q4_K_M` (22GB) — `nextn_predict_layers=1` ✅
+- Benchmark MTP: 16.5 tok/s (sin MTP) → 18.1 tok/s (con MTP) = **+10% en M2 Max**
+  - Nota: el speedup esperado en benchmarks GPU era 2x; en Apple Silicon unified memory
+    el beneficio es más modesto (~10%) pero consistente y reproducible.
+
+**Mac Studio — ~/.zshrc:**
+- Alias `Aurora` actualizado: `qwen3.6:27b` → `qwen3.6:27b-mtp-q4_K_M`
+- Alias `Aurora-nomtp` añadido como fallback si hay bugs de producción en llama.cpp MTP
+
+**serverX — Hermes Agent:**
+- Actualizado v0.14.0 → **v0.18.2** (+4 versiones, "Up to date")
+- `websockets` instalado como dependencia nueva
+- Servicio reiniciado — Telegram: ✅ conectado
+
+**serverX — WhatsApp Bridge (Espinita):**
+- `bridge.js` y dependencias descargados desde GitHub NousResearch/hermes-agent
+- Instalado en: `.hermes/hermes-agent/venv/lib/python3.12/site-packages/scripts/whatsapp-bridge/`
+- `npm install` completado (122 módulos de node_modules)
+- Error anterior `whatsapp_bridge_missing` resuelto → nuevo estado: `retrying`
+- Sesión WA vieja (de serveri3, deslogeada) limpiada. Backup en `session_bak_20260713/`
+- **PENDIENTE MONTU**: Escanear QR para reautenticar Espinita
+
+### Estado de agentes post-sesión
+
+| Agente | Modelo | MTP | Estado |
+|--------|--------|-----|--------|
+| Aurora (CLI) | qwen3.6:27b-mtp-q4_K_M | ✅ +10% | Activo |
+| Carlitos (CLI) | qwen3-coder:30b | ❌ sin variante | Sin cambio |
+| Rabín (Hermes/Telegram) | gpt-oss:20b | ❌ sin variante | Activo v0.18.2 |
+| Risko (Hermes) | qwen3.6:35b-a3b | — | No activo como instancia separada* |
+| Espinita (Hermes/WhatsApp) | qwen3.5:9b | ❌ sin variante | Pendiente QR |
+
+*Risko: el contenedor hermes-risko fue detenido en sesión anterior. El modelo MTP
+`qwen3.6:35b-a3b-mtp-q4_K_M` ya está descargado y listo para cuando se reactive.
+
+### Pendientes para Montu al despertar
+
+1. **Espinita QR scan** (5 min):
+   ```
+   ssh x@192.168.1.111
+   HERMES_HOME=/home/x/.hermes /home/x/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main whatsapp
+   ```
+   Escanear el QR con el teléfono desde WhatsApp > Dispositivos vinculados.
+
+2. **Risko MTP** (cuando se reactive): cambiar modelo a `qwen3.6:35b-a3b-mtp-q4_K_M`
+
+3. **Aurora benchmark**: correr el harness de Aurora para medir si el +10% MTP tiene
+   impacto perceptible dado que el cuello de botella real es el overhead de CC (~6 min).
+
+4. **Carlitos MTP**: no hay variante en Ollama. Alternativa: buscar en Unsloth/HuggingFace
+   si existe GGUF de qwen3-coder:30b con MTP integrado.
+
+5. **Inventario**: actualizar INVENTARIO_MAESTRO con los 2 modelos nuevos y versión Hermes.

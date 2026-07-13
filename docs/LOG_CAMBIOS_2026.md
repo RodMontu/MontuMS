@@ -1540,3 +1540,12 @@ existía el HARNESS.md pero Aurora no tenía configuración operativa como agent
 
 **Resultado:** ver tiempo de esta ejecucion vs 394s (v2) y 1304s (v1).
 
+## 2026-07-13 — Benchmark Aurora v4: modelo gpt-oss:20b (sin thinking)
+
+**Contexto:** Prueba de modelo alternativo para Aurora. qwen3.6:27b tiene extended thinking que no puede desactivarse via system prompt, causando ~4-5 min de overhead. Se prueba gpt-oss:20b (sin thinking, 67.3 tok/s vs 16.4 tok/s).
+
+**Cambios:**
+- Alias Aurora en .zshrc: qwen3.6:27b cambiado a gpt-oss:20b
+- aurora.md: modelo actualizado a gpt-oss:20b
+
+**Resultado esperado:** reduccion de 6.5 min a menos de 2 min si el cuello de botella era el thinking.

@@ -1529,3 +1529,14 @@ existía el HARNESS.md pero Aurora no tenía configuración operativa como agent
 - Ollama reiniciado para aplicar nueva configuracion
 
 **Siguiente paso:** Medir tiempo de esta tarea como benchmark post-optimizacion.
+
+
+## 2026-07-13 — Benchmark Aurora v3: system prompt cargado via --system-prompt-file
+
+**Cambios:**
+- Alias Aurora actualizado: agrega --system-prompt-file apuntando a /Users/montu/.claude/aurora-sp.md
+- Con esto el HARNESS de Aurora (incluyendo /no_think) se carga en cada invocacion CLI
+- Archivo aurora-sp.md creado: version del agente sin front matter YAML
+
+**Resultado:** ver tiempo de esta ejecucion vs 394s (v2) y 1304s (v1).
+

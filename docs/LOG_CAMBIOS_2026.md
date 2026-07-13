@@ -1515,3 +1515,17 @@ existía el HARNESS.md pero Aurora no tenía configuración operativa como agent
   (qwen3.6:35b-a3b). Corregido en el archivo durante esta misma sesión.
 
 **Siguiente paso:** Validar Aurora con tarea real de documentación y evaluar calidad de output.
+
+
+## 2026-07-12 — Optimizacion de performance de Aurora y Ollama
+
+**Contexto:** Tras primera tarea real de Aurora (21m 44s), se identificaron y corrigieron causas de lentitud.
+
+**Cambios:**
+- aurora.md: agregado /no_think en system prompt (desactiva extended thinking de qwen3.6:27b)
+- aurora.md: protocolo de inicio actualizado — leer tail/grep en vez de archivos completos
+- aurora.md: regla de transferencia de contenido via /tmp explicitada
+- Ollama plist: OLLAMA_MAX_LOADED_MODELS 2 a 3, agregado OLLAMA_NUM_PARALLEL=2
+- Ollama reiniciado para aplicar nueva configuracion
+
+**Siguiente paso:** Medir tiempo de esta tarea como benchmark post-optimizacion.

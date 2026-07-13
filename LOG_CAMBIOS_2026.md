@@ -4,14 +4,14 @@
 ## 2026-07-12 — MiauNube: Migración NFS + accesos completos serverX (Mac Studio)
 
 ### Bug confirmado: SMB + macOS 26 Tahoe (build 25F71)
-- Síntoma:  en TODOS los directorios del share SMB
+- Síntoma: `fts_read: Permission denied` en TODOS los directorios del share SMB
 - RCA: macOS 26 bloquea getdents() (FILE_LIST_DIRECTORY) pero permite open() (FILE_TRAVERSE). DACL sintético Samba 4.19 incompatible con nuevo SMB client de Tahoe. NFS confirma que servidor y permisos son correctos.
 - Workaround: NFS para clientes macOS. SMB queda activo para Windows/iOS.
 
 ### Cambios serverX
-- smb.conf: eliminado parámetro obsoleto 
+- smb.conf: eliminado parámetro obsoleto `directory name cache size`
 - smb.conf: agregado share [MontuMS] → /home/x/MontuMS (read-only)
-- smb.conf: fix  (crash loop rpcd_classic en standalone)
+- smb.conf: fix `rpc_server:svcctl = disabled` (crash loop rpcd_classic en standalone)
 - /etc/exports: agregado /home/x/MontuMS como export explícito dedicado
 
 ### Mac Studio — Mounts NFS activos

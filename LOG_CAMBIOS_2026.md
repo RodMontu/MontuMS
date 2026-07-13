@@ -1,6 +1,33 @@
 
 ---
 
+## 2026-07-12 — MiauNube: Migración NFS + accesos completos serverX (Mac Studio)
+
+### Bug confirmado: SMB + macOS 26 Tahoe (build 25F71)
+- Síntoma:  en TODOS los directorios del share SMB
+- RCA: macOS 26 bloquea getdents() (FILE_LIST_DIRECTORY) pero permite open() (FILE_TRAVERSE). DACL sintético Samba 4.19 incompatible con nuevo SMB client de Tahoe. NFS confirma que servidor y permisos son correctos.
+- Workaround: NFS para clientes macOS. SMB queda activo para Windows/iOS.
+
+### Cambios serverX
+- smb.conf: eliminado parámetro obsoleto 
+- smb.conf: agregado share [MontuMS] → /home/x/MontuMS (read-only)
+- smb.conf: fix  (crash loop rpcd_classic en standalone)
+- /etc/exports: agregado /home/x/MontuMS como export explícito dedicado
+
+### Mac Studio — Mounts NFS activos
+- ~/MiauNube → 192.168.1.111:/mnt/extra
+- ~/MontuMS  → 192.168.1.111:/home/x/MontuMS  (acceso dedicado docs diarios)
+- ~/ServerX-Home → 192.168.1.111:/home/x
+- LaunchAgent: cl.montuschi.nfs.serverx.plist (RunAtLoad, 3 mounts)
+
+### Pendientes
+- MacBook Pro + Mac Pecas (NFS): sesión futura
+- sda WDC 931GB: LV sin montar — investigar separado
+- winuser Pecas: pendiente en smb.conf
+
+
+---
+
 ## 2026-07-02 — Reconstrucción completa VM windows11 (serverX) tras falla SSD abril
 
 ### Contexto
@@ -224,3 +251,124 @@ BACKLOG ESTRATÉGICO: Motor de aprendizaje plan vs real
   actualizar medianas rodantes en SQLite
 - Motor lee SQLite en vez de CSV congelado
 - Estado: diseño conceptual definido, impl pendiente
+
+═══════════════════════════════════════════════════
+FECHA: 2026-07-10
+PROYECTO: Migración serveri3 → Mac Studio + Consolidación agentes
+═══════════════════════════════════════════════════
+
+## Fase 0 — Backup pre-retiro de serveri3
+
+**Contexto:** serveri3 (gateway Cloudflare Tunnel + Pi-hole DNS) entra en retiro. Servicios migran a serverX y Mac Studio. Antes de desconectar nada, se hace backup completo del estado actual como punto de recuperación.
+
+**Cambios:**
+- Backup de configuración de serveri3 realizado antes del inicio de la migración
+- Se captura el estado de Cloudflare Tunnel, Pi-hole DNS, y config de agentes (Clawdio/hermes) en serveri3
+- **Dato pendiente:** IP exacta de serveri3 por confirmar (sección red del inventario a actualizar cuando se complete retiro total)
+
+**Hallazgos:**
+- Cadena de fallback de Clawdio documentada estaba desactualizada: la doc decía `model.default: gemini-2.5-flash` + fallback `llama3.1:8b` en serverX, pero la config real tenía `model.default: deepseek-v4-flash` (OpenRouter) + 3 fallbacks (`hermes-3-llama-3.1-405b`, `nemotron-3-super-120b-a12b`, `glm-5` vía ollama-cloud)
+- El fallback a serverX/llama3.1:8b documentado **nunca existió** en la config real al momento de revisar
+
+---
+
+## Fase 1 — Ollama + 5 modelos en Mac Studio M2 Max
+
+**Contexto:** Mac Studio M2 Max 96GB se convierte en nodo IA principal (IP `192.168.1.102`, user `montu`). Se instala Ollama y se descargan los modelos necesarios para todos los agentes.
+
+**Cambios:**
+- Ollama instalado en Mac Studio M2 Max (IP `192.168.1.102`)
+- Modelos descargados:
+  - `gpt-oss:20b` — Rabín (ganador del A/B, Fase 2)
+  - `qwen3.6:27b` — evaluado en el A/B de Rabín, no seleccionado
+  - `qwen3-coder:30b` — Carlitos
+  - `qwen3.6:35b-a3b` — Aurora + Risko
+  - `qwen3.5:9b` — Spinita (descargado, agente pendiente de levantar)
+- Mac Studio reemplaza a serveri3 como nodo IA principal
+
+**Hallazgos:**
+- Límite real de memoria GPU en M2 Max no es los 96GB completos — macOS no entrega toda la RAM a Metal/GPU. Modelo de 85GB (`qwen3.5:122b-a10b`) se derramó 95% a CPU, cayendo de 27.1 a 15.4 tok/s con contexto real
+- Alternativa técnica no aplicada: `sysctl iogpu.wired_limit_mb` para subir el límite manualmente
+
+---
+
+## Fase 2 — A/B Rabín (gpt-oss:20b ganador)
+
+**Contexto:** Se realizan pruebas comparativas entre modelos locales de Ollama y cloud (OpenRouter) para determinar el modelo óptimo para Rabín, buscando equilibrio entre calidad de respuesta y latencia.
+
+**Cambios:**
+- Prueba A/B entre múltiples modelos para Rabín
+- **Resultado:** `gpt-oss:20b` declarado ganador para Rabín
+- Modelo se queda como default en config de Rabín
+
+---
+
+## Fase 3 — Repunte de Rabín a modelo local
+
+**Contexto:** Después del A/B, se vuelve a Rabín al modelo local (`qwen3.5:122b-a10b` o equivalente). Se detecta contaminación de contexto por sesiones sin límite en el framework Hermes.
+
+**Cambios:**
+- Rabín repunta a modelo local
+- Se identifica mecanismo de contaminación transversal: `compression.enabled: false` en Hermes, sesiones que nunca se resetean solas
+- Rabín acumuló 89k tokens desde el 30-may (causó latencia)
+
+**Hallazgos:**
+- Contaminación de contexto afecta a **todos los agentes Hermes** (Rabín, Risko, futuros Aurora/Spinita). No es bug aislado, es de diseño del framework
+- Backlog: evaluar activar compresión de contexto o política de reset automático periódico
+
+---
+
+## Setup del alias Carlitos
+
+**Contexto:** Se configura y activa el agente Carlitos con personalidad propia, modelo local `qwen3-coder:30b`, y su bot correspondiente en Telegram.
+
+**Cambios:**
+- Bot Telegram `@Carlitos` creado/activado
+- Modelo default: `qwen3-coder:30b` (Ollama local, Mac Studio)
+- Protocolo de alias: nombre propio con mayúscula (personalidad definida)
+- Carlitos se suma a la lista de agentes reales: Rabín, Risko, Spinita (pendiente), Carlitos, Aurora
+
+**Aclaración nomenclatura:** "Clawdio" ya no es un agente real — quedó como apodo genérico del período OpenClaw→Hermes para referirse en conjunto a los agentes de IA. Los agentes reales hoy: **Rabín, Risko, Spinita (pendiente), Carlitos, Aurora.**
+
+---
+
+## Ciclo completo de Risko
+
+**Contexto:** Risko (instancia Hermes Agent para OP Risk) pasa por su propio ciclo de migración y optimización durante esta sesión.
+
+**Hallazgos previos al ciclo:**
+- Risko: `risko-gateway.service` completa, `HERMES_HOME=/home/i3/.risko/`, bot `@Risko_OP_bot`, modelo original `gemini-2.5-flash`. Desplegada 2026-05-05, **nunca llegó al INVENTARIO_MAESTRO ni LOG_CAMBIOS_2026.md principal** (despliegue en chat aislado)
+- Contenedor Docker fantasma `hermes-risko` (#3) corriendo desde 2026-06-03, compitiendo por el mismo token de Telegram que `risko-gateway.service`, causando conflictos de getUpdates. Compartía directorio `/home/i3/.risko` sin estado propio. **Detenido (no eliminado) esta sesión**
+- Nextcloud OP Risk: contenedor `op-risk-nextcloud`, puerto 8090, `docker-compose.nextcloud.yml` en `/srv/op-risk/`, datos en `/srv/op-risk/nextcloud-data/`, expuesto en `docs.risk.montuschi.cl`. 16 documentos indexados desde `/mnt/extra/OP Risk/`
+- voice-proxy.service: proxy de transcripción de la era OpenClaw (puerto 9877), detenido/deshabilitado 2026-04-18, reemplazado por `stt-proxy`. Archivo `.service` inactivo en disco — candidato a limpieza física
+
+**Cambios del ciclo Risko:**
+- Modelos: `qwen3.5:122b-a10b` → `qwen3.6:35b-a3b` (24GB, MoE, entra completo en GPU) por derrame a CPU con el 122b
+- Confirmado: 26.4s primera respuesta vs 2m2s anterior — **mejoría dramática**
+- Riesgo identificado como Gemini por contaminación de sesión del 30-may (resuelto durante ciclo)
+- Montu resolvió algo relacionado a `/sethome` en chat individual con Risko (pendiente que Montu explique detalle para registro correcto)
+
+**Diagnóstico de confiabilidad de Risko (4 puntos):**
+
+1. **Contaminación de contexto por sesiones sin límite** —mecanismo transversal: `compression.enabled: false` en Hermes, sesiones nunca se resetean solas
+2. **Identidad como Gemini** — sesión de Telegram del 30-may contaminó la configuración actual; Risko "se identificó como Gemini" hasta limpieza de contexto
+3. **Contenedor fantasma hermes-risko** — competía por token de Telegram con `risko-gateway.service`, causando getUpdates conflictivos. Detenido (no eliminado) 2026-07-10
+4. **Derrame a CPU del modelo 122b** — qwen3.5:122b-a10b derramó 95% a CPU, cayendo de ~27 tok/s a ~15 tok/s con contexto real; se resolvió cambiando a qwen3.6:35b-a3b (24GB MoE, entra completo en GPU)
+
+---
+
+## Aclaraciones de rol (sessión 2026-07-10)
+
+**Rol Aurora vs. Rabín resuelto (definitivo):**
+- **Aurora:** escribe documentación técnica (LOG_CAMBIOS, INVENTARIO_MAESTRO, commits a MontuMS) — **cero acceso** a documentación personal de Montu
+- **Rabín:** solo LEE documentación técnica (consulta/referencia, no escribe ahí); es dueño completo (lectura+escritura) de la documentación personal de Montu (tareas, ideas, notas)
+- Pendiente de definir: ¿el "solo lectura" de Rabín sobre lo técnico es una restricción de permisos Unix real, o una regla de comportamiento en su config?
+
+**Capacidad de localización Aurora:**
+- Requisito nuevo: Aurora debe poder responder dónde vive cierta información (¿dónde está X?)
+- Pendiente evaluar: RAG vectorial vs búsqueda de texto completo (ripgrep) sobre repo
+- **BACKLOG-AURORA-FASE2:** diseñar en su propia sesión, no bloqueante para que Aurora exista y documente hoy
+
+**Próximos items pendientes:**
+- Visual-Voice STT: benchmark mlx-whisper (large-v3 / large-v3-turbo / medium) — aún no ejecutado → documentar resultado + decisión final cuando se corra Fase 4
+- Disco RESPALDO_ARCA: desconectado (no perdido), ubicación fue ambigua en inventario → corregir estado a "desconectado, pendiente reconexión"

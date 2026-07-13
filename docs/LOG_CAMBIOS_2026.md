@@ -1,4 +1,19 @@
 ---
+## 2026-07-13: Incidente Visual-Voice — ExitCode 128 + STT ffmpeg missing
+
+### Parte 1 — Contenedor caído (NVML Driver Not Loaded)
+- **Síntoma:** HTTP 502 en https://visual-voice.montuschi.cl. Contenedor caído desde 2026-07-12 07:11 UTC (38h downtime).
+- **Root Cause:** docker-compose.yml tenía runtime: nvidia + deploy.resources.reservations.devices: [gpu]. GPU P104-100 está bajo vfio-pci (VFIO passthrough a VM Windows) → NVML no disponible en host → ExitCode=128 al crear la task.
+- **Fix:** Eliminados runtime: nvidia y bloque deploy.resources.reservations del compose /home/x/visual-voice/docker-compose.yml. Backup: docker-compose.yml.bak.20260713_*.
+- **Justificación:** Pipeline post-2026-07-10 no requiere GPU en serverX. Todo el cómputo IA reside en Mac Studio (STT mlx-whisper :8765, Ollama :11434 gpt-oss:20b, Metal M2 Max).
+
+### Parte 2 — STT 500 Error (ffmpeg no instalado en Mac Studio)
+- **Síntoma:** Transcripción OK en chunks S1-S6 (0-60min), S7-S11 retornaban vacío silencioso.
+- **Root Cause:** ffmpeg no estaba instalado en Mac Studio. stt-mac lo requiere internamente para preprocesar audio antes de mlx-whisper. Chunks 1-6 eran legibles nativamente; S7+ requirieron conversión → FileNotFoundError: ffmpeg → HTTP 500.
+- **Fix:** brew install ffmpeg (v8.1.2_1) en Mac Studio + launchctl kickstart -k gui/501/cl.montuschi.stt-mac.
+- **Aclaración arquitectural:** El .env de Visual-Voice tiene OLLAMA_BASE_URL=http://192.168.1.111:11434 (serverX, obsoleto — ignorado por el código). El main.py hardcodea http://192.168.1.102:11434 (Mac Studio). Ollama nunca corrió en serverX.
+- **Estado post-fix:** Contenedor Up, puerto 8502 LISTEN, stt-mac PID 35364 operativo, test HTTP 200 confirmado.
+
 ## 2026-06-01 — Setup escritorio virtual serverX + fix bridge Clawdio Mac
 
 **serverX — Nuevas instalaciones:**

@@ -384,6 +384,13 @@ volume)]
 - Puerto LAN: `192.168.1.111:8502`
 - Acceso público: `https://visual-voice.montuschi.cl`
 - Protegido por: Cloudflare Access (política "Acceso Autorizado")
+- **Runtime:** CPU-only en serverX (sin runtime nvidia — GPU P104-100 reservada para VFIO passthrough a VM Windows)
+- **Pipeline IA (100% Mac Studio 192.168.1.102):**
+  - STT: `mlx-whisper large-v3-mlx` vía FastAPI :8765 (launchd `cl.montuschi.stt-mac`)
+  - Dependencia: `ffmpeg` v8.1.2_1 instalado en Mac Studio (req. interno de stt-mac para preprocesar audio)
+  - LLM Pass 2 (actas): `gpt-oss:20b` vía Ollama :11434 (Metal M2 Max)
+  - Minutes model default: OpenRouter Nemotron Ultra (free), con fallback automático a Nemotron Super → DeepSeek V4 Flash
+- **Nota:** `.env` tiene `OLLAMA_BASE_URL=http://192.168.1.111:11434` (obsoleto, ignorado). `main.py` hardcodea `192.168.1.102:11434`.
 
 ---
 

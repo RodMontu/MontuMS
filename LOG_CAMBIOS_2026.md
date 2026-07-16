@@ -1,3 +1,52 @@
+## 2026-07-15 — Optimizacion Carlitos + Gap Documentacion Infra Jul 2026
+
+### Carlitos Optimizacion
+
+- **Problema:** cold start de 2m07s por respuesta trivial. RCA: `OLLAMA_KEEP_ALIVE` en default (5 min) descargaba el modelo qwen3-coder:30b (~19GB) de RAM entre invocaciones, forzando recarga desde disco en cada llamada.
+- **Fix LaunchAgent** (`~/Library/LaunchAgents/homebrew.mxcl.ollama.plist`, backup en `.bak.20260715`): agregado `OLLAMA_KEEP_ALIVE=-1` (modelo nunca se descarga) y `OLLAMA_NUM_PARALLEL=1`. Servicio reiniciado vía `launchctl bootout`/`bootstrap`.
+- **Nota:** la tarea original pedía también `OLLAMA_BACKEND=mlx` — descartado, no es una variable de entorno real de Ollama (confirmado vía `ollama serve --help`; Ollama corre sobre llama.cpp/GGML, no tiene backend MLX). No se agregó al plist.
+- **Nuevo modelo `carlitos`** creado desde `qwen3-coder:30b` con `num_ctx=16384`, `temperature=0.1`, `top_p=0.9` (Modelfile en `/tmp/Modelfile.carlitos`).
+- **CLAUDE.md** (`~/.claude/CLAUDE.md`): se agregó el bloque "COMPORTAMIENTO OVERNIGHT / AUTONOMO". No se aplicó el cambio "effortLevel: medium → low" solicitado porque esa cadena no existe en el archivo (verificado antes de editar). Mapeo de sucursales OptiFierro y resto del contenido preservado sin cambios.
+- **Benchmark** (`/tmp/bench_carlitos.txt`): primera llamada post-restart con `load_duration=13.08s` (esperado, RAM vacía tras reinicio del servicio). Segunda llamada: `load_duration=0.157s`, `eval_duration=0.159s`, **76.8 tok/s**, `ollama ps` confirma `UNTIL: Forever`. Cold start resuelto — el modelo queda residente en RAM indefinidamente.
+
+### Gap Documentacion (cambios Mayo-Julio 2026 no documentados)
+
+**Hardware nuevo:**
+- serveri3 **APAGADO FÍSICAMENTE** — servicios migrados a serverX
+- Mac Studio M2 Max es nodo primario IA y workstation: IP 192.168.1.102, user montu, serial DFW97WXJR6, macOS Tahoe 26.5, 96GB RAM, 38 GPU cores
+
+**Servicios migrados de serveri3 a serverX:**
+- cloudflared v2026.7.1 (systemd), Pi-hole (Docker :53), web/nginx (Docker :8080)
+- Hermes Rabín v0.14.0 (hermes-gateway.service --user, modelo gpt-oss:20b)
+- SearXNG (Docker :8888), op-risk-nextcloud (Docker :8090)
+- oprisk-backend (Docker red oprisk-net), pia-backend FastAPI (systemd :5000)
+- Visual-Voice (:8502) 100% local desde 2026-07-10
+- El Tablero (/srv/web/tablero/, externo tablero.montuschi.cl)
+- MCP Core (mcp-core-mcp-core-1, :8812)
+
+**Agentes IA en Mac Studio Ollama:**
+- Rabín: gpt-oss:20b, Telegram @pantero_bot, hermes-gateway.service en serverX
+- Risko: qwen3.6:35b-a3b, @Risko_OP_bot
+- Carlitos: modelo `carlitos` (qwen3-coder:30b), CLI alias, CLAUDE.md en ~/.claude/
+- Aurora: qwen3.6:27b, CLI, agent file ~/.claude/agents/aurora.md
+- Dev agents en ~/.claude/agents/: dev-tech-lead (qwen3.6:35b-a3b), dev-implementer/dev-debugger (qwen3-coder:30b), dev-refactorizador (qwen3.6:27b), dev-reviewer (gpt-oss:20b)
+
+**NFS Mounts Mac Studio (reemplaza SMB, bug macOS 26 Tahoe):**
+- ~/MiauNube → serverX /mnt/extra
+- ~/MontuMS → serverX /home/x/MontuMS
+- ~/ServerX-Home → serverX /home/x
+- LaunchAgent: cl.montuschi.nfs.serverx.plist (RunAtLoad: true)
+
+**agy Antigravity CLI v1.1.1** reemplaza Gemini CLI (eliminado 2026-06-18):
+- Ruta: /Users/montu/.local/bin/agy, modelo Gemini 3.5 Flash Medium
+- agy-headless-bridge v1.2.1 como MCP en claude_desktop_config.json
+
+**Visual-Voice pipeline 100% local desde 2026-07-10:**
+- STT: mlx-whisper large-v3-mlx en Mac Studio, FastAPI :8765, launchd cl.montuschi.stt-mac
+- Pass 1: qwen2.5:7b en serverX, Pass 2: gpt-oss:20b en Mac Studio
+
+> **Nota de consistencia:** esta entrada fue escrita por Carlitos, no por Aurora. Según `HALLAZGOS_DOCUMENTACION_PENDIENTE.md` y el protocolo acordado 2026-07-10, Aurora es quien debería mantener LOG_CAMBIOS_2026.md/INVENTARIO_MAESTRO.md; Carlitos normalmente no escribe aquí. Se hizo una excepción por instrucción directa de Montu — revisar si esta entrada requiere que Aurora la re-audite después.
+
 
 ---
 

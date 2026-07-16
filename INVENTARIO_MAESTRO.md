@@ -4,6 +4,49 @@
 
 ---
 
+
+## MAC STUDIO — Nodo Primario IA + Workstation (act 2026-07-15)
+
+**IP LAN:** 192.168.1.102 | **Usuario:** montu | **Serial:** DFW97WXJR6
+**macOS:** Tahoe 26.5 | **RAM:** 96GB unified | **CPU:** M2 Max | **GPU:** 38 cores | **SSD:** 1TB NVMe
+
+**Rol:** Nodo de inferencia IA local (Ollama), workstation diaria de Montu, terminal de orquestacion.
+
+### Ollama v0.31.1 - Modelos activos
+| Modelo | Agente | Uso |
+|---|---|---|
+| qwen3-coder:30b (via carlitos) | Carlitos CLI | Coding assistant |
+| qwen3.6:35b-a3b | dev-tech-lead, Risko | Razonamiento complejo |
+| qwen3.6:27b | Aurora, dev-refactorizador | Documentacion, refactoring |
+| gpt-oss:20b | Rabin (Hermes en serverX) | Asistente personal |
+
+**LaunchAgent** homebrew.mxcl.ollama (Homebrew):
+OLLAMA_KEEP_ALIVE=-1, OLLAMA_NUM_PARALLEL=1, OLLAMA_FLASH_ATTENTION=1,
+OLLAMA_KV_CACHE_TYPE=q8_0, OLLAMA_HOST=0.0.0.0:11434, OLLAMA_MAX_LOADED_MODELS=2
+
+### Carlitos - Agente coding CLI
+- Binario: /Users/montu/.local/bin/claude --dangerously-skip-permissions
+- Modelo: carlitos (qwen3-coder:30b, num_ctx=16384, temp=0.1, top_p=0.9, keep_alive=-1)
+- CLAUDE.md: /Users/montu/.claude/CLAUDE.md
+- Agents dir: /Users/montu/.claude/agents/
+- Dev agents: dev-tech-lead (qwen3.6:35b-a3b), dev-implementer/dev-debugger (qwen3-coder:30b),
+  dev-refactorizador (qwen3.6:27b), dev-reviewer (gpt-oss:20b)
+
+### agy - Antigravity CLI (reemplaza Gemini CLI desde 2026-06-18)
+- Ruta: /Users/montu/.local/bin/agy | Version: v1.1.1
+- Modelo: Gemini 3.5 Flash Medium | Auth: Google One AI Pro (ce3wkc@gmail.com)
+- MCP: agy-headless-bridge v1.2.1 en claude_desktop_config.json
+- Herramientas: agy_ask, agy_research
+
+### NFS Mounts (reemplaza SMB - bug macOS 26 Tahoe bloquea getdents via SMB)
+| Mount Mac Studio | Origen serverX |
+|---|---|
+| ~/MiauNube | /mnt/extra |
+| ~/MontuMS | /home/x/MontuMS |
+| ~/ServerX-Home | /home/x |
+LaunchAgent: cl.montuschi.nfs.serverx.plist (RunAtLoad: true)
+SMB permanece activo en serverX para clientes Windows/iOS.
+
 ## SERVIDORES / EQUIPOS
 
 | Ítem | IP | Hostname | User | Rol actual | Estado |
@@ -164,6 +207,8 @@ Fixes aplicados 2026-07-12:
 ### HALLAZGOS DESEADOS POR SECCIÓN
 
 #### serveri3 (desafiliación)
+
+> **ESTADO 2026-07:** APAGADO FISICAMENTE. Todos los servicios migrados a serverX (192.168.1.111).
 - [ ] Confirmar IP exacta de serveri3 antes de eliminar del inventario
 - [ ] Migrar servicios Cloudflare Tunnel a otro nodo cuando se desconecte
 - [ ] Actualizar PLAN_MIGRACION sobre GPU P104-100 status (tenía "host por ahora" como default)

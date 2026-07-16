@@ -1,0 +1,8 @@
+# Archivos de sistema
+.DS_Store
+
+# Transcripciones (van a OP Risk Nextcloud, no aqui)
+*.txt
+
+# Copias locales del NAS
+miau_nube_copia/

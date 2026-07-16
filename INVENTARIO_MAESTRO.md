@@ -1,6 +1,6 @@
 # INVENTARIO_MAESTRO — Estado actual post-migración 2026-07-10
 
-Última actualización: 2026-07-12 (sesión NFS + Samba fixes + Mac Studio NAS)
+Última actualización: 2026-07-16 (reorganización LLMs Mac Studio + despliegue Risko hermes-risko.service)
 
 ---
 
@@ -12,17 +12,24 @@
 
 **Rol:** Nodo de inferencia IA local (Ollama), workstation diaria de Montu, terminal de orquestacion.
 
-### Ollama v0.31.1 - Modelos activos
+### Ollama v0.31.1 - Modelos activos (act. 2026-07-16)
 | Modelo | Agente | Uso |
 |---|---|---|
-| qwen3-coder:30b (via carlitos) | Carlitos CLI | Coding assistant |
-| qwen3.6:35b-a3b | dev-tech-lead, Risko | Razonamiento complejo |
-| qwen3.6:27b | Aurora, dev-refactorizador | Documentacion, refactoring |
-| gpt-oss:20b | Rabin (Hermes en serverX) | Asistente personal |
+| gemma3:27b (17GB) | Rabín, Risko (primario), dev-reviewer, of-reviewer | Asistente personal / OP Risk / revisión de código |
+| carlitos:latest (18GB, via alias carlitos) | Carlitos CLI | Coding assistant |
+| qwen3.6:35b-a3b (23GB) | Aurora, dev-tech-lead, of-tech-lead, delegación Rabín y Risko, dev-refactorizador, of-refactorizador | Razonamiento complejo / documentación / refactoring |
+| qwen3-coder:30b (18GB) | dev-implementer, dev-debugger, of-implementer, of-debugger | Coding subagents |
+| qwen3.5:9b (6.6GB) | fallback Hermes Rabín | Fallback |
+
+**Eliminados 2026-07-16** (69GB liberados, sin uso tras reorganización): gpt-oss:20b, qwen3.6:27b,
+qwen3.6:35b-a3b-mtp-q4_K_M, qwen3.6:27b-mtp-q4_K_M
 
 **LaunchAgent** homebrew.mxcl.ollama (Homebrew):
 OLLAMA_KEEP_ALIVE=-1, OLLAMA_NUM_PARALLEL=1, OLLAMA_FLASH_ATTENTION=1,
 OLLAMA_KV_CACHE_TYPE=q8_0, OLLAMA_HOST=0.0.0.0:11434, OLLAMA_MAX_LOADED_MODELS=2
+
+**LaunchAgent** cl.montuschi.ollama-warmup.plist (nuevo 2026-07-16):
+Precarga carlitos + gemma3:27b a 25s del inicio de sesión macOS (fix cold start Carlitos).
 
 ### Carlitos - Agente coding CLI
 - Binario: /Users/montu/.local/bin/claude --dangerously-skip-permissions
@@ -68,15 +75,15 @@ SMB permanece activo en serverX para clientes Windows/iOS.
 
 ---
 
-## AGENTES (estados FINAL confirmados)
+## AGENTES (estados FINAL confirmados, act. 2026-07-16)
 
 | Agente | Bot Telegram | Default Model | Ubicación | Estado |
 |--------|-------------|---------------|-----------|--------|
-| **Rabín** | — | `gpt-oss:20b` (Ollama local, Mac Studio) | Activo |
-| **Carlitos** | `@Carlitos` | `qwen3-coder:30b` (Ollama local, Mac Studio) | Activo |
-| **Aurora** | — | `qwen3.6:35b-a3b` (Ollama local, Mac Studio) | Activa (documentación) |
-| **Risko** | `@Risko_OP_bot` | `qwen3.6:35b-a3b` (Ollama local, Mac Studio) | Activo (OP Risk) |
-| **Spinita** | — | `qwen3.5:9b` descargado, agente no levantado | Pendiente de levantar |
+| **Rabín** | `@pantero_bot` | `gemma3:27b` primario, `qwen3.6:35b-a3b` delegación (Ollama local, Mac Studio) | `hermes-gateway.service` (serverX, HERMES_HOME=/home/x/.hermes) | Activo |
+| **Carlitos** | `@Carlitos` | `qwen3-coder:30b` (Ollama local, Mac Studio) | CLI (Mac Studio) | Activo |
+| **Aurora** | — | `qwen3.6:35b-a3b` (Ollama local, Mac Studio) | CLI (Mac Studio) | Activa (documentación) |
+| **Risko** | `@Risko_OP_bot` | `gemma3:27b` primario, `qwen3.6:35b-a3b` delegación (Ollama local, Mac Studio) | `hermes-risko.service` (serverX, HERMES_HOME=/home/x/.hermes-risko) | Activo — token Telegram pendiente |
+| **Spinita** | — | `qwen3.5:9b` descargado, agente no levantado | — | Pendiente de levantar |
 
 > **Nomenclatura:** "Clawdio" ya no es un agente real — apodo genérico del período OpenClaw→Hermes. Agentes reales con personalidad definida (nombre propio mayúscula): Rabín, Risko, Spinita, Carlitos, Aurora. Protocolo `cc+modelo` para futuros modelos cloud genéricos sin personalidad.
 
@@ -108,10 +115,10 @@ SMB permanece activo en serverX para clientes Windows/iOS.
 
 | Servicio | Ubicación | Modelo(s) | Estado | Notas |
 |----------|-----------|-----------|--------|-------|
-| **Rabín** | `HERMES_HOME` en serveri3 → migrar a Mac Studio/OT | gpt-oss:20b | Activo (en proceso de migración post-retiro serveri3) | Ganador del A/B, Fase 2 |
+| **Rabín** | `hermes-gateway.service` (systemd --user), `HERMES_HOME=/home/x/.hermes` | gemma3:27b primario, qwen3.6:35b-a3b delegación (Mac Studio Ollama) | Activo | Migración post-retiro serveri3 completada. Modelo actualizado 2026-07-16 (era gpt-oss:20b) |
 | **Carlitos** | — | qwen3-coder:30b (Mac Studio Ollama) | Activo | Setup completado en sesión 2026-07-10 |
 | **Aurora** | `~/MontuMS/harness/aurora/` | qwen3.6:35b-a3b (Mac Studio Ollama) | Activa | HARNESS.md definido, primera tarea: consolidar esta documentación |
-| **Risko** | `/home/i3/.risko/` (hermes-risko.service + container fantasma) | qwen3.6:35b-a3b | Activo | Contenedor fantasma hermes-risko detenido, no eliminado |
+| **Risko** | `hermes-risko.service` (systemd --user, nuevo 2026-07-16), `HERMES_HOME=/home/x/.hermes-risko` | gemma3:27b primario, qwen3.6:35b-a3b delegación (Mac Studio Ollama) | Activo — token @Risko_OP_bot pendiente | Reemplaza el despliegue anterior en `/home/i3/.risko/` (serveri3, apagado). Contenedor fantasma hermes-risko sigue detenido/no eliminado (serveri3, referencia histórica) |
 
 ---
 
@@ -219,6 +226,7 @@ Fixes aplicados 2026-07-12:
 
 | Fecha | Cambio | Sección afectada |
 |-------|--------|-----------------|
+| 2026-07-16 | Reorganización stack LLMs Mac Studio (Rabín/reviewer agents → gemma3:27b, Aurora/tech-lead/refactorizador → qwen3.6:35b-a3b, 69GB liberados). Warmup LaunchAgent nuevo. Risko desplegado como hermes-risko.service independiente (HERMES_HOME=/home/x/.hermes-risko), token Telegram pendiente. | MAC STUDIO, AGENTES, AGENTES EIS |
 | 2026-07-12 | Samba: share [MontuMS] nuevo, fix svcctl crash, smb.conf limpiado. NFS: export /home/x/MontuMS agregado. Mac Studio: 3 mounts NFS + LaunchAgent. Bug SMB+macOS26 Tahoe documentado. | ALMACENAMIENTO, NFS, Clientes |
 | 2026-07-10 | Migración serveri3→Mac Studio, Ollama + modelos, A/B Rabín, repunte local, Carlitos setup, Risko ciclo completo, contenedor hermes-risko detenido | Todo el inventario |
 | 2026-05-05 | Deploy original de Risko (risko-gateway.service) | AGENTES EIS (sin registrarse entonces en INVENTARIO) |

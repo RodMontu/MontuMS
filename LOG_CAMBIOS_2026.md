@@ -1,3 +1,48 @@
+## 2026-07-16 — Despliegue Risko como instancia Hermes independiente
+
+**Contexto:** @Risko_OP_bot existía como bot Telegram sin instancia Hermes propia.
+Se despliega como hermes-risko.service independiente en serverX.
+
+**Cambios:**
+- Creado /home/x/.hermes-risko/ con estructura completa (logs, skills, sessions, cache, memories, accounts, platforms/telegram)
+- Creado SOUL.md: identidad OP Risk, routing subagentes, equipo Montu/Yerko/Chepu
+- Creado .env: TELEGRAM_BOT_TOKEN pendiente, WHATSAPP_ENABLED=false, API keys genéricas (OPENROUTER, GEMINI/GOOGLE, BYTEROVER, STT, SEARXNG) copiadas de Rabín
+- Creado config.yaml: base Rabín (backup en /home/x/.hermes/config.yaml.bak_prerisko) + model.default=gemma3:27b, delegation.model=qwen3.6:35b-a3b (base_url http://192.168.1.102:11434/v1), display.personality=risko, agent.system_prompt=SOUL Risko, personalities.risko agregado. Editado con ruamel.yaml (round-trip, preserva formato) en vez de parser línea a línea, porque el system_prompt real usa un scalar YAML de comilla simple (no bloque `|`) y personalities: es una sección top-level separada de agent.personalities.
+- Creado hermes-risko.service (systemd --user, mismo venv de Rabín /home/x/.hermes/hermes-agent/venv/, diferenciado por HERMES_HOME=/home/x/.hermes-risko). NOTA: el binario /home/x/.local/bin/hermes asumido en el plan no existe — Rabín corre vía `python -m hermes_cli.main gateway run` desde su venv; no existe flag `--home`, solo env var HERMES_HOME.
+- Estado servicio: **ACTIVO** (systemctl --user is-active → active). Gateway corriendo, cron operativo.
+- Token @Risko_OP_bot: **PENDIENTE** — no se encontró un token separado en /home/x/.hermes/.env (solo existe el de @pantero_bot/Rabín). Telegram queda en retry loop rechazando el placeholder `PENDIENTE_TOKEN_RISKO_OP_BOT`. El gateway sigue activo igual (cron sigue funcionando sin plataformas conectadas).
+
+**Hallazgos:**
+- RCA de un fallo intermedio: el config.yaml copiado de Rabín traía la sección `whatsapp:` sin `enabled` explícito; el gateway igual intentaba levantar WhatsApp (sin sesión pareada) y abortaba con "non-retryable startup conflict" (exit 78/CONFIG). Fix: `WHATSAPP_ENABLED=false` en .env + `whatsapp.enabled: false` explícito en config.yaml (el código distingue un disable explícito en YAML de la ausencia de la clave, para evitar que un paso de re-enable automático lo reactive).
+- No existe `/home/x/.local/bin/hermes` ni flag `--home`; Hermes solo soporta selección de home vía `HERMES_HOME` env var.
+
+**Siguiente paso:** Montu debe proporcionar el token real de @Risko_OP_bot en /home/x/.hermes-risko/.env y correr `systemctl --user restart hermes-risko.service`. Configurar TELEGRAM_ALLOWED_USERS con los IDs del equipo OP Risk (Montu, Yerko, Chepu). Primera interacción vía Telegram.
+
+## 2026-07-16 — Reorganización stack LLMs Mac Studio + warmup fix Carlitos
+
+**Contexto:** Redistribución de modelos Ollama para eficiencia de memoria y coherencia
+arquitectónica de agentes. Fix de cold start de Carlitos mediante LaunchAgent de warmup.
+
+**Cambios:**
+- Hermes Rabín config.yaml: model.default gpt-oss:20b → gemma3:27b
+- Hermes Rabín config.yaml: delegation.model → qwen3.6:35b-a3b (http://192.168.1.102:11434/v1)
+- Agent file aurora.md: modelo qwen3.6:27b → qwen3.6:35b-a3b
+- Agent files dev-refactorizador.md, of-refactorizador.md: qwen3.6:27b → qwen3.6:35b-a3b
+- Agent files dev-reviewer.md, of-reviewer.md: gpt-oss:20b → gemma3:27b
+- Ollama Mac Studio — eliminados (69GB liberados): gpt-oss:20b, qwen3.6:27b,
+  qwen3.6:35b-a3b-mtp-q4_K_M, qwen3.6:27b-mtp-q4_K_M
+- gemma3:27b pulled a Mac Studio Ollama (17GB)
+- LaunchAgent /Users/montu/Library/LaunchAgents/cl.montuschi.ollama-warmup.plist:
+  precarga carlitos + gemma3:27b a 25s del inicio de sesión macOS
+
+**Hallazgos:**
+- Cold start Carlitos (~2min): carga inicial desde disco. KEEP_ALIVE=-1 mantiene modelos
+  calientes post-carga pero no precarga. El 0.3s previo era warm start, no cold start real.
+- /usr/local/bin/ollama no existe — binario real: /opt/homebrew/bin/ollama
+- Variantes mtp eliminadas (sin uso documentado en agents): qwen3.6:35b-a3b-mtp-q4_K_M, qwen3.6:27b-mtp-q4_K_M
+
+**Siguiente paso:** Validar primera interacción Rabín con gemma3:27b. Routing rules SOUL.md. Harness Aurora.
+
 ## 2026-07-15 — Optimizacion Carlitos + Gap Documentacion Infra Jul 2026
 
 ### Carlitos Optimizacion

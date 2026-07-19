@@ -1564,3 +1564,166 @@ existía el HARNESS.md pero Aurora no tenía configuración operativa como agent
 - aurora.md: modelo actualizado a gpt-oss:20b
 
 **Resultado esperado:** reduccion de 6.5 min a menos de 2 min si el cuello de botella era el thinking.
+
+---
+
+## 2026-07-18 — Optimización stack de inferencia local Mac Studio (PLAN-INFER-MS-01)
+
+**Contexto:** Ejecución de plan de optimización multi-fase para agentes Hermes/CLI sobre
+Ollama en Mac Studio M2 Max 96GB. Plan sintetizado desde deep research multi-IA (Qwen Studio,
+Gemini, ChatGPT, GLM) + análisis arquitectónico Opus 4.8. Ejecutado autónomamente por Miaude
+bajo protocolo Miaude-sin-Montu.
+
+**Cambios:**
+- /opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist (Cellar, fuente de verdad brew):
+  - OLLAMA_MAX_LOADED_MODELS: 2 a 3 (elimina swaps entre agentes con 4 modelos productivos)
+  - Agregado OLLAMA_KEEP_ALIVE=-1 (faltaba del Cellar, solo estaba en LaunchAgents)
+  - Agregado OLLAMA_NUM_PARALLEL=1 (idem)
+- Modelfile carlitos: num_ctx 16384 a 20480 (mayor contexto para archivos de codigo reales)
+  Recreado via ollama create carlitos -f /tmp/Modelfile.carlitos
+- ~/Library/LaunchAgents/ollama.carlitos.plist a .DISABLED
+  (causaba proceso zombie de ollama serve sin env vars correctas al boot)
+- ~/Library/LaunchAgents/cl.montuschi.ollama-warmup.plist: actualizado de 2 a 3 modelos
+  (carlitos + gemma3:27b + qwen3.6:35b-a3b)
+
+**Hallazgos:**
+- gpt-oss:20b y qwen3.6:27b NO estan presentes en Ollama Mac Studio (ver Ollama list).
+  Discrepancia con INVENTARIO_MAESTRO. Requiere verificacion de que modelos usan Rabin/Aurora.
+- brew services restart/start regenera el plist desde el Cellar, borrando cambios manuales
+  en ~/Library/LaunchAgents/. Regla documentada: editar SIEMPRE el plist del Cellar.
+- Prefix cache ya operativo antes de cambios (ratio 14.37x TTFT T1/T2). Fase 2 del plan
+  (orden de prompts) no requeria intervencion.
+- iogpu.wired_limit_mb=0 en macOS 26 Tahoe = administrado por SO. Fase 4 del plan cancelada.
+- Backend Ollama 0.31.1 en Apple Silicon = Metal nativo. No existe flag OLLAMA_MLX separado.
+  Fase 3 (MLX vs GGUF) = N/A para esta version.
+
+**Benchmark PRE vs POST (modelo: carlitos / qwen3-coder:30b Q4_K_M):**
+- TTFT cold: 2.041s a 1.669s (-18.2%)
+- TTFT warm (cache hit): 0.142s a 0.141s (sin cambio)
+- Decode tok/s: 82.3 a 67.1 (-18.5%, atribuible al aumento de num_ctx; sigue sobre meta >=40)
+- Calidad de respuesta: Excelente en ambos casos (sin degradacion)
+- Archivos benchmark: ~/bench/results/bench_PRE_20260718_155208.json y bench_POST_20260718_200422.json
+
+**Siguiente paso:** ver entrada 2026-07-19 — la discrepancia de modelos se investigo y resolvio.
+
+---
+
+## 2026-07-19 — Fix modelo primario Rabin/Risko + migracion Risko a perfil nativo
+
+**Contexto:** Rabin y Risko respondian siempre con qwen3.5:9b (fallback) en vez
+de su modelo primario configurado (gemma3:27b en ese momento).
+
+**Causa raiz 1 (confirmada con logs):** gemma3:27b no soporta tool-calling.
+Cada llamada de Hermes incluye herramientas por defecto (ej. ejecutar date),
+generando HTTP 400 "gemma3:27b does not support tools" y forzando fallback
+a qwen3.5:9b en cada turno.
+
+**Fix 1:** modelo primario de Rabin y Risko cambiado de gemma3:27b a
+qwen3.6:35b-a3b (MoE, 3B parametros activos, soporta tools+thinking, ya
+usado como subagente de analisis de ambos). Cambio en el campo
+model.default de /home/x/.hermes/config.yaml (Rabin) y config.yaml de Risko.
+
+**Causa raiz 2 (confirmada con evidencia de codigo y verificacion con hash):**
+Hermes Agent reescribe su propio unit file de systemd en cada arranque segun
+HERMES_HOME. Risko vivia en /home/x/.hermes-risko (directorio hermano, no
+reconocido como "perfil nativo" bajo /home/x/.hermes/profiles/), causando que
+Hermes calculara mal el nombre de servicio y sobreescribiera el unit file de
+hermes-gateway.service (Rabin) cada vez que Risko arrancaba. Esto producia
+conflictos de PID, gateway.lock compartido, y caidas en cascada.
+
+**Fix 2 (migracion de datos en produccion):**
+- Backup en frio: servicios detenidos, tar czf, exit code 0, 57 archivos,
+  ~9MB. Ubicacion: /home/x/hermes-risko-backup-pre-migracion.tar.gz
+  (se mantiene, no eliminar sin autorizacion explicita de Montu)
+- Movido /home/x/.hermes-risko a /home/x/.hermes/profiles/risko
+- Actualizado hermes-risko.service con las nuevas rutas
+- Verificacion critica: md5sum de hermes-gateway.service identico antes y
+  despues de reiniciar hermes-risko.service. Confirma fix de raiz, no parche.
+- Verificado con "hermes profile list" y "hermes profile show risko":
+  ambos perfiles con modelo qwen3.6:35b-a3b, gateway running, rutas correctas.
+
+**Fix 3 — experimento de reasoning_effort (aprendizaje documentado):**
+Se probo reasoning_effort=low en el bloque agent de ambos configs, con la
+hipotesis de mejorar adherencia a instrucciones del SOUL (anti-voseo,
+anti-alucinacion). Resultado: calidad mejoro pero el tiempo de segunda
+respuesta empeoro severamente (Risko: ~6s a ~28s; Rabin: ~11s a ~14s) porque
+cada respuesta, incluso un saludo, pagaba el costo de un ciclo de
+razonamiento oculto. Se revirtio a reasoning_effort vacio manteniendo el
+guardrail textual del SOUL (ver Fix 4). Con esa combinacion se confirmo en
+pruebas reales: calidad se mantiene, velocidad vuelve a ser rapida
+(Risko ~11s, Rabin ~18s en segunda respuesta).
+Conclusion: el guardrail textual explicito es suficiente por si solo para
+este caso de uso. No activar reasoning_effort en agentes conversacionales
+de baja latencia salvo necesidad especifica de una tarea.
+
+**Fix 4 — guardrails agregados al SOUL de Rabin y Risko:**
+- Regla anti-voseo explicita: prohibido vos/tenes/queres/sabes/podes/haces
+  (formas rioplatenses). Tutear siempre tu/tienes/quieres. Espanol chileno
+  sin excepcion.
+- Guardrail de auto-descripcion: al preguntar que modelo/infraestructura
+  usan, responder SOLO con datos verificados (qwen3.6:35b-a3b, proveedor
+  custom, infraestructura privada). Prohibido inventar detalles tecnicos
+  adicionales.
+
+**Discrepancia de modelos, resuelta:** el INVENTARIO_MAESTRO previo
+documentaba gpt-oss:20b (Rabin) y qwen3.6:27b (Aurora) como modelos activos.
+Verificacion confirma que NINGUNO de los dos existe. Stack real verificado:
+gemma3:27b, carlitos (Modelfile custom sobre qwen3-coder:30b, num_ctx 20480),
+qwen3-coder:30b (base, contexto completo), qwen3.6:35b-a3b (23GB, ahora
+primario de Rabin/Risko y subagente de analisis), qwen3.5:9b (fallback).
+
+**Version de Hermes Agent:** documentada como v0.14.0, verificacion previa
+sugirio v0.18.2 instalada. PENDIENTE DE VERIFICACION FORMAL.
+
+---
+
+## 2026-07-19 — Aurora: alias roto (modelo eliminado) + Modelfile de contexto
+
+**Contexto:** Al intentar delegar una tarea de documentacion a Aurora, se
+descubrio que el alias Aurora en .zshrc apuntaba a qwen3.6:27b-mtp-q4_K_M,
+variante eliminada en la reorganizacion de modelos del 2026-07-16/17. El
+alias fallaba silenciosamente (modelo no encontrado en Ollama).
+
+**Hallazgo adicional:** el archivo /Users/montu/.claude/agents/aurora.md
+(formato de subagente de Claude Code) NO es el que Aurora usa realmente.
+La invocacion real vive en el alias de .zshrc, que carga el SOUL via
+--system-prompt-file apuntando a /Users/montu/.claude/aurora-sp.md — un
+archivo distinto, sin relacion operativa con agents/aurora.md. Cualquier
+edicion futura al harness de Aurora debe hacerse en aurora-sp.md.
+
+**Fix del alias — primer intento:** corregido a apuntar a qwen3.6:35b-a3b
+directo (mismo modelo ahora usado por Rabin/Risko). Al probar con una tarea
+real de documentacion, el proceso hizo timeout a los ~20 minutos sin
+completar nada (git status limpio, sin commit). Diagnostico: qwen3.6:35b-a3b
+estaba cargado en Ollama con CONTEXT=262144 (maximo, sin recortar) — el
+mismo patron de sobrecosto ya documentado en las sesiones 2026-07-12/13
+(Aurora con qwen3.6:27b sin thinking desactivable, 21m44s en su primera
+tarea real).
+
+**Prueba de aislamiento de causa:** se ejecuto una tarea de complejidad
+comparable (3 llamadas SSH + lectura + escritura de archivo) via Carlitos
+(qwen3-coder:30b, contexto recortado a 20480, sin capacidad de thinking).
+Resultado: 332 segundos (5m32s), completado sin errores. Descarta que el
+hardware o "los modelos locales en general" sean la causa — el problema es
+especifico a la combinacion modelo-con-thinking + contexto sin recortar.
+
+**Fix definitivo:** creado Modelfile custom "aurora" sobre qwen3.6:35b-a3b
+(mismos pesos, sin costo adicional de disco) con num_ctx recortado a 32768.
+Alias actualizado para usar el modelo "aurora" en vez de qwen3.6:35b-a3b
+directo. Validado con la misma tarea de prueba usada para Carlitos:
+225 segundos (3m45s), completado sin errores — incluso mas rapido que
+Carlitos en la misma tarea.
+
+**Nota para consideracion futura:** el historial de este mismo documento
+(sesiones 2026-07-12/13) ya habia identificado que qwen3.6 (27b en ese
+entonces) tiene extended thinking dificil de desactivar via prompt, y que
+gpt-oss:20b resolvia el problema por no tener thinking en absoluto. Ese
+modelo ya no existe en el stack. El fix de contexto recortado resolvio el
+problema en esta prueba puntual; si en tareas reales mas largas/complejas
+el thinking vuelve a ser un cuello de botella, la alternativa historica
+probada es usar un modelo sin capacidad de thinking en absoluto para el
+rol de Aurora, en vez de intentar suprimir el thinking de un modelo que
+si lo tiene.
+
+**BACKLOG-MS-OLLAMA-01 — cerrado:** discrepancia de modelos investigada y
+resuelta (ver arriba). Warmup e inventario actualizados con el stack real.

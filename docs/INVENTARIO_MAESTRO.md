@@ -1,5 +1,87 @@
 # DOCUMENTO TÉCNICO MAESTRO
 
+
+## ESTADO ACTUAL VERIFICADO (act. 2026-07-19)
+
+**NOTA:** las secciones mas abajo en este documento (fechadas 2026-05/2026-07-02)
+describen una infraestructura ANTERIOR (Rabin/Risko/Espinita sobre Gemini 2.5 Flash
+en serveri3, antes de la migracion a Mac Studio + Hermes en serverX). Estan
+desactualizadas y pendientes de un refresco completo. Esta seccion documenta el
+estado real, verificado directamente, al 2026-07-19.
+
+### Mac Studio M2 Max — inferencia local (Ollama)
+
+**Motor:** Ollama 0.31.1, backend Metal nativo, 77.8 GiB disponibles a GPU.
+**Fuente de verdad de configuracion:** /opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist
+(Cellar — brew services regenera SIEMPRE desde aqui, no editar LaunchAgents directo).
+
+Variables activas: OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0,
+OLLAMA_KEEP_ALIVE=-1, OLLAMA_MAX_LOADED_MODELS=3, OLLAMA_NUM_PARALLEL=1.
+
+**Modelos instalados (verificado con ollama list, 2026-07-19):**
+
+| Modelo | Tamano | num_ctx | Uso |
+|---|---|---|---|
+| gemma3:27b | 17GB | 131072 | sin rol asignado activo por ahora |
+| carlitos (Modelfile) | 18GB (comparte pesos con qwen3-coder:30b) | 20480 | Carlitos, dev-implementer/debugger, of-implementer/debugger |
+| qwen3-coder:30b | 18GB (base) | 262144 | dev-implementer/debugger via contexto completo cuando se requiere |
+| qwen3.6:35b-a3b | 23GB, MoE 3B activos | 262144 (default) | Rabin y Risko (primario, desde 2026-07-19), subagente de analisis de ambos, dev-tech-lead/of-tech-lead, dev-refactorizador/of-refactorizador |
+| aurora (Modelfile) | comparte pesos con qwen3.6:35b-a3b | 32768 | Aurora (gestion documental), creado 2026-07-19 tras timeout con contexto sin recortar |
+| qwen3.5:9b | 6.6GB | — | fallback |
+
+**NO existen en el stack (documentados antes, confirmado eliminados):**
+gpt-oss:20b, qwen3.6:27b, qwen3.6:27b-mtp-q4_K_M, qwen3.6:35b-a3b-mtp-q4_K_M.
+
+### Agentes Hermes (Rabin, Risko) — estado verificado 2026-07-19
+
+| Agente | HERMES_HOME | Modelo primario | Servicio systemd |
+|---|---|---|---|
+| Rabin | /home/x/.hermes | qwen3.6:35b-a3b | hermes-gateway.service |
+| Risko | /home/x/.hermes/profiles/risko | qwen3.6:35b-a3b | hermes-risko.service |
+
+Ambos con reasoning_effort vacio (deshabilitado — ver LOG_CAMBIOS 2026-07-19 para
+el porque). SOUL de ambos incluye guardrail anti-voseo (chileno obligatorio, sin
+formas rioplatenses) y guardrail anti-alucinacion de auto-descripcion (deben
+responder con datos verificados sobre su modelo/infraestructura, nunca inventar).
+
+**Regla critica:** Risko DEBE vivir bajo /home/x/.hermes/profiles/<nombre> (perfil
+nativo de Hermes). Si se crea una instancia nueva de Hermes en un directorio
+hermano (ej. /home/x/.hermes-otro), Hermes reescribe el unit file de
+hermes-gateway.service en cada arranque de esa instancia, causando caidas en
+cascada. Backup de la migracion de Risko conservado en
+/home/x/hermes-risko-backup-pre-migracion.tar.gz (no eliminar sin autorizacion).
+
+### Agente Carlitos y agentes dev-* (Claude Code, subagentes locales)
+
+Invocacion real: alias de shell en ~/.zshrc (ANTHROPIC_BASE_URL apuntando a
+Ollama local + --model + --dangerously-skip-permissions), NO el mecanismo de
+subagentes nativo de Claude Code (subagent_type via Task tool) — se confirmo
+el 2026-07-19 que los archivos en ~/.claude/agents/*.md no estan registrados
+como subagent_type invocable en sesiones -p no interactivas.
+
+**Aurora especificamente:** el archivo ~/.claude/agents/aurora.md NO es el
+harness real. El harness real es ~/.claude/aurora-sp.md, cargado via
+--system-prompt-file en el alias `Aurora` de .zshrc.
+
+### CLAUDE.md global (Mac Studio, ~/.claude/CLAUDE.md)
+
+Reducido de 72 a ~60 lineas (2026-07-19): removidas referencias a serveri3
+como host de Hermes (ya no aplica) y bloques especificos de proyecto
+(OptiFierro V2, Visual-Voice) — movidos a CLAUDE.md por proyecto. Ver
+LOG_CAMBIOS para el detalle completo de que se reorganizo.
+
+### Discrepancias pendientes de verificacion formal
+
+- Version exacta de Hermes Agent instalada: documentada historicamente como
+  v0.14.0, indicio de v0.18.2 real (posible auto-update). No confirmado con
+  pip show en esta sesion.
+- Todas las secciones de este documento fechadas antes de 2026-07-16 describen
+  la infraestructura previa a la migracion a Mac Studio y deben tratarse como
+  historicas, no como estado actual, hasta que se haga un refresco completo.
+
+---
+
+
 ## Mi Infraestructura TI
 
 **Fecha de actualización:** 2 de mayo de 2026

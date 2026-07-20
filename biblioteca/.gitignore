@@ -1,0 +1,3 @@
+catalogo.db
+*.db
+__pycache__/

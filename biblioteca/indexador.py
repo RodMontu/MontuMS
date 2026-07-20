@@ -19,6 +19,17 @@ SCHEMA_PATH = BASE_DIR / "schema.sql"
 # el campo 'archivo' guarda la ruta relativa a MONTUMS_ROOT para no pisarse.
 SCAN_DIRS = [MONTUMS_ROOT, MONTUMS_ROOT / "docs"]
 
+# Carpetas que NUNCA deben indexarse, aunque queden dentro de SCAN_DIRS
+# (defensa en profundidad: hoy el glob no es recursivo asi que no las toca,
+# pero si SCAN_DIRS o el glob cambian a futuro, esto evita que se cuelen).
+# miau_nube_copia/ es una copia local del NAS, no documentacion propia de
+# MontuMS. biblioteca/ es el propio sistema de indexado y no debe auto-indexarse.
+EXCLUDE_DIRS = {"miau_nube_copia", "biblioteca"}
+
+
+def _excluido(path: Path) -> bool:
+    return bool(EXCLUDE_DIRS & set(path.relative_to(MONTUMS_ROOT).parts[:-1]))
+
 HEADER_RE = re.compile(r"^(#{2,3})\s+(.*)$")
 
 
@@ -181,7 +192,7 @@ def encontrar_markdowns(solo_archivo: str | None) -> list[Path]:
         if not d.exists():
             continue
         encontrados.extend(sorted(d.glob("*.md")))
-    return encontrados
+    return [p for p in encontrados if not _excluido(p)]
 
 
 def limpiar_huerfanos(conn: sqlite3.Connection) -> int:

@@ -1875,3 +1875,17 @@ artefacto).
 reutilizar en el futuro - la logica ya esta validada (funciono una vez y
 produjo resultados coherentes), solo falta que quede efectivamente guardado
 en disco.
+
+## 2026-07-19 — "La Biblioteca" Fase 1 completa: servidor MCP dedicado + hardening
+
+**Contexto:** Implementación de un servidor MCP dedicado para el catálogo documental de MontuMS ("La Biblioteca"), separado del stack previo, y limpieza de duplicados de documentación en la raíz del repo.
+
+**Cambios:**
+- biblioteca-mcp: servidor MCP nuevo y dedicado en /home/x/ws/biblioteca-mcp/, puerto 8813, expone `buscar_tema`, `obtener_ultima_version`, `registrar_cambio`, `buscar_credencial`. Probado end-to-end con cliente MCP real.
+- Hardening (revisión de agy): WAL mode + timeout en SQLite (evita bloqueos lectura/escritura concurrente), columna `seccion` NOT NULL (cierra bug de duplicados silenciosos), manejo de errores en las 4 funciones MCP.
+- Consolidación de documentación: se eliminaron los duplicados `INVENTARIO_MAESTRO.md` y `LOG_CAMBIOS_2026.md` que existían en la raíz de MontuMS (commit 1aeb1da, 945 líneas eliminadas). `docs/` queda como única fuente de verdad.
+- Re-corrido el indexador tras la consolidación: 64 filas huérfanas eliminadas del catálogo correspondientes a esos archivos de la raíz.
+
+**Hallazgos:** mcp-core (compose: /home/x/ws/mcp-core, listado como activo en la actualización del 01 Abril 2026) fue confirmado como eliminado por completo — contenedor e imagen, no solo detenido. Su último log real es de abril, sin relación con esta implementación; no se reconstruyó. Se actualizó la sección "Stack Docker ServerX" de INVENTARIO_MAESTRO.md para reflejar esto.
+
+**Siguiente paso:** ninguno indicado explícitamente por Montu/Miaude para esta fase; commit de estos cambios en docs/ queda pendiente de confirmación explícita antes de aplicarse.

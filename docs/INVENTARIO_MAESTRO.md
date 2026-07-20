@@ -854,7 +854,7 @@ Contenedores activos (10):
 - web nginx (compose: /home/x/stack/web)
 - retroassembly (compose: /home/x/stack/retroassembly)
 - visual-voice (compose: /home/x/visual-voice)
-- mcp-core (compose: /home/x/ws/mcp-core)
+- ~~mcp-core (compose: /home/x/ws/mcp-core)~~ — **ELIMINADO** (contenedor e imagen eliminados por completo, no solo detenidos; último log real de abril 2026, sin relación con "La Biblioteca". No se reconstruyó — actualizado 2026-07-19, ver sección "La Biblioteca — biblioteca-mcp" más abajo)
 
 Contenedores pausados (volúmenes intactos):
 - pegas x2 (compose: /home/x/stack/pegas) — modificar antes de relanzar
@@ -866,6 +866,15 @@ Contenedores eliminados permanentemente (decisión 01/04/2026):
 Clawdio (openclaw-gateway, @pantero_bot) reside en **serveri3**, NO en serverX.
 Compose: /srv/openclaw/openclaw en serveri3 (192.168.1.211)
 NO levantar en serverX bajo ninguna circunstancia.
+
+### La Biblioteca — biblioteca-mcp (Fase 1 completa, 2026-07-19)
+Servidor MCP dedicado para el catálogo documental de MontuMS.
+- **Ubicación:** /home/x/ws/biblioteca-mcp/ (código), /home/x/MontuMS/biblioteca/ (catálogo.db, mcp_tools/, indexador, clasificador)
+- **Puerto:** 8813 (localhost)
+- **Herramientas expuestas (MCP):** buscar_tema, obtener_ultima_version, registrar_cambio, buscar_credencial
+- **Estado:** probado end-to-end con cliente MCP real
+- **Hardening (revisión de agy):** WAL mode + timeout en SQLite (evita bloqueos lectura/escritura concurrente), columna `seccion` NOT NULL (cierra bug de duplicados silenciosos), manejo de errores en las 4 funciones MCP
+- **Relación con mcp-core:** ninguna — mcp-core fue un contenedor previo, eliminado por completo (imagen incluida), sin actividad desde abril 2026; ver nota en "Stack Docker ServerX" más arriba
 
 ## Incidente Gateway serverX — 2026-04-07
 - Síntoma: serverX sin internet (ENETUNREACH). Ruta default desapareció en runtime.

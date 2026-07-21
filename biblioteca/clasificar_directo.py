@@ -24,7 +24,13 @@ Reglas:
   {"resumen": "resumen breve en espanol de 1-2 lineas", "tags": ["tag1", "tag2"]}
 - Los tags deben ser palabras o frases cortas relevantes al contenido
   (nombres de servicios, IPs, proyectos, tecnologias mencionadas).
-- No agregues explicaciones ni comentarios fuera del JSON."""
+- No agregues explicaciones ni comentarios fuera del JSON.
+
+REGLA CRITICA PARA TABLAS Y LISTAS:
+Si el contenido es una tabla (filas con |), lista bullets, o enumeracion con multiples items:
+el resumen DEBE describir en 1-2 frases de que trata la tabla y que compara o enumera.
+Ejemplo: "Tabla con 5 alias SSH (sshi3, sshx, sshto) y sus destinos correspondientes".
+NUNCA copies las filas, ni |---|, ni contenido crudo. El resumen es SINTESIS en prosa."""
 
 
 def _extraer_json(texto: str) -> dict:

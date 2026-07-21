@@ -39,3 +39,10 @@
   - Tiempo promedio: ~27s por sección
   - Tags generados: agentes IA, modelos, stack, coordinación
 
+- [x] agentes.md (5 secciones completadas)
+- [x] convenciones.md (7 secciones completadas)
+- [ ] handoff_actual.md
+- [ ] proyectos.md
+- [ ] README.md (raíz)
+
+Procesado hasta: convenciones.md. Stack actualizado en MacBook → serverX.

@@ -162,10 +162,7 @@ def indexar_archivo(conn: sqlite3.Connection, path: Path) -> int:
             """
             INSERT INTO documentos (archivo, seccion, resumen, tags, fecha_actualizacion, tipo)
             VALUES (?, ?, ?, ?, ?, 'documento')
-            ON CONFLICT(archivo, seccion) DO UPDATE SET
-                resumen = excluded.resumen,
-                tags = excluded.tags,
-                fecha_actualizacion = excluded.fecha_actualizacion
+            ON CONFLICT(archivo, seccion) DO NOTHING
             """,
             (archivo_rel, seccion, resumen, ",".join(tags), fecha),
         )

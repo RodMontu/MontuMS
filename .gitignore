@@ -1,5 +1,6 @@
 # Archivos de sistema
 .DS_Store
+._*
 
 # Transcripciones (van a OP Risk Nextcloud, no aqui)
 *.txt

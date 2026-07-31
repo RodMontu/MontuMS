@@ -72,9 +72,13 @@ LOG_CAMBIOS para el detalle completo de que se reorganizo.
 
 ### Discrepancias pendientes de verificacion formal
 
-- Version exacta de Hermes Agent instalada: documentada historicamente como
+- Version exacta de Hermes Agent instalada: ~~documentada historicamente como
   v0.14.0, indicio de v0.18.2 real (posible auto-update). No confirmado con
-  pip show en esta sesion.
+  pip show en esta sesion.~~ **RESUELTO 2026-07-30:** confirmada v0.19.0
+  (2026.7.20) "The Quicksilver Release" via pip show y `hermes --version`.
+  El salto de v0.14.0 → v0.18.2 → v0.19.0 tuvo un auto-update intermedio
+  (v0.14.0 → v0.18.2) que nunca quedo registrado en LOG_CAMBIOS_2026.md —
+  gap de trazabilidad a tener presente hacia adelante.
 - Todas las secciones de este documento fechadas antes de 2026-07-16 describen
   la infraestructura previa a la migracion a Mac Studio y deben tratarse como
   historicas, no como estado actual, hasta que se haga un refresco completo.
@@ -889,8 +893,8 @@ Servidor MCP dedicado para el catálogo documental de MontuMS.
 
 ## 8. CLAWDIO — Ecosistema Multi-Agente IA
 
-**Host principal:** serveri3 (192.168.1.211, usuario i3)
-**Framework:** Hermes Agent v0.14.0
+**Host principal:** serverX (192.168.1.111, usuario x) — corregido 2026-07-30, esta sección databa de antes de la migración y decía serveri3
+**Framework:** Hermes Agent v0.19.0 (2026.7.20 "The Quicksilver Release")
 **Nombre del Sistema:** Clawdio (Alias fonético Mi TI: **"Miaude"**)
 
 ### Arquitectura Multi-Agente (desde 2026-06-03)
@@ -908,8 +912,9 @@ Servidor MCP dedicado para el catálogo documental de MontuMS.
 
 ### 8.1 Rabín — Asistente Personal
 
-**Host:** serveri3 (192.168.1.211, usuario i3)
-**Framework:** Hermes Agent v0.14.0**Bot Telegram:** @pantero_bot (Alias: **"Clawdio Rabín"** o "Rabín")
+**Host:** serverX (192.168.1.111, usuario x) — corregido 2026-07-30
+**Framework:** Hermes Agent v0.19.0 (2026.7.20 "The Quicksilver Release")
+**Bot Telegram:** @pantero_bot (Alias: **"Clawdio Rabín"** o "Rabín")
 **Bot Alertas TI:** @clawdio_dev_local_bot (Alias: **"Clawdio Dev"**)
 **Usuarios:** Montu (ID: 8357148621) + Pecas (ID: 8328037199)
 **Despliegue:** systemd `hermes-gateway.service` (no Docker)

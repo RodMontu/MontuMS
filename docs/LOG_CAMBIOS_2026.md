@@ -1,4 +1,23 @@
 ---
+
+## 2026-07-30 — Upgrade Hermes Agent en serverX (Rabín) de v0.18.2 a v0.19.0
+
+**Contexto:** Montu solicito research comparando la version instalada de Hermes Agent contra las release notes de NousResearch/hermes-agent para verificar si habia actualizaciones relevantes pendientes.
+
+**Cambios:**
+- Version anterior real: v0.18.2 (2026.7.7.2), confirmada via `pip show` dentro del venv `/home/x/.hermes/hermes-agent/venv`. Nota: INVENTARIO_MAESTRO.md la documentaba historicamente como v0.14.0 — discrepancia por auto-update que nunca quedo registrado en LOG_CAMBIOS.
+- Version nueva: v0.19.0 (2026.7.20) "The Quicksilver Release", confirmada via `pip show` y `hermes --version` post-upgrade (estado "Up to date").
+- Comando ejecutado: `pip install --upgrade hermes-agent` dentro del venv, luego `systemctl --user restart hermes-gateway.service`.
+- Verificacion post-upgrade: servicio activo y estable.
+
+**Hallazgos:**
+- approvals.mode se mantuvo en "manual" (no fue sobreescrito por el nuevo default "smart approvals" que introduce v0.19.0).
+- Telegram conecto limpio al primer intento, sin el loop de reconexion/TimedOut observado antes del upgrade.
+- Warning de WhatsApp "not paired, no creds.json" persiste igual que antes del upgrade (preexistente desde 28-jul, no relacionado a esta accion).
+- Se confirmo que el salto v0.14.0 → v0.18.2 fue un auto-update intermedio que nunca quedo registrado en LOG_CAMBIOS_2026.md — gap de trazabilidad a tener presente hacia adelante.
+
+**Siguiente paso:** ninguno por ahora; servicio estable tras upgrade.
+
 ## 2026-07-13: Incidente Visual-Voice — ExitCode 128 + STT ffmpeg missing
 
 ### Parte 1 — Contenedor caído (NVML Driver Not Loaded)

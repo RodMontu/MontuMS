@@ -1908,3 +1908,19 @@ en disco.
 **Hallazgos:** mcp-core (compose: /home/x/ws/mcp-core, listado como activo en la actualización del 01 Abril 2026) fue confirmado como eliminado por completo — contenedor e imagen, no solo detenido. Su último log real es de abril, sin relación con esta implementación; no se reconstruyó. Se actualizó la sección "Stack Docker ServerX" de INVENTARIO_MAESTRO.md para reflejar esto.
 
 **Siguiente paso:** ninguno indicado explícitamente por Montu/Miaude para esta fase; commit de estos cambios en docs/ queda pendiente de confirmación explícita antes de aplicarse.
+## 2026-08-04 — Fix: carlitos (qwen3-coder:30b) sin output vía Claude Code
+
+**Contexto:** carlitos devolvía exit 0 con texto vacío en toda invocación real via Claude Code. ollama run carlitos y ollama run qwen3-coder:30b colgaban indefinidamente sin tools declaradas.
+
+**Cambios:**
+- Root cause: el Modelfile de carlitos tenia PARAMETER num_ctx 20480. El system prompt mas el toolset completo que Claude Code envia en cada turno pesa entre 21500 y 23000 tokens, mas que el contexto disponible. llama-server truncaba el prompt (truncating input prompt limit=10242 prompt=21504 keep=4 new=10242), destruyendo la estructura del chat-template.
+- Se descartaron las hipotesis de corrupcion de blob o bug de renderer/parser de Ollama 0.31.1 verificando el modelo base qwen3-coder:30b sano via 6 tests directos por api/generate, api/chat y v1/messages, con y sin tools, streaming y no streaming.
+- Fix aplicado: num_ctx de 20480 a 65536 en el Modelfile de carlitos, via ollama create carlitos -f modelfile editado en Mac Studio.
+- Verificado con 2 pruebas reales consecutivas via bin/carlitos, ambas devuelven texto correcto (OK, LISTO), sin truncamiento en log (n_ctx_slot = 65536, prompt completo procesado).
+
+**Hallazgos:** dev-implementer y dev-debugger usan el tag base qwen3-coder:30b directo, no carlitos, por lo que no tienen este num_ctx fijo y no comparten este bug deterministico. No confirmado si sufren starvation de contexto bajo presion de VRAM con multiples modelos Forever cargados.
+
+**Backlog agregado:** BACKLOG-CARLITOS-01 — monitorear latencia de 85 a 107 segundos en frio por invocacion -p aislada de carlitos, por reuso parcial de prompt-cache entre llamadas sueltas (conv_id vacio cada vez). Evaluar en uso real de sesion continua si sigue siendo un problema.
+
+**Siguiente paso:** ninguno bloqueante. Fix cerrado y verificado.
+

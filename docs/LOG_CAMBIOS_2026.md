@@ -2046,3 +2046,28 @@ en disco.
 **Rollback disponible:** N/A -- no se modifico nada (intento de pip upgrade fue no-op, confirmado antes y despues).
 
 **Pendiente que abre:** BACKLOG-HERMES-01 -- decidir con Montu: instalar Node 26 en serverX + elegir canal de reinstalacion (Docker recomendado por aislamiento) para llegar a v0.20.0 Herald. Ver resumen de opcionales en el chat del 2026-08-12.
+
+## 2026-08-12 (cont.) — Hermes Agent v0.14.0 -> v0.20.0 Herald — Migracion pip -> instalador nativo EJECUTADA
+
+**Autorizacion:** Montu confirmo explicitamente proceder de forma autonoma con el entendimiento de que Rabin/Risko no se estaban usando hoy (downtime aceptable).
+
+**Cambio ejecutado:**
+1. Backup completo pre-cambio: ~/backups/hermes/hermes_backup_20260812_145715.tar.gz (176MB, config.yaml + .env + profiles/ + todo excepto venv/.git)
+2. Servicios detenidos limpiamente (hermes-gateway, hermes-risko)
+3. Eliminado SOLO ~/.hermes/hermes-agent/ (venv pip viejo) -- config.yaml, .env, profiles/risko, state.db, memory_store.db, clawdio_db.sqlite, SOUL.md, skills/, credentials/, whatsapp/session/ NO se tocaron (viven en ~/.hermes/ directamente)
+4. Instalador oficial (curl install.sh) corrido -- reinstalo Node/Python/uv de forma aislada en ~/.hermes/, NO toco el Node de sistema (sigue en v22.22.2, irrelevante ahora)
+5. Config y .env detectados y conservados automaticamente por el instalador; skills sincronizadas (16 nuevas, 52 actualizadas, google-workspace modificado por usuario preservado)
+6. Unidades systemd (hermes-gateway.service, hermes-risko.service) NO requirieron cambios -- misma ruta de venv
+7. Ambos servicios reiniciados y verificados: activos, sin crash-loop, Telegram reconectado en ambos, sin errores nuevos post-reinicio
+
+**Version final:** hermes-agent v0.20.0 (2026.8.3) "The Herald Release" -- confirmado via `hermes --version`
+
+**Hallazgo pre-existente (NO causado por este cambio):** WhatsApp de Rabin (hermes-gateway) no esta pareado -- ~/.hermes/platforms/whatsapp/session/ vacio, "external bridge left running" en shutdown. Esto ya estaba asi antes de tocar nada. Pendiente: `hermes whatsapp` para re-parear si se quiere WhatsApp activo, o remover WHATSAPP_ENABLED del .env si no se usa.
+
+**Espinita:** sigue sin ubicarse en serverX tras la migracion (no aparecio ningun servicio/config nuevo). Pendiente confirmar con Montu donde vive.
+
+**Rollback disponible:** SI -- ~/backups/hermes/hermes_backup_20260812_145715.tar.gz contiene el estado completo pre-migracion. Para revertir: detener servicios, restaurar tar, reinstalar hermes-agent==0.19.0 via pip en un venv nuevo, apuntar systemd de vuelta.
+
+**Nuevas capacidades disponibles desde v0.20.0 (no configuradas, requieren decision/setup):** voz conversacional con wake words, protocolo A2A v1.0, webhooks salientes firmados, skill de citas verificadas/fact-checking, plugin SDK del desktop app. Ver resumen conversacional del 2026-08-12 para detalle.
+
+**Cierra:** BACKLOG-HERMES-01 (bloqueo Node26+canal resuelto -- el instalador maneja Node de forma aislada, no fue necesario tocar el sistema)

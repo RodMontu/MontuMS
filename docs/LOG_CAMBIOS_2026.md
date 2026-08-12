@@ -1924,3 +1924,125 @@ en disco.
 
 **Siguiente paso:** ninguno bloqueante. Fix cerrado y verificado.
 
+
+## 2026-08-05 — [FASE 0] Arquitectura IA Local — Estabilizar memoria y medir
+
+**Nodo:** Mac Studio M2 Max (192.168.1.102)
+**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §7 Fase 0
+
+**Cambio realizado:**
+- Bajado proceso huerfano de Ollama (carlitos:latest con num_ctx=20480 desactualizado, corriendo en paralelo a la version ya corregida con num_ctx=65536).
+- OLLAMA_KEEP_ALIVE=30m y OLLAMA_MAX_LOADED_MODELS=1 fijados en el plist autoritativo (/opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist). brew services restart ollama aplicado.
+- Linea base de latencia capturada: Carlitos 97.4s (antes 102.68s), Aurora 66.75s (antes 74s).
+- Observacion de 30 min (15 muestras): compresor 1.0-1.7GB estable, swapouts 552 constante sin crecimiento.
+
+**Estado de memoria post-cambio:**
+- Modelos residentes: 0 en reposo (keep_alive finito, expiran solos)
+- RAM en uso / compresor / swapouts: 66GB (0 modelos cargados) / 0.99-1.7GB / 552 estable
+
+**Criterio de salida de la fase:** PARCIAL, con correccion de metrica documentada
+- Memoria en uso < 60GB en reposo: NO CUMPLIDO en lectura literal (66GB) -- verificado independientemente (vm_stat + suma de RSS real de 877 procesos = 26.4GB) que el grueso es cache de archivos macOS ("Inactive", ~38GB), reclamable al instante, no memoria realmente ocupada. Metrica corregida para fases siguientes: presion de memoria / free+inactive, no "used" crudo de `top`.
+- Compresor < 5GB: CUMPLIDO (1.0-1.7GB)
+- Swapouts estables: CUMPLIDO (552 sin crecimiento en 30 min)
+- Ningun modelo con keep-alive Forever: CUMPLIDO
+
+**Rollback disponible:** si, trivial (recargar modelos con keep_alive anterior)
+
+**Pendiente que abre:** ninguno bloqueante. Correccion de criterio de memoria aplicada desde Fase 1 en adelante.
+
+---
+
+## 2026-08-06 — [FASE 1] Arquitectura IA Local — Runtime nuevo (llama.cpp + Qwen3-Coder-Next)
+
+**Nodo:** Mac Studio M2 Max (192.168.1.102)
+**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §3.2, §7 Fase 1
+
+**Cambio realizado:**
+- llama.cpp instalado via Homebrew, llama-server build 10280.
+- Modelo Qwen3-Coder-Next-80B-A3B, cuantizacion Q4_K_M, descargado desde unsloth/Qwen3-Coder-Next-GGUF (Hugging Face), 48528320544 bytes verificados, en ~/models/qwen3-coder-next-80b-a3b-Q4_K_M.gguf.
+- llama-server levantado en puerto 11500 (127.0.0.1), ctx-size 131072, cache-type-k/v q8_0, cache-reuse 256, flash-attn on, slot-save-path ~/llama-slots. Ollama (11434) sin tocar, sin conflicto.
+
+**Estado de memoria post-cambio:**
+- Modelos residentes: 1 (Qwen3-Coder-Next Q4_K_M, ~49.4GB RSS del proceso llama-server)
+- RAM en uso / compresor / swapouts: dentro de rango, sin degradacion observada
+
+**Criterio de salida de la fase:** CUMPLIDO (5/5)
+- curl directo: respuesta valida -- CUMPLIDO
+- Tool-calling (10 llamadas): 10/10 JSON valido vs umbral >=9/10 -- CUMPLIDO
+- TTFT en frio: 8.16s vs umbral <20s -- CUMPLIDO
+- TTFT en caliente (mismo prefijo): 0.55s vs umbral <3s -- CUMPLIDO (numero decisivo del proyecto, contra los 102.68s originales de Carlitos)
+- Decode: 50.69 tok/s vs umbral >=15 tok/s -- CUMPLIDO
+
+**Rollback disponible:** si, trivial (apagar llama-server, cero impacto en Ollama/flujo existente)
+
+**Pendiente que abre:** ninguno bloqueante. Nota: durante el benchmark aparecio una vez la advertencia de re-procesamiento completo por cache vacia (SWA/hybrid), atribuida a cache fria inicial -- validado en profundidad en Fase 2.
+
+---
+
+## 2026-08-06 — [FASE 2] Arquitectura IA Local — Pi contra el runtime nuevo
+
+**Nodo:** Mac Studio M2 Max (192.168.1.102)
+**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §3.3, §3.4, §7 Fase 2
+
+**Cambio realizado:**
+- Pi (@mariozechner/pi-coding-agent v0.73.1) instalado via npm, configurado contra llama-server local (127.0.0.1:11500) en ~/.pi/agent/models.json. NOTA: paquete deprecado en favor de @earendil-works/pi-coding-agent (mismo autor, rename de scope) -- pendiente decidir cual usar en la instalacion definitiva de Fase 4.
+- Repo de prueba desechable ~/pi_test_fase2/, rama pi-fase2-test, main intacta -- no se toco ningun repo real (MontuMS, OptiFierro).
+- Sesion real de 9 turnos incrementales (CRUD FastAPI + tests + refactor + README), creciendo hasta ~29.3K tokens de historial real.
+
+**Estado de memoria post-cambio:** sin cambios respecto a Fase 1 (mismo llama-server, mismo modelo residente)
+
+**Criterio de salida de la fase:** CUMPLIDO
+- TTFT turno N>=2 con sesion en ~30K tokens <= 5s: CUMPLIDO (max medido 1.65s en turno 9, ~29.3K tokens)
+- Tarea completada sin intervencion manual: CUMPLIDO (15/15 tests pasan, 5 endpoints + README escritos end-to-end por Pi)
+- Advertencia de re-procesamiento completo (SWA/hybrid) durante crecimiento incremental turno a turno: NO reaparecio en turnos 2-9 (~27.7K tokens adicionales) -- solo aparecio en el arranque de sesion (turno 1, cache vacia), consistente con lo esperable, no con el riesgo temido.
+
+**Rollback disponible:** si (flujo actual con Carlitos/Aurora sigue intacto, sin tocar)
+
+**Pendiente que abre:** decidir nombre de paquete definitivo de Pi (@mariozechner vs @earendil-works) antes de Fase 4.
+
+---
+
+## 2026-08-06 — [FASE 3] Arquitectura IA Local — LiteLLM como fachada unica
+
+**Nodo:** Mac Studio M2 Max (192.168.1.102) / serverX (192.168.1.111)
+**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §7 Fase 3
+
+**Cambio realizado:**
+- Tunel SSH inverso persistente Mac Studio -> serverX (autossh, 127.0.0.1:11500), empaquetado como LaunchAgent macOS com.montu.ssh-tunnel-serverx.plist (RunAtLoad+KeepAlive). Se descarto rebindear llama-server a la LAN + regla pf por quedar fuera de alcance de ejecucion autonoma (modificacion de configuracion de seguridad del sistema); el tunel SSH evita tocar el firewall del Mac.
+- LiteLLM proxy desplegado en Docker en serverX (/home/x/litellm/), network_mode host, puerto 4141 (4000 estaba ocupado por proceso ajeno "nxd", no tocado). Ruta local-qwen3-coder-next-80b -> http://127.0.0.1:11500/v1 (via tunel), timeout 180s. Master key en /home/x/litellm/.master_key (chmod 600, solo en serverX, nunca en texto plano fuera de ahi).
+- Rutas OpenRouter/Anthropic: NO configuradas -- revisado /home/x/.vault/, sin credenciales reales pobladas (solo .example vacio). Pendiente si se agregan credenciales.
+- Logging estructurado activado en LiteLLM.
+
+**Estado de memoria post-cambio:** sin cambios respecto a Fase 1/2
+
+**Criterio de salida de la fase:** CUMPLIDO
+- Backend caido produce error visible y logueado: CUMPLIDO. Prueba real: kill a llama-server -> LiteLLM devolvio HTTP 500 con stack trace completo en ~5.5s (litellm.InternalServerError, OpenAIException Connection error, 2 reintentos automaticos), NO cuelgue silencioso -- fix directo del incidente original de 9+ horas colgadas sin error, documentado en la Lista Negra §9.1 del plan.
+- llama-server reiniciado con la config exacta de Fase 1/2 (nuevo PID), confirmado operativo. Tunel SSH nunca se cayo durante la prueba.
+
+**Rollback disponible:** si (Ollama, Carlitos, Aurora, flujo actual sin tocar; 13 contenedores de produccion existentes en serverX no tocados)
+
+**Pendiente que abre:** BACKLOG-LITELLM-01 -- agregar credenciales reales de OpenRouter/Anthropic al vault cuando esten disponibles, para completar rutas de fallback a nube.
+
+## 2026-08-12 — Hermes Agent — Auditoria de version + intento de actualizacion (Rabin/Risko)
+
+**Nodo:** serverX (192.168.1.111)
+**Contexto:** Solicitud de Montu (fuera de pantalla) para investigar la ultima actualizacion de Hermes Agent (Nous Research) y actualizar "lo nuestro" de forma autonoma.
+
+**Diagnostico (solo lectura, previo a cualquier cambio):**
+- Rabin (hermes-gateway.service) y Risko (hermes-risko.service): ambos activos y sanos, corriendo desde 2026-07-31, comparten el mismo venv pip en /home/x/.hermes/hermes-agent/venv
+- Version instalada real: hermes-agent 0.19.0 (memoria previa decia v0.14.0 -- desactualizada, alguien actualizo sin dejar registro aqui)
+- Node.js en serverX: v22.22.2. Sin nvm/n instalado.
+- Espinita: NO se encontro servicio systemd, proceso, ni config bajo ningun patron razonable (~/.hermes, busqueda global por "espinita"). Requiere confirmar con Montu donde vive realmente.
+- Log de Rabin muestra un error de red de Telegram (Bad Gateway) el 2026-08-04, autorresuelto -- no es un problema activo hoy.
+
+**Cambio intentado:** `pip install -U hermes-agent` en el venv compartido (Rabin+Risko).
+**Resultado:** NO-OP. PyPI ya sirve 0.19.0 como ultima version -- confirmado que Nous Research dejo de publicar wheels nuevas a PyPI (documentado oficialmente: el canal pip/Homebrew se retira a partir de v0.20.0). No hay upgrade incremental seguro disponible por este canal.
+
+**Bloqueo real identificado (requiere decision de Montu, NO ejecutado):**
+- Ultima release: v0.20.0 "Herald" (2026-08-03) -- voz conversacional, protocolo A2A v1.0, webhooks salientes firmados, citas verificadas, plugin SDK desktop.
+- Requiere Node 26 (no presente) + migrar el canal de instalacion de pip/venv a shell installer, Docker o Nix (cambio de arquitectura, no un simple update).
+- Se considero fuera de alcance de ejecucion autonoma: toca runtime de sistema + reinstalacion completa de servicios de produccion (Rabin/Risko, con alcance familiar/de negocio) sin supervision.
+
+**Rollback disponible:** N/A -- no se modifico nada (intento de pip upgrade fue no-op, confirmado antes y despues).
+
+**Pendiente que abre:** BACKLOG-HERMES-01 -- decidir con Montu: instalar Node 26 en serverX + elegir canal de reinstalacion (Docker recomendado por aislamiento) para llegar a v0.20.0 Herald. Ver resumen de opcionales en el chat del 2026-08-12.

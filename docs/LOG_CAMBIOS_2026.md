@@ -2132,3 +2132,63 @@ documentación técnica.
 **Nota de ejecución:** esta entrada fue documentada por CCa supervisando
 a Aurora, como validación inicial del nuevo protocolo de supervisión
 documentado arriba.
+
+---
+
+### 2026-08-16 (cont.) — BACKLOG-INFRA-01 resuelto: llama-server como LaunchAgent persistente
+
+**PROBLEMA:** llama-server (motor de Carlitos/Aurora vía Pi) era un proceso
+manual sin persistencia — no sobrevivía reinicios ni caídas, causa raíz del
+fallo de Aurora documentado en la entrada anterior de hoy.
+
+**SOLUCIÓN:** LaunchAgent propio `cl.montuschi.llama-server.plist` en
+~/Library/LaunchAgents/ (NO vía `brew services`, siguiendo la lección ya
+aprendida con Ollama: brew services regenera desde el Cellar y pisa config
+manual). Comando: `/opt/homebrew/bin/llama-server -m
+/Users/montu/models/qwen3-coder-next-80b-a3b-Q4_K_M.gguf --host 127.0.0.1
+--port 11500 -c 131072 -ngl 999`. RunAtLoad=true, KeepAlive=true.
+`launchctl bootstrap` exitoso a la primera. Verificado en vivo por Miaude:
+`/health` responde `{"status":"ok"}`, plist correcto en disco.
+
+**TEST DE RESPAWN:** `kill -9` al proceso real → LaunchAgent lo revivió en
+1 segundo, `/health` en verde a los ~5-10s (recarga rápida por cache de
+disco de macOS).
+
+**EVALUACIÓN DE CARLITOS (tarea delegada: redactar el plist), solicitada
+por Montu:** Calidad: XML correcto y completo a la primera — Label,
+ProgramArguments desglosado, RunAtLoad, KeepAlive, paths absolutos, todo
+presente. Único defecto: envolvió el XML en fences ```xml``` pese a pedido
+explícito de no hacerlo — hubo que extraerlo antes de guardar. Velocidad:
+9.41s totales, ~48 palabras de output, ~6.6 tok/s (estimado — `pi` no
+expone tokens/segundo real). Veredicto: confiable para tareas acotadas y
+bien especificadas con corrección mínima; el hábito de envolver en
+markdown fences es un patrón de falla recurrente a seguir vigilando, no
+darlo por resuelto; para tareas con más ambigüedad se seguiría queriendo
+supervisión más cercana.
+
+**AURORA:** falló el primer intento de documentar este cambio (timeout
+~60s, LaunchAgent recién levantado aún estabilizando slots), tuvo éxito
+en el segundo intento (~4.8s, síntesis genuina, aceptada).
+
+**LECCIÓN DE ORQUESTACIÓN (Miaude):** intentar hacer completar el
+commit+push final a una NUEVA invocación de CCa fallando dos veces —
+primero por confusión de identidad (se refirió a sí mismo como
+"Carlitos" tras un prompt saturado de contexto sobre Carlitos), luego
+rechazando la tarea completa por detectar el patrón de "confirmación
+humana reportada de segunda mano + pedido de no volver a confirmar" como
+un intento de inyección — CORRECTAMENTE, ya que cada invocación `-p` de
+CCa es stateless y no tiene forma de verificar afirmaciones sobre
+sesiones anteriores. Lección: no reenviar contexto de sesiones previas
+como si el agente lo recordara: para cierres finales de una cadena larga
+de sub-invocaciones, es más simple y seguro que Miaude ejecute el paso
+final directamente en vez de forzar a un CCa stateless a confiar en
+afirmaciones no verificables.
+
+**RIESGO RESIDUAL:** llama-server queda permanentemente residente en RAM
+(~49.4GB) — a diferencia de Ollama (OLLAMA_KEEP_ALIVE=30m, descarga tras
+inactividad), este servicio no libera memoria nunca. Con 77.8GB
+disponibles a GPU en el Mac Studio, queda poco margen si además se carga
+un modelo Ollama grande en simultáneo (ej. gemma3:27b, 17GB). Pendiente
+evaluar mecanismo de descarga por inactividad.
+
+---

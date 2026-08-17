@@ -1245,12 +1245,12 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 ---
 
-## Stack de inferencia local nuevo — Mac Studio M2 Max (en validacion, Fase 4 pendiente)
-> Fases 0-3 de PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md completas y verificadas (2026-08-05/06, ver LOG_CAMBIOS). Fase 4 (corte real: migrar Carlitos/Aurora a perfiles de Pi, retirar Claude Code CLI vs Ollama, liberar ~40GB) NO ejecutada aun -- Carlitos y Aurora (tabla de Agentes Hermes Hub arriba) siguen operativos en su configuracion actual hasta que se autorice el corte.
+## Stack de inferencia local nuevo — Mac Studio M2 Max (Fase 4 EJECUTADA 2026-08-16)
+> Fases 0-3 de PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md completas y verificadas (2026-08-05/06, ver LOG_CAMBIOS). Fase 4 (corte real: migrar Carlitos/Aurora a perfiles de Pi, retirar Claude Code CLI vs Ollama) EJECUTADA el 2026-08-16 en dos partes: (a) alias de shell ya apuntaban a ~/bin/Aurora y ~/bin/Carlitos (wrappers Pi) desde antes; (b) BACKLOG-INFRA-01 cerrado hoy: llama-server pasó de proceso manual a LaunchAgent persistente `cl.montuschi.llama-server.plist` (RunAtLoad+KeepAlive, test de respawn verificado en 1s). Ver LOG_CAMBIOS_2026.md 2026-08-16 para el detalle completo, incluyendo evaluación de desempeño de Carlitos.
 
 | Componente | Version | Puerto | Servicio | Huella |
 |---|---|---|---|---|
-| llama-server (llama.cpp) | build 10280 | 11500 (127.0.0.1) | proceso manual, pendiente empaquetar como launchd en Fase 4 | ~49.4GB RAM |
+| llama-server (llama.cpp) | build 10280 (10360 disponible, no actualizado) | 11500 (127.0.0.1) | LaunchAgent cl.montuschi.llama-server.plist (RunAtLoad+KeepAlive), desde 2026-08-16 | ~49.4GB RAM, permanente (sin idle-unload) |
 | Qwen3-Coder-Next-80B-A3B Q4_K_M | unsloth GGUF | -- | ~/models/ | 45.2GB disco |
 | Pi coding agent | @mariozechner/pi-coding-agent 0.73.1 | -- | CLI, ~/.pi/agent/models.json | -- |
 | Tunel SSH (Mac -> serverX) | autossh | 11500 reenviado | LaunchAgent com.montu.ssh-tunnel-serverx | -- |

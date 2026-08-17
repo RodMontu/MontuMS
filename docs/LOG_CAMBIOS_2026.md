@@ -2192,3 +2192,41 @@ un modelo Ollama grande en simultáneo (ej. gemma3:27b, 17GB). Pendiente
 evaluar mecanismo de descarga por inactividad.
 
 ---
+
+---
+
+### 2026-08-16 (cont.) — Idle-unload de 15 min agregado a llama-server (mitiga riesgo residual de BACKLOG-INFRA-01)
+
+**MOTIVADOR:** Montu detectó en vivo, vía la app Mac Studio Monitor (en
+desarrollo, no documentada aún), que llama-server quedaba permanentemente
+en ~51.6GB de RAM tras el despliegue de hoy — el riesgo residual que ya
+se había anotado en la entrada anterior, ahora visible en la práctica.
+
+**SOLUCIÓN:** llama.cpp (esta build, 10280) tiene flag nativo
+`--sleep-idle-seconds N` (default -1 = deshabilitado) — no hizo falta
+construir un watcher propio. Agregado al plist
+`cl.montuschi.llama-server.plist` con N=900 (15 minutos, decisión
+explícita de Montu — no 30, con criterio de "ajustar hacia arriba si
+hace falta, no al revés").
+
+**VALIDACIÓN EMPÍRICA (antes de comprometerlo a producción):** se probó
+primero con `--sleep-idle-seconds 8` en un proceso manual aparte:
+- RSS recién iniciado: 150MB (no carga hasta la primera consulta real).
+- Tras un `/v1/chat/completions` real: RSS sube a 51.1GB.
+- Tras 15s de idle (> umbral de 8s): RSS baja a 265MB — el log confirma
+  el ciclo `entering sleeping state` → `exiting sleeping state` →
+  `loading model` (recarga automática al llegar la siguiente consulta).
+- Costo de despertar: ~2.7s de recarga antes de procesar el primer
+  request tras dormir — latencia a tener presente, no es instantáneo.
+
+**DESPLIEGUE FINAL:** plist actualizado con `--sleep-idle-seconds 900`,
+redeployado via `launchctl bootstrap`, `/health` verde, RSS en ~51GB
+tras la carga inicial de RunAtLoad. Se dormirá solo tras 15 min sin uso.
+
+**Nota de ejecución:** a diferencia de las entradas anteriores de hoy,
+esta se ejecutó directamente por Miaude (sin CCa), por eficiencia —
+tarea acotada y de bajo riesgo, y para evitar el patrón de fricción
+observado en el cierre de BACKLOG-INFRA-01 con invocaciones stateless
+de CCa sin contexto compartido.
+
+---

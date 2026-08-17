@@ -1250,7 +1250,7 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 | Componente | Version | Puerto | Servicio | Huella |
 |---|---|---|---|---|
-| llama-server (llama.cpp) | build 10280 (10360 disponible, no actualizado) | 11500 (127.0.0.1) | LaunchAgent cl.montuschi.llama-server.plist (RunAtLoad+KeepAlive), desde 2026-08-16 | ~49.4GB RAM, permanente (sin idle-unload) |
+| llama-server (llama.cpp) | build 10280 (10360 disponible, no actualizado) | 11500 (127.0.0.1) | LaunchAgent cl.montuschi.llama-server.plist (RunAtLoad+KeepAlive), desde 2026-08-16 | --sleep-idle-seconds 900 (duerme tras 15min sin uso, recarga en ~2.7s al despertar; validado empíricamente 2026-08-16) |
 | Qwen3-Coder-Next-80B-A3B Q4_K_M | unsloth GGUF | -- | ~/models/ | 45.2GB disco |
 | Pi coding agent | @mariozechner/pi-coding-agent 0.73.1 | -- | CLI, ~/.pi/agent/models.json | -- |
 | Tunel SSH (Mac -> serverX) | autossh | 11500 reenviado | LaunchAgent com.montu.ssh-tunnel-serverx | -- |

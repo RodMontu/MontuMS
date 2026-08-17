@@ -2071,3 +2071,64 @@ en disco.
 **Nuevas capacidades disponibles desde v0.20.0 (no configuradas, requieren decision/setup):** voz conversacional con wake words, protocolo A2A v1.0, webhooks salientes firmados, skill de citas verificadas/fact-checking, plugin SDK del desktop app. Ver resumen conversacional del 2026-08-12 para detalle.
 
 **Cierra:** BACKLOG-HERMES-01 (bloqueo Node26+canal resuelto -- el instalador maneja Node de forma aislada, no fue necesario tocar el sistema)
+
+---
+
+### 2026-08-16 — QRO (Qwen Desktop) incorporado a la MS + RCA Fetch cerrado + corrección de flujo de documentación
+
+**QRO OPERATIVO:** Qwen Chat Desktop (Alibaba) instalado y configurado en
+Mac Studio (192.168.1.102) como TERCER CEREBRO de la MS, rol "QRO".
+App Electron cliente MCP puro sobre chat.qwen.ai — NO expone servidor
+propio, Miaude NO puede invocarlo programáticamente. Interfaz Miaude↔QRO
+es manual: Montu copia/pega (handoff). Modelo: Qwen3.8-Max (GA
+03-ago-2026, MoE 2.4T params, ~95B activos, 1M contexto), tier consumidor
+gratuito, no consume tokens Anthropic. System Prompt "QRO" cargado y
+persistente (toggle "Habilitar en nuevo chat" activo).
+
+MCP oficiales activos: code-interpreter, fire-crawl, image-generation.
+MCP propio activo: Sequential-Thinking.
+
+HALLAZGO DE SEGURIDAD (resuelto): MCP `Filesystem` estaba activo con
+scope sin verificar — riesgo de exponer ~/MontuMS y mounts NFS a Alibaba
+Cloud. Desactivado por Montu.
+
+USOS PRIORITARIOS DE QRO: (1) red-team arquitectónico — revisor crítico
+independiente de diseños de Miaude, su valor es el DESACUERDO
+fundamentado, no la validación; (2) deep research y scraping web masivo
+vía fire-crawl, gratis; (3) análisis de contexto masivo (1M tokens);
+(4) borradores largos, traducciones, resúmenes extensos.
+NO usar para: ejecución en infraestructura productiva (sigue siendo
+CCa/agy), ni inferencia local (sigue siendo Carlitos/Aurora).
+
+REGLA DE DATOS INVIOLABLE: QRO opera SOLO con contexto de arquitectura.
+Nunca datos de cliente (Torres Ocaranza/OptiFierro), nunca datos de
+accidentabilidad nominados de OP Risk (Ley 21.719), nunca credenciales
+ni la bóveda /home/x/.vault/. La inferencia ocurre en Alibaba Cloud
+(jurisdicción CN).
+
+**RCA CERRADO — Fetch MCP (-32000 Connection closed):** causa raíz: `uvx`
+no instalado en Mac Studio (verificado con `which uvx` → not found; npx
+y node sí presentes en /opt/homebrew/bin/). El server Fetch requiere
+runner Python (uv/uvx) inexistente, el proceso hijo murió al instante.
+DECISIÓN: no remediar — `fire-crawl` (MCP oficial de Qwen, ya activo, sin
+dependencias locales) cubre la misma función. Entrada `Fetch` eliminada.
+REGLA DERIVADA: apps GUI de macOS no heredan el PATH del shell interactivo
+— solo ven el PATH del sistema. Todo MCP con runner de Homebrew debe
+configurarse con RUTA ABSOLUTA del binario, nunca el nombre pelado. Mismo
+patrón que ya motivó el wrapper `bash -lc` en Desktop Commander.
+
+**CORRECCIÓN DE FLUJO — Documentación técnica (importante, corrige
+conocimiento desactualizado):** Rabín (Clawdio, Hermes Gateway) YA NO
+documenta. El skill doc-updater y el flujo de commit+push atribuido
+anteriormente a Rabín quedaron OBSOLETOS. El flujo VIGENTE desde
+2026-08-16 es: Aurora clasifica y genera resumen+tags (invocación
+puntual vía /Users/montu/bin/aurora, nunca bulk ni bucle agéntico),
+SIEMPRE bajo supervisión de CCa como orquestador — porque Aurora aún no
+tiene confianza al 100% y requiere verificación de calidad antes de
+aceptar cualquier entrada al catálogo. Rabín mantiene su canal MCP con
+Miaude (clawdio, telegram:8357148621) solo para notificaciones, no para
+documentación técnica.
+
+**Nota de ejecución:** esta entrada fue documentada por CCa supervisando
+a Aurora, como validación inicial del nuevo protocolo de supervisión
+documentado arriba.

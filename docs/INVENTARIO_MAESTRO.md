@@ -15,18 +15,27 @@ estado real, verificado directamente, al 2026-07-19.
 **Fuente de verdad de configuracion:** /opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist
 (Cellar — brew services regenera SIEMPRE desde aqui, no editar LaunchAgents directo).
 
-Variables activas: OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0,
-OLLAMA_KEEP_ALIVE=-1, OLLAMA_MAX_LOADED_MODELS=3, OLLAMA_NUM_PARALLEL=1.
+Variables activas (actualizado 2026-08-06, ver LOG_CAMBIOS Fase 0): OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0,
+OLLAMA_KEEP_ALIVE=30m, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NUM_PARALLEL=1.
+(Valores anteriores hasta 2026-08-05: KEEP_ALIVE=-1, MAX_LOADED_MODELS=3 -- causaban
+sobre-suscripcion de memoria, corregido en Fase 0 del plan de arquitectura IA local.)
 
-**Modelos instalados (verificado con ollama list, 2026-07-19):**
+**Nota 2026-08-06:** "Carlitos" y "Aurora" como CLI de uso diario de Montu YA NO corren
+sobre estos modelos Ollama -- migraron a Pi + llama-server (Qwen3-Coder-Next-80B-A3B),
+ver seccion "Stack de inferencia local nuevo" mas abajo. Los tags Ollama de abajo se
+conservan para los roles que Fase 4 NO migro (dev-implementer/debugger, of-implementer/
+debugger, subagentes de Rabin/Risko, dev-tech-lead/refactorizador) y como rollback.
+
+**Modelos instalados (verificado con ollama list, 2026-07-19 -- num_ctx de carlitos
+corregido 2026-08-06, ver nota):**
 
 | Modelo | Tamano | num_ctx | Uso |
 |---|---|---|---|
 | gemma3:27b | 17GB | 131072 | sin rol asignado activo por ahora |
-| carlitos (Modelfile) | 18GB (comparte pesos con qwen3-coder:30b) | 20480 | Carlitos, dev-implementer/debugger, of-implementer/debugger |
+| carlitos (Modelfile) | 18GB (comparte pesos con qwen3-coder:30b) | 65536 (corregido 2026-08-04, esta tabla tenia el valor viejo 20480 sin actualizar) | dev-implementer/debugger, of-implementer/debugger (Carlitos-CLI de Montu ya no usa este tag, ver nota arriba) |
 | qwen3-coder:30b | 18GB (base) | 262144 | dev-implementer/debugger via contexto completo cuando se requiere |
 | qwen3.6:35b-a3b | 23GB, MoE 3B activos | 262144 (default) | Rabin y Risko (primario, desde 2026-07-19), subagente de analisis de ambos, dev-tech-lead/of-tech-lead, dev-refactorizador/of-refactorizador |
-| aurora (Modelfile) | comparte pesos con qwen3.6:35b-a3b | 32768 | Aurora (gestion documental), creado 2026-07-19 tras timeout con contexto sin recortar |
+| aurora (Modelfile) | comparte pesos con qwen3.6:35b-a3b | 32768 | uso historico, gestion documental (Aurora-CLI de Montu ya no usa este tag, ver nota arriba) |
 | qwen3.5:9b | 6.6GB | — | fallback |
 
 **NO existen en el stack (documentados antes, confirmado eliminados):**
@@ -1236,4 +1245,21 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 ---
 
-**Fin del documento (act 2026-07-02)**
+## Stack de inferencia local nuevo — Mac Studio M2 Max (en validacion, Fase 4 pendiente)
+> Fases 0-3 de PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md completas y verificadas (2026-08-05/06, ver LOG_CAMBIOS). Fase 4 (corte real: migrar Carlitos/Aurora a perfiles de Pi, retirar Claude Code CLI vs Ollama, liberar ~40GB) NO ejecutada aun -- Carlitos y Aurora (tabla de Agentes Hermes Hub arriba) siguen operativos en su configuracion actual hasta que se autorice el corte.
+
+| Componente | Version | Puerto | Servicio | Huella |
+|---|---|---|---|---|
+| llama-server (llama.cpp) | build 10280 | 11500 (127.0.0.1) | proceso manual, pendiente empaquetar como launchd en Fase 4 | ~49.4GB RAM |
+| Qwen3-Coder-Next-80B-A3B Q4_K_M | unsloth GGUF | -- | ~/models/ | 45.2GB disco |
+| Pi coding agent | @mariozechner/pi-coding-agent 0.73.1 | -- | CLI, ~/.pi/agent/models.json | -- |
+| Tunel SSH (Mac -> serverX) | autossh | 11500 reenviado | LaunchAgent com.montu.ssh-tunnel-serverx | -- |
+| LiteLLM proxy | ghcr.io/berriai/litellm:main-stable | 4141 | Docker en serverX, /home/x/litellm/ | -- |
+
+**Reglas duras ya aplicadas:** un solo modelo grande residente en el Mac (Qwen3-Coder-Next) · OLLAMA_KEEP_ALIVE=30m + OLLAMA_MAX_LOADED_MODELS=1 mientras Ollama coexista · timeout 180s en la ruta local de LiteLLM · llama-server sigue bindeado solo a 127.0.0.1, sin exposicion en la LAN.
+
+**Retirado:** nada aun. Ollama, Carlitos y Aurora siguen intactos sin cambios. Fase 4 es la que retira Claude Code CLI vs ANTHROPIC_BASE_URL local (causa raiz documentada del incidente de 9+ horas colgadas).
+
+---
+
+**Fin del documento (act 2026-08-06)**

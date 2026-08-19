@@ -1245,16 +1245,24 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 ---
 
-## Stack de inferencia local nuevo — Mac Studio M2 Max (Fase 4 EJECUTADA 2026-08-16)
+## Stack de inferencia local nuevo — Mac Studio M2 Max (Fase 4 EJECUTADA 2026-08-16, act. 2026-08-17)
 > Fases 0-3 de PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md completas y verificadas (2026-08-05/06, ver LOG_CAMBIOS). Fase 4 (corte real: migrar Carlitos/Aurora a perfiles de Pi, retirar Claude Code CLI vs Ollama) EJECUTADA el 2026-08-16 en dos partes: (a) alias de shell ya apuntaban a ~/bin/Aurora y ~/bin/Carlitos (wrappers Pi) desde antes; (b) BACKLOG-INFRA-01 cerrado hoy: llama-server pasó de proceso manual a LaunchAgent persistente `cl.montuschi.llama-server.plist` (RunAtLoad+KeepAlive, test de respawn verificado en 1s). Ver LOG_CAMBIOS_2026.md 2026-08-16 para el detalle completo, incluyendo evaluación de desempeño de Carlitos.
 
 | Componente | Version | Puerto | Servicio | Huella |
 |---|---|---|---|---|
 | llama-server (llama.cpp) | build 10280 (10360 disponible, no actualizado) | 11500 (127.0.0.1) | LaunchAgent cl.montuschi.llama-server.plist (RunAtLoad+KeepAlive), desde 2026-08-16 | --sleep-idle-seconds 900 (duerme tras 15min sin uso, recarga en ~2.7s al despertar; validado empíricamente 2026-08-16) |
 | Qwen3-Coder-Next-80B-A3B Q4_K_M | unsloth GGUF | -- | ~/models/ | 45.2GB disco |
-| Pi coding agent | @mariozechner/pi-coding-agent 0.73.1 | -- | CLI, ~/.pi/agent/models.json | -- |
+| Pi coding agent | @earendil-works/pi-coding-agent 0.84.2 (act. 2026-08-18, ver LOG_CAMBIOS) | -- | CLI, ~/.pi/agent/models.json | -- |
 | Tunel SSH (Mac -> serverX) | autossh | 11500 reenviado | LaunchAgent com.montu.ssh-tunnel-serverx | -- |
 | LiteLLM proxy | ghcr.io/berriai/litellm:main-stable | 4141 | Docker en serverX, /home/x/litellm/ | -- |
+
+### Extensiones e integraciones activas de Pi (Mac Studio — act. 2026-08-17)
+
+| Extensión / Herramienta | Versión | Ubicación / Tipo | Propósito |
+|---|---|---|---|
+| `@pi-vault/pi-guardrails` | v0.1.0 | `~/.pi/agent/extensions` (npm) | Capa de seguridad y guardrails para Pi (bloqueo de secretos, paths sensibles, comandos catastróficos, fail-closed). |
+| `ast-grep` | v0.45.1 | Homebrew (`/opt/homebrew/bin/ast-grep`) | Parser local de AST y análisis estructural de código cross-language (dependencia CLI de pi-fovea). |
+| `pi-fovea` | v0.18.0 | `~/.pi/agent/extensions` (npm) | Capa de contexto con "foveated heat diffusion" sobre grafo AST local para reducción de tokens de contexto por turno. |
 
 **Reglas duras ya aplicadas:** un solo modelo grande residente en el Mac (Qwen3-Coder-Next) · OLLAMA_KEEP_ALIVE=30m + OLLAMA_MAX_LOADED_MODELS=1 mientras Ollama coexista · timeout 180s en la ruta local de LiteLLM · llama-server sigue bindeado solo a 127.0.0.1, sin exposicion en la LAN.
 
@@ -1262,4 +1270,15 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 ---
 
-**Fin del documento (act 2026-08-06)**
+## Backlog Técnico de Inferencia Local y Harness (act. 2026-08-17)
+
+- **BACKLOG-OLLAMA-CLEANUP:** Limpieza del tag huérfano `carlitos:latest` en Ollama (18GB, remanente de antes de la migración a llama-server, no se usa, baja prioridad).
+- **BACKLOG-FOVEA-BENCHMARK [CERRADO 2026-08-18]:** Benchmark formal ejecutado sobre 15 tareas reales de solo lectura en OptiFierro-V2 (commit aa3145d593d68d9ac704934697295128043c4efd). Resultado real: tiempo prácticamente igual con y sin fovea (56.7s vs 58.7s). Tokens totales muestran a fovea 62% más caro, pero la brecha está casi enteramente explicada por `cacheRead` (contexto reutilizado, no cómputo nuevo) — comparando solo input+output frescos la diferencia cae a 3%, prácticamente idéntica. Fovea es neutro en tareas acotadas a un solo archivo, pero muestra ventaja real y grande en tareas multi-archivo (búsqueda de patrones, trazado de referencias cruzadas, estructura de directorio completo), con ahorros de tokens de hasta 3-4x en esos casos y evitó un timeout de exploración descontrolada en la condición sin fovea. Política resultante: activación selectiva de fovea para tareas multi-archivo, no adopción pareja como default. Detalle completo en LOG_CAMBIOS_2026.md (2026-08-18) y en `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md`.
+- **BACKLOG-FOVEA-MUESTRA-MAYOR:** La hipótesis "ventaja de fovea en tareas multi-archivo vs neutralidad en archivo único" se construyó sobre apenas 3 casos de una muestra de 15 tareas. Queda pendiente validarla con una muestra mayor antes de convertirla en regla dura del harness (ej. activación automática de fovea por tipo de tarea).
+- **BACKLOG-MODEL-SWAP-BENCH:** Benchmark de swap de modelo (actual Qwen3-Coder-Next vs candidato 7B-14B o Devstral Small) usando el contexto ya curado por pi-fovea como constante — condicionado a resultado positivo del benchmark de reducción de tokens.
+- **BACKLOG-CHATGPT-LUNA-EVAL:** Idea lateral: evaluar ChatGPT/GPT-5.6 Luna con cuenta gratuita como cuarta pata del ecosistema de agentes para absorber tareas sin consumir tokens de Anthropic (tópico para sesión dedicada, sin más detalle por ahora).
+
+---
+
+**Fin del documento (act 2026-08-17)**
+

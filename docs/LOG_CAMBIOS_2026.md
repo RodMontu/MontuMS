@@ -2308,3 +2308,19 @@ No se modificó `indexador.py` ni se borraron filas — ambos hallazgos quedan d
 **Estado al cierre:** wrapper en producción en `~/bin/Carlitos`, probado, documentado, con copia versionada en el repo. Punto 2 del roadmap original cerrado — punto 3 (benchmark de swap de modelo) queda habilitado para la próxima sesión.
 
 ---
+
+## 2026-08-19 (cont.) — Fix de indexador.py: recursividad de docs/ y filtro AppleDouble
+
+**Contexto:** continuación directa de la misma sesión. En vez de avanzar al punto 3 del roadmap (benchmark de swap de modelo), se priorizó cerrar los dos bugs de La Biblioteca dejados abiertos en la Parte 1 (BACKLOG-BIBLIOTECA-PATHS, BACKLOG-BIBLIOTECA-APPLEDOUBLE) — acotados, ya diagnosticados, y conviene resolverlos antes de generar más documentación pesada.
+
+**Corrección de diagnóstico sobre BACKLOG-BIBLIOTECA-PATHS — no era el bug que parecía:** al leer el código fuente completo de `indexador.py` antes de tocar nada, apareció un comentario explícito fechado 2026-07-19 explicando que indexar tanto `MontuMS/` como `MontuMS/docs/` fue una decisión intencional, porque en ese momento existían dos archivos físicos distintos con el mismo nombre. Verificado con `ls` directo: los archivos de raíz (`MontuMS/LOG_CAMBIOS_2026.md`, `MontuMS/INVENTARIO_MAESTRO.md`) ya no existen en disco — fueron eliminados en algún punto antes del 2026-07-21 (documentado en `COMO_USAR_LA_BIBLIOTECA.md` sección 7, "no deben recrearse ahí"). Las filas "duplicadas" que motivaron el backlog original eran huérfanas de esos archivos ya borrados, y `limpiar_huerfanos()` ya las había limpiado como efecto colateral del reindex de la Parte 1 (G2) de esta misma sesión — confirmado con query directa post-reindex: el catálogo solo tenía `docs/LOG_CAMBIOS_2026.md` y `docs/INVENTARIO_MAESTRO.md`, sin duplicados. El backlog original había mezclado dos problemas distintos bajo un mismo nombre: esta parte (paths duplicados) y la cobertura faltante de `docs/evidencia/`, que es un bug real y separado. Backlog cerrado con esta corrección de diagnóstico, sin cambio de código asociado.
+
+**Fix real 1 — cobertura de subcarpetas de docs/:** `encontrar_markdowns()` usaba `d.glob("*.md")` (no recursivo) para ambos directorios de `SCAN_DIRS`, por lo que `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md` nunca se indexó. Se agregó `SCAN_DIRS_RECURSIVE = {MONTUMS_ROOT / "docs"}` y el código ahora usa `d.rglob` para los directorios de ese set y `d.glob` para el resto — deliberadamente **no** se hizo recursivo `MONTUMS_ROOT` (para no empezar a indexar `harness/` u otras carpetas sin decisión explícita, evitando expandir el alcance del catálogo sin que Montu lo pida).
+
+**Fix real 2 — filtro de archivos AppleDouble:** se agregó `encontrados = [p for p in encontrados if not p.name.startswith("._")]` inmediatamente después del glob, antes del filtro de `_excluido()`. Root cause exacto: un archivo AppleDouble como `._INVENTARIO_MAESTRO.md` termina en `.md` y por lo tanto matchea el patrón `*.md` igual que un documento real.
+
+**Validación (backup previo en `/tmp/indexador.py.pre-fix-2026-08-19.bak` en serverX, sintaxis verificada con `py_compile` antes de correr nada):** reindex post-fix procesó 475 secciones (16 archivos, incluyendo por primera vez `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md` con 3 secciones), eliminó las 4 filas huérfanas de AppleDouble que quedaban de la sesión anterior, y no generó ninguna fila `._` nueva. Confirmado con query directa post-reindex: catálogo en 456 filas, cero filas AppleDouble, `docs/evidencia/` indexada y consultable.
+
+**Estado al cierre:** los dos backlogs de La Biblioteca quedan cerrados. Los tres pendientes reales de esta sesión completa son ahora: `BACKLOG-OLLAMA-CLEANUP`, `BACKLOG-FOVEA-GREPMODE`, `BACKLOG-FOVEA-MUESTRA-MAYOR` (validación estadística), y el punto 3 original del roadmap (benchmark de swap de modelo), que queda como el próximo paso natural.
+
+---

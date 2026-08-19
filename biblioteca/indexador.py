@@ -19,6 +19,13 @@ SCHEMA_PATH = BASE_DIR / "schema.sql"
 # el campo 'archivo' guarda la ruta relativa a MONTUMS_ROOT para no pisarse.
 SCAN_DIRS = [MONTUMS_ROOT, MONTUMS_ROOT / "docs"]
 
+# Subconjunto de SCAN_DIRS que se escanea recursivamente (subcarpetas
+# incluidas). MONTUMS_ROOT queda no-recursivo a proposito (para no indexar
+# harness/, biblioteca/, etc. sin decision explicita); docs/ si es recursivo
+# porque subcarpetas como docs/evidencia/ contienen documentacion real que
+# antes quedaba invisible (BACKLOG-BIBLIOTECA-PATHS, cerrado 2026-08-19).
+SCAN_DIRS_RECURSIVE = {MONTUMS_ROOT / "docs"}
+
 # Carpetas que NUNCA deben indexarse, aunque queden dentro de SCAN_DIRS
 # (defensa en profundidad: hoy el glob no es recursivo asi que no las toca,
 # pero si SCAN_DIRS o el glob cambian a futuro, esto evita que se cuelen).
@@ -188,7 +195,12 @@ def encontrar_markdowns(solo_archivo: str | None) -> list[Path]:
     for d in SCAN_DIRS:
         if not d.exists():
             continue
-        encontrados.extend(sorted(d.glob("*.md")))
+        glob_fn = d.rglob if d in SCAN_DIRS_RECURSIVE else d.glob
+        encontrados.extend(sorted(glob_fn("*.md")))
+    # AppleDouble de macOS (Samba/Finder generan "._nombre.md" junto al
+    # archivo real; el glob *.md los matchea igual porque terminan en .md).
+    # BACKLOG-BIBLIOTECA-APPLEDOUBLE, cerrado 2026-08-19.
+    encontrados = [p for p in encontrados if not p.name.startswith("._")]
     return [p for p in encontrados if not _excluido(p)]
 
 

@@ -2266,3 +2266,45 @@ Hallazgo de patrón, con evidencia específica de 3 tareas que rompieron la tend
 **Conclusión y política de uso resultante (reemplaza la conclusión anterior de adopción sin condiciones):** pi-fovea no demostró una reducción de contexto pareja en todas las tareas, contrario a la expectativa inicial. Es neutro (ni ayuda ni perjudica de forma significativa) en tareas acotadas a un solo archivo. Muestra una ventaja real, grande y mecánicamente explicable específicamente en tareas que requieren buscar o rastrear información a través de múltiples archivos (búsqueda de patrones, trazado de llamadas o referencias, estructura de directorio completo). Política recomendada: activar fovea selectivamente para este segundo tipo de tareas, no como default parejo para todo. Esta hipótesis (multi-archivo vs archivo único) fue construida sobre apenas 3 casos de una muestra de 15 — queda pendiente validarla con una muestra mayor antes de convertirla en regla dura del harness.
 
 ---
+
+## 2026-08-19 — Cierre de gaps de documentación (G1-G4) y formalización de política fovea selectivo en Carlitos
+
+**Contexto:** sesión de continuación directa sobre el hilo de optimización del harness Pi/Carlitos. Primera parte: cerrar cuatro gaps reales detectados al auditar el estado del punto 1 (documentación) de la sesión anterior (2026-08-18) — el contenido ya existía pero no estaba realmente propagado/consistente. Segunda parte: formalizar la política "fovea selectivo" en el harness real de Carlitos (punto 2 del roadmap), priorizada por sobre el fix de bugs de La Biblioteca descubiertos en la primera parte, porque desbloquea el objetivo original del hilo (benchmark de swap de modelo).
+
+**G1 — Commit huérfano pusheado:** el commit `5f7694f` (cierre del piloto fovea, 2026-08-18) estaba commiteado en serverX pero nunca pusheado a `origin/main` (`ahead 1`). Push ejecutado y verificado.
+
+**G2 — Reindex de La Biblioteca + dos bugs nuevos encontrados por RCA:** se corrió `indexador.py` (473 secciones procesadas, 12 filas huérfanas limpiadas, catálogo de 430 a 454 filas). Investigación previa (antes de tocar nada) del código fuente confirmó dos hallazgos:
+1. `indexador.py` no es recursivo — solo escanea el primer nivel de `MontuMS/` y `MontuMS/docs/`, por lo que `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md` nunca se indexó. Backlog abierto: `BACKLOG-BIBLIOTECA-PATHS` (mismo bug de fondo que la inconsistencia de paths ya detectada).
+2. El reindex incorporó 4 filas basura de archivos AppleDouble de macOS (`docs/._*.md`, prefijo `._`), generados por Samba/Finder al sincronizar con `/mnt/extra`. `indexador.py` no filtra ese patrón. Confirmado en vivo una segunda vez durante la Parte 2 de esta sesión: escribir un archivo nuevo en `~/MontuMS/harness/carlitos/` desde el Mac Studio vía el mismo NFS mount generó automáticamente su `._` correspondiente, que se limpió manualmente antes de que un futuro reindex lo recogiera. Backlog abierto: `BACKLOG-BIBLIOTECA-APPLEDOUBLE`.
+
+No se modificó `indexador.py` ni se borraron filas — ambos hallazgos quedan documentados para una sesión de fix dedicada (RCA antes de parche).
+
+**G3 — Corrección de redacción "Retirado" en INVENTARIO_MAESTRO.md:** la línea decía "nada aún" y a la vez describía en futuro un retiro que ya había ocurrido el 2026-08-16 (contradicción interna). Reescrita para reflejar el estado real (Claude Code CLI vs ANTHROPIC_BASE_URL retirado, Ollama permanece instalado para otros usos).
+
+**G4 — Nuevo backlog `BACKLOG-BIBLIOTECA-PATHS`:** documentado el bug de paths relativos inconsistentes en el catálogo (`LOG_CAMBIOS_2026.md` vs `docs/LOG_CAMBIOS_2026.md` como si fueran archivos distintos), causando resultados fragmentados en `buscar_tema`.
+
+**Nota de proceso — guardrail de CCa respetado, no sorteado:** se delegó la investigación y ejecución de G1-G4 a CCa vía invocación headless. CCa se detuvo dos veces, una por cada commit pendiente, citando su propia regla de `CLAUDE.md` ("nunca commit/push sin confirmación") y rechazando correctamente una aprobación relayada dentro de un prompt como prueba válida de autorización de Montu. Dado que el diff ya había sido validado de forma independiente (coincidencia exacta con lo planeado, verificado dos veces) y la autorización de Montu para este turno era explícita y directa, Miaude ejecutó el `git add/commit/push` final directamente en lugar de insistirle a CCa que se saltara su propio candado — el guardrail de CCa se considera correcto, no un obstáculo a evadir.
+
+**Commits:** `321d3bd` (G3+G4), `e5eee02` (BACKLOG-BIBLIOTECA-APPLEDOUBLE). Repo sincronizado con `origin/main` al cierre de esta parte.
+
+---
+
+### Parte 2 — Formalización de la política "fovea selectivo" en `~/bin/Carlitos`
+
+**RCA de arquitectura antes de implementar:** se investigó el código fuente de `pi-fovea` (no solo su comportamiento observado) para encontrar el punto de control real. Hallazgo: fovea expone dos superficies independientes. (a) 4 tools standalone (`fovea_sketch`, `fovea_focus`, `fovea_dwell`, `fovea_impact`) que el modelo invoca explícitamente — togglables por invocación con la flag nativa de Pi `--exclude-tools`, sin tocar ningún archivo. (b) un hook de "grep augment mode" (`tools.grepMode`, default `"augment"`) que intercepta resultados de la tool nativa `grep` en queries tipo-símbolo — solo configurable vía archivo `fovea.json` (global o por proyecto), sin override por CLI ni variable de entorno. Se decidió no tocar (b) para esta fase: el benchmark del 2026-08-18 lo tuvo activo en las 15 tareas, incluidas las 12 de archivo único, sin mostrar perjuicio. Queda documentado como `BACKLOG-FOVEA-GREPMODE` por si una muestra mayor cambia esa conclusión.
+
+**Implementación:** `~/bin/Carlitos` reescrito con default **fovea OFF** (excluye las 4 tools) y flag explícita `--fovea` como primer argumento para activarlas. Decisión de diseño: activación **declarativa** (el operador decide en el momento de invocar), no heurística automática por clasificación de la tarea — la política se sostiene sobre apenas 3 casos de evidencia (`BACKLOG-FOVEA-MUESTRA-MAYOR`), y automatizar la clasificación ahora sería una suposición disfrazada de regla.
+
+**Validación antes de reemplazar el wrapper en producción (4 pruebas):** (1) sin `--fovea`, las 4 tools ausentes del listado de tools disponibles del modelo — confirmado; (2) con `--fovea`, las 4 presentes — confirmado; (3) timing de una invocación trivial sin regresión (~3.1s); (4) una tarea de código real (explicar un pipe de bash) responde correctamente sin diferencia de calidad. Backup del wrapper original preservado en `/tmp/Carlitos.pre-fovea-selectivo.bak` antes del reemplazo.
+
+**Dos bugs reales encontrados durante las pruebas del wrapper (no en el alcance original, documentados por protocolo):**
+1. **Bug de stdin colgado, reproducido en vivo:** una invocación headless de `pi -p` lanzada en background sin stdin redirigido se colgó indefinidamente esperando EOF de un stdin heredado que nunca cierra — el mismo patrón ya documentado el 2026-08-18 en el script de benchmark, encontrado de nuevo de forma independiente. Corrección: el wrapper ahora redirige stdin a `/dev/null`, pero **solo quedó condicionado a modo one-shot** (hay un prompt como argumento) — nunca en invocación sin argumentos, para no romper un eventual uso interactivo/TUI de Pi.
+2. **Bug de `set -u` + array vacío en bash 3.2:** la primera versión del wrapper usaba `set -euo pipefail`; al probarla con `--fovea` (que deja el array `FOVEA_FLAG` vacío), bash de sistema de macOS (3.2, no Homebrew) reventó con `unbound variable` al expandir `"${FOVEA_FLAG[@]}"` — comportamiento específico de bash 3.2 bajo `set -u`, no reproduce en bash 4+. Corrección: se removió `-u`, dejando `set -eo pipefail`, con la razón documentada inline en el script para que no se reintroduzca sin querer en una futura edición.
+
+**Hallazgo de infraestructura — `~/bin` sin control de versiones:** `~/bin` en el Mac Studio no es un repositorio git. El cambio al wrapper de Carlitos, un script en uso diario, no tenía ninguna red de seguridad más allá del backup temporal en `/tmp`. Se copió el wrapper final a `harness/carlitos/wrapper_carlitos.sh` dentro de MontuMS (vía el mismo NFS mount que usa Miaude para leer/escribir el repo desde el Mac) para que quede versionado. Sigue pendiente evaluar si conviene poner `~/bin` completo bajo git — no se decidió en esta sesión, queda como pregunta abierta para Montu.
+
+**Documentación actualizada:** sección nueva "Política fovea selectivo — implementación formalizada" en `docs/EVALUACION_HARNESS_AGENTICOS_CARLITOS_2026-08.md`, con el detalle completo del mecanismo, la implementación y los hallazgos colaterales. `INVENTARIO_MAESTRO.md` actualizado con referencia al wrapper y dos backlogs nuevos (`BACKLOG-FOVEA-GREPMODE`, nota de cierre parcial en `BACKLOG-FOVEA-MUESTRA-MAYOR`).
+
+**Estado al cierre:** wrapper en producción en `~/bin/Carlitos`, probado, documentado, con copia versionada en el repo. Punto 2 del roadmap original cerrado — punto 3 (benchmark de swap de modelo) queda habilitado para la próxima sesión.
+
+---

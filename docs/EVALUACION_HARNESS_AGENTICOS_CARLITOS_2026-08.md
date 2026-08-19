@@ -96,6 +96,54 @@ Se documenta la caracterización del modelo **Qwen3.8-Max**, disponible a travé
 
 ---
 
+## Política "fovea selectivo" — implementación formalizada (2026-08-19)
+
+Cierra `BACKLOG-FOVEA-MUESTRA-MAYOR` en su parte de implementación (la validación
+estadística con muestra mayor queda como ítem aparte, ver backlog). Se investigó
+el mecanismo real de toggle de pi-fovea antes de implementar nada (RCA primero):
+
+**Hallazgo de arquitectura:** pi-fovea expone dos superficies de control distintas:
+
+1. **4 tools standalone** (`fovea_sketch`, `fovea_focus`, `fovea_dwell`,
+   `fovea_impact`) — el modelo las invoca explícitamente. Se pueden excluir por
+   invocación con la flag nativa de Pi `--exclude-tools`, sin tocar ningún
+   archivo de config ni el core de la extensión. **Este es el punto de control
+   real usado para la selectividad.**
+2. **Hook de "grep augment mode"** — intercepta resultados de la tool nativa
+   `grep` en queries tipo-símbolo y les agrega una sección de grafo. Se
+   controla vía `tools.grepMode` (`off`/`replace`/`augment`, default
+   `augment`) en `~/.pi/agent/fovea.json` (global) o `<repo>/.pi/fovea.json`
+   (por proyecto) — **no tiene override por CLI ni por variable de entorno**,
+   solo por archivo. No se implementó toggle por invocación para este hook:
+   el benchmark del 2026-08-18 lo tuvo activo en las 15 tareas (incluidas las
+   12 de archivo único) y no mostró perjuicio, así que no se consideró
+   necesario resolverlo en esta fase. Ver `BACKLOG-FOVEA-GREPMODE`.
+
+**Implementación:** `~/bin/Carlitos` (Mac Studio) rediseñado con default
+**fovea OFF** (excluye las 4 tools) y flag explícita `--fovea` como primer
+argumento para activarlas en tareas multi-archivo. Decisión de diseño:
+activación **declarativa** (el operador decide), no heurística automática por
+clasificación de la tarea — honesto dado que la política se sostiene sobre
+apenas 3 casos de evidencia (ver `BACKLOG-FOVEA-MUESTRA-MAYOR`); una
+heurística automática necesitaría más muestra para no ser una suposición
+disfrazada de regla.
+
+Validado con 4 pruebas antes de reemplazar el wrapper en producción:
+tools ausentes del set del modelo sin `--fovea`, presentes con `--fovea`,
+timing normal, y una tarea de código real sin regresión. Copia versionada del
+wrapper en `harness/carlitos/wrapper_carlitos.sh` (`~/bin` no está bajo git,
+ver hallazgo en LOG_CAMBIOS_2026.md 2026-08-19).
+
+**Hallazgos colaterales durante la implementación** (no estaban en el alcance
+original, se documentan porque el protocolo del ecosistema lo exige):
+- Reproducido en vivo el bug de stdin colgado en invocaciones headless de Pi
+  (ya documentado el 2026-08-18) — se agregó blindaje `< /dev/null`
+  condicionado a modo one-shot en el wrapper (nunca en modo interactivo, para
+  no romper el TUI).
+- `set -u` + array bash vacío revienta en bash 3.2 (el bash de sistema de
+  macOS) con "unbound variable" — no reproduce en bash 4+. El wrapper corregido
+  usa `set -eo pipefail` sin `-u`, con la razón documentada inline.
+
 ## Backlog técnico derivado
 
 1. **`BACKLOG-OLLAMA-CLEANUP`:** Limpieza del tag huérfano `carlitos:latest` en Ollama (18GB, remanente previo a la migración a llama-server, baja prioridad).
@@ -103,3 +151,4 @@ Se documenta la caracterización del modelo **Qwen3.8-Max**, disponible a travé
 3. **`BACKLOG-FOVEA-MUESTRA-MAYOR`:** La hipótesis multi-archivo vs archivo único que sustenta la política de uso selectivo de pi-fovea se construyó sobre apenas 3 casos de una muestra de 15 tareas. Validar con una muestra mayor antes de convertirla en regla dura del harness (ej. activación automática de fovea por tipo de tarea detectado).
 4. **`BACKLOG-MODEL-SWAP-BENCH`:** Benchmark de swap de modelo (Qwen3-Coder-Next vs 7B–14B / Devstral Small) manteniendo el contexto optimizado por pi-fovea como variable de control.
 5. **`BACKLOG-CHATGPT-LUNA-EVAL`:** Exploración conceptual de ChatGPT / GPT-5.6 Luna (cuenta gratuita) como cuarto cerebro de apoyo para absorción de tareas analíticas sin consumo de cuota Anthropic.
+6. **`BACKLOG-FOVEA-GREPMODE` [NUEVO 2026-08-19]:** El hook de "grep augment mode" de pi-fovea no tiene toggle por invocación (solo por archivo de config `fovea.json`, global o por proyecto). Si una futura muestra mayor (`BACKLOG-FOVEA-MUESTRA-MAYOR`) muestra que este hook sí tiene costo o interferencia en tareas de archivo único, evaluar escribir `<repo>/.pi/fovea.json` con `tools.grepMode: "off"` desde el wrapper antes de invocar Pi en modo fovea-OFF. No implementado ahora porque el benchmark del 2026-08-18 no mostró perjuicio con el hook activo.

@@ -1266,7 +1266,11 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 
 **Reglas duras ya aplicadas:** un solo modelo grande residente en el Mac (Qwen3-Coder-Next) · OLLAMA_KEEP_ALIVE=30m + OLLAMA_MAX_LOADED_MODELS=1 mientras Ollama coexista · timeout 180s en la ruta local de LiteLLM · llama-server sigue bindeado solo a 127.0.0.1, sin exposicion en la LAN.
 
-**Retirado:** nada aun. Ollama, Carlitos y Aurora siguen intactos sin cambios. Fase 4 es la que retira Claude Code CLI vs ANTHROPIC_BASE_URL local (causa raiz documentada del incidente de 9+ horas colgadas).
+**Retirado (2026-08-16, Fase 4 ejecutada):** Claude Code CLI apuntando a Ollama via
+ANTHROPIC_BASE_URL — retirado como via de invocacion de modelos locales (causa raiz
+documentada del incidente de 9+ horas colgadas). Ollama permanece instalado para
+otros usos; Carlitos y Aurora ya corren sobre wrappers Pi contra llama-server :11500.
+Pendiente de limpieza: tag huerfano `carlitos:latest` (ver BACKLOG-OLLAMA-CLEANUP).
 
 ---
 
@@ -1276,6 +1280,7 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 - **BACKLOG-FOVEA-BENCHMARK [CERRADO 2026-08-18]:** Benchmark formal ejecutado sobre 15 tareas reales de solo lectura en OptiFierro-V2 (commit aa3145d593d68d9ac704934697295128043c4efd). Resultado real: tiempo prácticamente igual con y sin fovea (56.7s vs 58.7s). Tokens totales muestran a fovea 62% más caro, pero la brecha está casi enteramente explicada por `cacheRead` (contexto reutilizado, no cómputo nuevo) — comparando solo input+output frescos la diferencia cae a 3%, prácticamente idéntica. Fovea es neutro en tareas acotadas a un solo archivo, pero muestra ventaja real y grande en tareas multi-archivo (búsqueda de patrones, trazado de referencias cruzadas, estructura de directorio completo), con ahorros de tokens de hasta 3-4x en esos casos y evitó un timeout de exploración descontrolada en la condición sin fovea. Política resultante: activación selectiva de fovea para tareas multi-archivo, no adopción pareja como default. Detalle completo en LOG_CAMBIOS_2026.md (2026-08-18) y en `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md`.
 - **BACKLOG-FOVEA-MUESTRA-MAYOR:** La hipótesis "ventaja de fovea en tareas multi-archivo vs neutralidad en archivo único" se construyó sobre apenas 3 casos de una muestra de 15 tareas. Queda pendiente validarla con una muestra mayor antes de convertirla en regla dura del harness (ej. activación automática de fovea por tipo de tarea).
 - **BACKLOG-MODEL-SWAP-BENCH:** Benchmark de swap de modelo (actual Qwen3-Coder-Next vs candidato 7B-14B o Devstral Small) usando el contexto ya curado por pi-fovea como constante — condicionado a resultado positivo del benchmark de reducción de tokens.
+- **BACKLOG-BIBLIOTECA-PATHS:** El catalogo tiene filas con path relativo inconsistente (`LOG_CAMBIOS_2026.md` vs `docs/LOG_CAMBIOS_2026.md`) para el mismo archivo fisico, generando duplicados logicos y resultados fragmentados en `buscar_tema`. RCA pendiente sobre `indexador.py` (normalizacion de rutas relativas a la raiz de MontuMS) antes de cualquier limpieza de filas. No borrar filas hasta tener el fix del indexador.
 - **BACKLOG-CHATGPT-LUNA-EVAL:** Idea lateral: evaluar ChatGPT/GPT-5.6 Luna con cuenta gratuita como cuarta pata del ecosistema de agentes para absorber tareas sin consumir tokens de Anthropic (tópico para sesión dedicada, sin más detalle por ahora).
 
 ---

@@ -2340,3 +2340,14 @@ No se modificó `indexador.py` ni se borraron filas — ambos hallazgos quedan d
 **Estado al cierre:** `BACKLOG-MODEL-SWAP-BENCH` cerrado. Cambios de documentación dejados con `git add` (staged, sin commit) para revisión de Miaude, según instrucción explícita de la tarea.
 
 ---
+
+## 2026-08-20 — Limpieza de tags huérfanos en Ollama (BACKLOG-OLLAMA-CLEANUP)
+
+Borrados `carlitos:latest` (18GB) y `aurora:latest` (23GB) de Ollama — remanentes
+de antes de la migración a Pi+llama-server, sin uso real (`ollama ps` confirmó
+nada cargado en memoria antes de borrar). El backlog original solo mencionaba
+un tag huérfano; al ejecutar se confirmó que eran dos. 41GB recuperados.
+Quedan 5 modelos con uso real en Ollama: qwen3.6:35b-a3b, rabin-gateway:latest,
+gemma3:27b, qwen3-coder:30b, qwen3.5:9b.
+
+---

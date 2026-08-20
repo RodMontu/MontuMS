@@ -1278,13 +1278,13 @@ Mac Studio NO está bajo git, es el único respaldo en el repo.
 ANTHROPIC_BASE_URL — retirado como via de invocacion de modelos locales (causa raiz
 documentada del incidente de 9+ horas colgadas). Ollama permanece instalado para
 otros usos; Carlitos y Aurora ya corren sobre wrappers Pi contra llama-server :11500.
-Pendiente de limpieza: tag huerfano `carlitos:latest` (ver BACKLOG-OLLAMA-CLEANUP).
+Limpieza de tags huerfanos (`carlitos:latest`, `aurora:latest`) completada 2026-08-20 -- ver BACKLOG-OLLAMA-CLEANUP.
 
 ---
 
 ## Backlog Técnico de Inferencia Local y Harness (act. 2026-08-17)
 
-- **BACKLOG-OLLAMA-CLEANUP:** Limpieza del tag huérfano `carlitos:latest` en Ollama (18GB, remanente de antes de la migración a llama-server, no se usa, baja prioridad).
+- **BACKLOG-OLLAMA-CLEANUP [CERRADO 2026-08-20]:** Al ejecutar la limpieza se confirmó que eran DOS tags huerfanos, no uno (el backlog original solo mencionaba `carlitos:latest`): `carlitos:latest` (18GB) y `aurora:latest` (23GB), ambos remanentes de antes de la migracion a Pi+llama-server, sin uso (`ollama ps` confirmo nada cargado en memoria antes de borrar). Borrados con `ollama rm carlitos:latest aurora:latest` -- 41GB recuperados. Quedan 5 modelos con uso real en Ollama: qwen3.6:35b-a3b, rabin-gateway:latest, gemma3:27b, qwen3-coder:30b, qwen3.5:9b.
 - **BACKLOG-FOVEA-BENCHMARK [CERRADO 2026-08-18]:** Benchmark formal ejecutado sobre 15 tareas reales de solo lectura en OptiFierro-V2 (commit aa3145d593d68d9ac704934697295128043c4efd). Resultado real: tiempo prácticamente igual con y sin fovea (56.7s vs 58.7s). Tokens totales muestran a fovea 62% más caro, pero la brecha está casi enteramente explicada por `cacheRead` (contexto reutilizado, no cómputo nuevo) — comparando solo input+output frescos la diferencia cae a 3%, prácticamente idéntica. Fovea es neutro en tareas acotadas a un solo archivo, pero muestra ventaja real y grande en tareas multi-archivo (búsqueda de patrones, trazado de referencias cruzadas, estructura de directorio completo), con ahorros de tokens de hasta 3-4x en esos casos y evitó un timeout de exploración descontrolada en la condición sin fovea. Política resultante: activación selectiva de fovea para tareas multi-archivo, no adopción pareja como default. Detalle completo en LOG_CAMBIOS_2026.md (2026-08-18) y en `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md`.
 - **BACKLOG-FOVEA-MUESTRA-MAYOR:** La hipótesis "ventaja de fovea en tareas multi-archivo vs neutralidad en archivo único" se construyó sobre apenas 3 casos de una muestra de 15 tareas. Queda pendiente validarla con una muestra mayor antes de convertirla en regla dura del harness (ej. activación automática de fovea por tipo de tarea). **Parte de implementación cerrada 2026-08-19:** el toggle manual ya existe y esta operativo (ver abajo); lo pendiente es solo la validacion estadistica con mas muestra.
 - **BACKLOG-FOVEA-GREPMODE [NUEVO 2026-08-19]:** El hook de grep-augment de pi-fovea no tiene toggle por invocacion, solo por archivo `fovea.json`. Ver detalle en EVALUACION_HARNESS_AGENTICOS_CARLITOS_2026-08.md.

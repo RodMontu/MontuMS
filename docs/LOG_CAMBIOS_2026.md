@@ -2341,6 +2341,69 @@ No se modificó `indexador.py` ni se borraron filas — ambos hallazgos quedan d
 
 ---
 
+## 2026-08-20 — Setup Jan.ai v0.8.4 + providers custom + pruebas comparativas + MCP servers
+
+**Contexto:** Sesión de configuración de Jan.ai como entorno de desarrollo local en Mac Studio, evaluación comparativa de modelos locales (Qwen3-Coder-Next-80B-A3B vs qwen3.6:35b-a3b), investigación de modelos comunitarios riesgosos y activación de servidores MCP para integración con el ecosistema de agentes.
+
+**Cambios:**
+
+**1. Instalación Jan.ai:**
+- Jan.ai v0.8.4 instalado en Mac Studio vía `brew install --cask jan`
+- App lista para uso, sin configuración inicial (sin API keys de terceros)
+
+**2. Providers custom configurados (settings.json):**
+- `llama_server_local`: http://127.0.0.1:11500/v1 (Qwen3-Coder-Next-80B-A3B, llama.cpp)
+- `ollama_local`: http://127.0.0.1:11434/v1 (qwen3.6:35b-a3b, Ollama)
+- Ambos validados con `curl -X POST http://127.0.0.1:11500/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"...","messages":[{"role":"user","content":"test"}]}'` antes de usar en UI
+
+**3. Pruebas comparativas manuales (3 sesiones):**
+
+| Prueba | qwen3.6:35b-a3b | qwen3-coder-next-80b-a3b | Ganador |
+|---|---|---|---|
+| Anti-alucinación (Claude Fable/Mythos) | Afirma con alta confianza que no existen (falso) | Reconoce corte de conocimiento (junio 2024), se abstuvo de especular | qwen3-coder-next-80b-a3b |
+| Lectura documento (OptiFierro) | Correcto | Correcto, ~4.3x menos tokens (697 vs 3027) | qwen3-coder-next-80b-a3b |
+| Código (año bisiesto con excepción seculares) | Correcto | Correcto | Empate |
+
+**4. Investigación modelos comunitarios "Claude-Mythos/Fable/Opus-Distilled":**
+- Hub de Jan mostró varios modelos con tags "Uncensored/Heretic/Abliterated"
+- Investigación: relación con denuncia pública de Anthropic (feb-2026) contra DeepSeek/Moonshot/MiniMax por destilación ilícita de Claude
+- Decisión: exclusión de esta familia de modelos para uso en Espinita (cliente) o Rabín/Risko (personal) por riesgo de comportamiento impredecible y proveniencia dudosa
+
+**5. Jan-v3.5-4B como modelo de routing (bloqueante):**
+- Identificado como candidato a "modelo de routing" para feature "Use a dedicated model for routing" de Jan (Settings > MCP Servers)
+- Bloqueo: motor llamacpp interno de Jan tiene "Max Concurrently Loaded Models" = 1
+- Requerido: subir a 2+ para usar router en paralelo con modelo principal
+- Pendiente: configuración de Max Concurrently Loaded Models
+
+**6. Túnel SSH para SearXNG (LaunchAgent):**
+- LaunchAgent existente `com.montu.ssh-tunnel-serverx.plist` (autossh) extendido
+- Agregado forward local: `-L 127.0.0.1:8888:127.0.0.1:8888`
+- Objetivo: alcanzar SearXNG (corre en serverX, solo loopback 127.0.0.1:8888) desde Mac Studio
+- Sin cambios en exposición de red de serverX
+- Reverse tunnel existente de llama-server (:11500) sigue funcionando sin regresión
+
+**7. Servidores MCP activados en Jan (mcp_config.json):**
+- `fetch` (mcp-server-fetch vía uvx)
+- `filesystem` (@modelcontextprotocol/server-filesystem, scope: /Users/montu/MontuMS únicamente)
+- `sequential-thinking` (@modelcontextprotocol/server-sequential-thinking)
+- `searxng` (mcp-searxng vía npx, apuntado a http://127.0.0.1:8888 por el túnel nuevo, sin API key, sin costo)
+- Dejados inactivos: Jan Browser MCP, browsermcp, serper (requiere API key paga de terceros, contrario a tesis de mantener dato bajo control propio)
+
+**8. Allow All MCP Tool Permissions:**
+- Dejado intencionalmente en OFF (aprobación por cada tool call)
+
+**Hallazgos:**
+- qwen3-coder-next-80b-a3b es significativamente más eficiente en tokens (4.3x menos en pruebas de lectura), útil para tareas de análisis de documentos largos, y reconoció correctamente su corte de conocimiento (junio 2024), absteniéndose de especular sobre eventos posteriores
+- qwen3.6:35b-a3b (MoE) puede alucinar sobre productos recientes (Claude Fable/Mythos), afirmando con alta confianza que no existen en vez de reconocer el límite de su entrenamiento — señal de falta de humildad epistémica ante eventos posteriores a su corte de conocimiento
+- Jan.ai v0.8.4 funciona sin API keys de terceros, ideal para entornos locales con modelos propios
+- SearXNG es una alternativa viable a Google/Bing para búsquedas web sin dependencia de APIs pagas, con costo cero y privacidad total
+
+**Pendientes:**
+- [ ] Configurar "Max Concurrently Loaded Models" ≥ 2 en Jan para habilitar modelo de routing
+- [ ] Validar funcionalidad de Jan-v3.5-4B como modelo de routing (una vez habilitado el paralelismo)
+
+---
+
 ## 2026-08-20 — Limpieza de tags huérfanos en Ollama (BACKLOG-OLLAMA-CLEANUP)
 
 Borrados `carlitos:latest` (18GB) y `aurora:latest` (23GB) de Ollama — remanentes

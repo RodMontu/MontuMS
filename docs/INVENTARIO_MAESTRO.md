@@ -1282,7 +1282,42 @@ Limpieza de tags huerfanos (`carlitos:latest`, `aurora:latest`) completada 2026-
 
 ---
 
-## Backlog Técnico de Inferencia Local y Harness (act. 2026-08-17)
+## Jan.ai — Entorno local de desarrollo (act. 2026-08-20)
+
+| Componente | Version | Puerto | Servicio | Huella |
+|---|---|---|---|---|
+| Jan.ai | v0.8.4 | UI: local | App Electron | brew cask install |
+| llama_server_local | llama.cpp | 11500 (127.0.0.1) | Qwen3-Coder-Next-80B-A3B Q4_K_M | settings.json |
+| ollama_local | Ollama 0.31.1 | 11434 (127.0.0.1) | qwen3.6:35b-a3b | settings.json |
+| Tunel SSH (Mac -> serverX) | autossh | 8888 reenviado | LaunchAgent com.montu.ssh-tunnel-serverx | para SearXNG |
+| LiteLLM proxy | ghcr.io/berriai/litellm:main-stable | 4141 | Docker en serverX, /home/x/litellm/ | para fallback a nube |
+
+### Servidores MCP activos en Jan (mcp_config.json)
+
+| MCP | Comando | Scope | Estado |
+|---|---|---|---|
+| `fetch` | `uvx mcp-server-fetch` | — | ✅ activo |
+| `filesystem` | `@modelcontextprotocol/server-filesystem` | `/Users/montu/MontuMS` únicamente | ✅ activo |
+| `sequential-thinking` | `@modelcontextprotocol/server-sequential-thinking` | — | ✅ activo |
+| `searxng` | `npx mcp-searxng` | http://127.0.0.1:8888 (túnel) | ✅ activo |
+| Jan Browser MCP | — | — | ❌ inactivo |
+| browsermcp | — | — | ❌ inactivo |
+| serper | API key paga (serper.dev) | — | ❌ inactivo (costo, anti-tesis) |
+
+**Allow All MCP Tool Permissions:** OFF (aprobación por cada tool call)
+
+**Modelos disponibles en Jan:**
+- Qwen3-Coder-Next-80B-A3B (llama_server_local, llama.cpp)
+- qwen3.6:35b-a3b (ollama_local, Ollama)
+- Jan-v3.5-4B (candidato a "modelo de routing", bloqueado por Max Concurrently Loaded Models = 1)
+
+**Bloqueo pendiente:**
+- Max Concurrently Loaded Models = 1 en motor llamacpp interno de Jan
+- Requerido: ≥ 2 para usar Jan-v3.5-4B como modelo de routing en paralelo con el modelo principal
+
+---
+
+## Backlog Técnico de Inferencia Local y Harness (act. 2026-08-20)
 
 - **BACKLOG-OLLAMA-CLEANUP [CERRADO 2026-08-20]:** Al ejecutar la limpieza se confirmó que eran DOS tags huerfanos, no uno (el backlog original solo mencionaba `carlitos:latest`): `carlitos:latest` (18GB) y `aurora:latest` (23GB), ambos remanentes de antes de la migracion a Pi+llama-server, sin uso (`ollama ps` confirmo nada cargado en memoria antes de borrar). Borrados con `ollama rm carlitos:latest aurora:latest` -- 41GB recuperados. Quedan 5 modelos con uso real en Ollama: qwen3.6:35b-a3b, rabin-gateway:latest, gemma3:27b, qwen3-coder:30b, qwen3.5:9b.
 - **BACKLOG-FOVEA-BENCHMARK [CERRADO 2026-08-18]:** Benchmark formal ejecutado sobre 15 tareas reales de solo lectura en OptiFierro-V2 (commit aa3145d593d68d9ac704934697295128043c4efd). Resultado real: tiempo prácticamente igual con y sin fovea (56.7s vs 58.7s). Tokens totales muestran a fovea 62% más caro, pero la brecha está casi enteramente explicada por `cacheRead` (contexto reutilizado, no cómputo nuevo) — comparando solo input+output frescos la diferencia cae a 3%, prácticamente idéntica. Fovea es neutro en tareas acotadas a un solo archivo, pero muestra ventaja real y grande en tareas multi-archivo (búsqueda de patrones, trazado de referencias cruzadas, estructura de directorio completo), con ahorros de tokens de hasta 3-4x en esos casos y evitó un timeout de exploración descontrolada en la condición sin fovea. Política resultante: activación selectiva de fovea para tareas multi-archivo, no adopción pareja como default. Detalle completo en LOG_CAMBIOS_2026.md (2026-08-18) y en `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md`.
@@ -1295,5 +1330,5 @@ Limpieza de tags huerfanos (`carlitos:latest`, `aurora:latest`) completada 2026-
 
 ---
 
-**Fin del documento (act 2026-08-17)**
+**Fin del documento (act 2026-08-20)**
 

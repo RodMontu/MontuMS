@@ -1,5 +1,133 @@
 ---
 
+## 2026-08-21/22 — Split Flash+Pro, migración real de Rabín/Risko a inferencia local, hallazgos críticos de red y contexto
+
+**Contexto:** Sesión larga continuando el trabajo de consolidación Pro+Flash del mismo
+día (ver entrada anterior "Jan.app + LLMs locales" / router_candidatos.ini). Objetivo
+original: un solo proceso llama-server en modo router sirviendo Pro (coding,
+Carlitos/Aurora) y Flash (conversacional, Rabín/Risko/Espinita) simultáneamente.
+Terminó en una arquitectura distinta y más simple tras encontrar limitaciones reales
+del binario y varios bugs de infraestructura no triviales.
+
+**Cambios ejecutados (CCa, credenciales Pecas, bajo diseño/supervisión de Miaude — RCA
+en cada paso, checkpoints explícitos antes de tocar producción compartida por
+Yerko/Chepu vía Risko):**
+
+1. Consolidación inicial en router (`--models-preset`) confirmada NO viable para el
+   caso de uso: sin mecanismo de descarga individual de modelo (404 en todos los
+   endpoints candidatos probados), solo eviction automático vía `--models-max` — no
+   da el control determinístico que necesita un toggle manual.
+2. Reemplazado por dos procesos independientes: Flash (`cl.montuschi.llama-server.plist`,
+   :11500, siempre cargado) y Pro (`cl.montuschi.llama-server-pro.plist`, :11501, bajo
+   demanda, `RunAtLoad=false`).
+3. Encontrado y corregido: el LaunchAgent de producción existía con `KeepAlive=true`
+   pero estaba huérfano (no cargado en launchd realmente) — sin protección real ante
+   caídas.
+4. Migrados Rabín y Risko (`/home/x/.hermes/config.yaml` y
+   `/home/x/.hermes/profiles/risko/config.yaml`): primario Ollama→Flash, delegación
+   Ollama→Pro, fallback local muerto (Ollama) eliminado de la cadena. `system_prompt`
+   de ambos actualizado.
+5. **Bug crítico encontrado tarde:** Flash/Pro bindeados a `127.0.0.1` — inalcanzables
+   desde serverX. Todas las pruebas de migración "pasaban" porque el failover
+   automático a OpenRouter/DeepSeek es tan rápido y transparente que enmascaró el
+   fallo real de red en varias rondas de verificación. Corregido a
+   `--host 192.168.1.102` (decisión explícita de Montu de exponer solo la interfaz
+   LAN, no `0.0.0.0`, tras explicarle la diferencia de superficie de exposición en su
+   red plana).
+6. **Segundo bug encontrado tras el primero:** Hermes exige mínimo 64.000 tokens de
+   contexto para inicializar cualquier agente; Flash estaba en 32768 (heredado del
+   preset de testing de candidatos de la sesión anterior). Subido a 65536 — costo
+   real en RAM solo ~3.1GB (arquitectura GQA de Qwen3, KV cache barato).
+7. Construidos `~/bin/modo-carlitos` y `~/bin/modo-normal` (toggle manual, no
+   automatizado por horario — decisión explícita de Montu, uso de Carlitos
+   errático/no calendarizable). Tres bugs de bash encontrados y corregidos en la
+   construcción: sintaxis de `bootout` (target combinado, no dos argumentos), falta
+   de `kickstart -k` explícito para plist con `RunAtLoad=false`, falso negativo de
+   `pipefail` + `grep -q` sobre `launchctl list`.
+8. **Cuarto bug, encontrado por el propio Montu al usar el script manualmente:** los
+   toggles se construyeron y probaron ANTES del fix de red (paso 5), quedando con sus
+   chequeos de salud apuntando a `127.0.0.1` — corregido a `192.168.1.102` en ambos
+   scripts.
+9. Test de estrés de RAM (Flash+Pro cargados simultáneamente, apps normales de Montu
+   corriendo): RSS combinado ~76.9GB, dejando solo 65MB de RAM libre dura (9.3GB en
+   páginas reclamables). Conclusión: no vale la pena mantener ambos cargados de forma
+   permanente — el toggle es la arquitectura correcta, dado que el failover ya es
+   transparente y rápido (~9s).
+10. Limpieza menor: borrado `~/Library/LaunchAgents/ollama.carlitos.plist.DISABLED`
+    (remanente muerto del Carlitos-vía-Ollama de marzo, ya deshabilitado, sin efecto
+    funcional).
+
+**Validación:** Confirmado end-to-end con evidencia de log real (no solo "llegó una
+respuesta", que fue justo lo que ocultó el bug de red la primera vez) —
+`prompt_tokens`/`completion_tokens` de la respuesta HTTP coincidentes con las entradas
+del log del proceso `llama-server` real, para Rabín (vía Telegram, mensaje real
+enviado por Montu) y Risko (vía método interno `hermes chat -q`, para no exponer un
+mensaje de prueba a Yerko/Chepu sin su conocimiento). Failover automático a DeepSeek
+confirmado en vivo bajando Flash a propósito, con reversión automática al restaurar.
+
+**Decisión de seguridad tomada en el camino:** exponer Flash/Pro en `192.168.1.102`
+(interfaz LAN específica) en vez de `0.0.0.0` (todas las interfaces) — más simple hoy
+que un túnel SSH, pero reconocido como exposición sin autenticación en una red plana;
+revisitar cuando se ejecute la segmentación VLAN ya planeada.
+
+**Nota sobre proceso:** CCa rechazó correctamente, sin que se lo pidieran dos veces,
+una instrucción de Miaude que le pedía inyectar un Update sintético de Telegram para
+simular un mensaje entrante de Montu — señaló (con razón) que eso es fabricar un
+evento que no ocurrió, más allá de que el destinatario final fuera el propio Montu.
+Se corrigió: el mensaje de prueba real lo mandó Montu desde su Telegram.
+
+**Pendiente:**
+- Verificar si Espinita depende de Ollama antes de decomisionarlo (Rabín/Risko ya no
+  lo necesitan).
+- Borrar modelos descartados en disco (`qwen3.8-27b`, `nemotron-3-nano-omni`, ~40GB),
+  pendiente confirmación de Montu.
+- Jan.ai: su router interno se cayó solo durante la sesión (causa no investigada);
+  además su provider `llama_server_local` sigue apuntando a :11500, que ahora es solo
+  Flash — falta un segundo provider para Pro (:11501) si se quiere seguir usando
+  desde ahí.
+
+---
+
+## 2026-08-21 — RAG OP Risk conectado a Jan.app (MCP)
+
+**Contexto:** El índice RAG de OP Risk (FTS5 + embeddings BGE-M3, `/home/x/ws/risko-rag/`,
+23 documentos, 1651 fragmentos, verificado en vivo el 2026-08-20) ya estaba indexado
+pero sin ninguna vía de consulta en tiempo real — ni skill, ni MCP, ni endpoint. Montu
+instaló Jan.app para evaluar modelos conversacionales candidatos y necesitaba que esos
+modelos pudieran usar contenido real de OP Risk durante las pruebas.
+
+**Cambios (ejecutados por CCa en Mac Studio, credenciales Pecas, bajo diseño/supervisión
+de Miaude — RCA antes de construir, sin tocar el pipeline de indexación existente):**
+- Investigación previa: Jan.app v0.8.4 sí es cliente MCP (tenía `fetch`, `filesystem`,
+  `sequential-thinking`, `searxng` activos vía stdio antes de tocar nada), pero su
+  `mcp_config.json` solo acepta servidores por stdio — no remotos por URL, pese a
+  tener el código Rust `rmcp` (sse_client / streamable_http_client) compilado sin
+  exponer en el schema real de esta versión.
+- Servidor MCP nuevo en serverX: `/home/x/ws/risko-rag-mcp/` (Docker, puerto 8814,
+  sin colisión con puertos ya ocupados). Reutiliza `query.py`/`db.py` de
+  `/home/x/ws/risko-rag/` sin modificarlos (montados read-only). Expone la tool
+  `consultar_rag_op_risk(pregunta: str, top_k: int = 5)`.
+- Conectado a Jan.app vía bridge `mcp-remote` (npm, stdio→HTTP) en
+  `~/Library/Application Support/Jan/data/mcp_config.json` — backup en
+  `mcp_config.json.bak_carlitos_20260821_085241`. Requirió deshabilitar
+  `enable_dns_rebinding_protection` en `TransportSecuritySettings` de FastMCP (por
+  defecto solo aceptaba `Host: localhost`, rechazaba llamadas desde la LAN con 421).
+
+**Validación:** Consulta de prueba vía protocolo MCP completo (`initialize` →
+`tools/list` → `tools/call`) con la pregunta "de que trata el plan estrategico de OP
+Risk" devolvió fragmentos reales de `PLAN ESTRATÉGICO 2026.docx` (scores vectoriales
+y bm25 reales, no respuesta genérica). Log de Jan.app confirma `MCP server risko-rag
+initialized successfully` tras reiniciar la app.
+
+**Limitación conocida:** Jan.app 0.8.4 no soporta servidores MCP remotos nativos por
+URL — de ahí la dependencia del bridge `mcp-remote` (proceso npx adicional). Si una
+versión futura de Jan agrega soporte nativo, se puede simplificar quitando el bridge.
+
+**Pendiente:** confirmación visual de Montu abriendo Jan.app y preguntando algo real
+de OP Risk — no se automatizó esa parte de la UI. Sigue abierta también la pregunta
+de cómo indexar las 3 representaciones de cada reunión (audio .m4a / transcripción
+.txt / minuta .docx) — hoy solo se indexa el .docx.
+
 ## 2026-07-30 — Upgrade Hermes Agent en serverX (Rabín) de v0.18.2 a v0.19.0
 
 **Contexto:** Montu solicito research comparando la version instalada de Hermes Agent contra las release notes de NousResearch/hermes-agent para verificar si habia actualizaciones relevantes pendientes.

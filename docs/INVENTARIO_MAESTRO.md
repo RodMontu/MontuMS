@@ -43,6 +43,8 @@ gpt-oss:20b, qwen3.6:27b, qwen3.6:27b-mtp-q4_K_M, qwen3.6:35b-a3b-mtp-q4_K_M.
 
 ### Agentes Hermes (Rabin, Risko) — estado verificado 2026-07-19
 
+**⚠️ SUPERSEDIDO 2026-08-21/22:** modelo primario, fallback y delegación migrados de Ollama a Flash/Pro (llama-server, Mac Studio). Ver seccion "Migracion Flash+Pro (split)..." mas abajo para el estado real actual — esta tabla ya no refleja la configuracion vigente.
+
 | Agente | HERMES_HOME | Modelo primario | Servicio systemd |
 |---|---|---|---|
 | Rabin | /home/x/.hermes | qwen3.6:35b-a3b | hermes-gateway.service |
@@ -1247,6 +1249,8 @@ El modelo decide qué hacer. El Harness decide qué puede ver, qué herramientas
 ---
 
 ## Stack de inferencia local nuevo — Mac Studio M2 Max (Fase 4 EJECUTADA 2026-08-16, act. 2026-08-17)
+
+**⚠️ PARCIALMENTE SUPERSEDIDO 2026-08-21/22:** el proceso unico en :11500 sirviendo solo Pro se reemplazo por dos procesos independientes (Flash :11500, Pro :11501) — ver seccion "Migracion Flash+Pro (split)..." mas abajo. Lo demas de esta seccion (Pi, extensiones, reglas de fovea) sigue vigente.
 > Fases 0-3 de PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md completas y verificadas (2026-08-05/06, ver LOG_CAMBIOS). Fase 4 (corte real: migrar Carlitos/Aurora a perfiles de Pi, retirar Claude Code CLI vs Ollama) EJECUTADA el 2026-08-16 en dos partes: (a) alias de shell ya apuntaban a ~/bin/Aurora y ~/bin/Carlitos (wrappers Pi) desde antes; (b) BACKLOG-INFRA-01 cerrado hoy: llama-server pasó de proceso manual a LaunchAgent persistente `cl.montuschi.llama-server.plist` (RunAtLoad+KeepAlive, test de respawn verificado en 1s). Ver LOG_CAMBIOS_2026.md 2026-08-16 para el detalle completo, incluyendo evaluación de desempeño de Carlitos.
 
 | Componente | Version | Puerto | Servicio | Huella |
@@ -1282,12 +1286,124 @@ Limpieza de tags huerfanos (`carlitos:latest`, `aurora:latest`) completada 2026-
 
 ---
 
-## Jan.ai — Entorno local de desarrollo (act. 2026-08-20)
+## Migración Flash+Pro (split) y Rabín/Risko a inferencia local real — act. 2026-08-21/22
+
+**Contexto:** Continuación del stack de la sección anterior. Todo lo de esa sección
+(single process en :11500 sirviendo solo Pro, sin router) queda SUPERSEDIDO por lo
+de acá. Ejecutado en su mayoría por CCa (Claude Code CLI, credenciales Pecas) bajo
+diseño y supervisión de Miaude. Detalle narrativo completo en LOG_CAMBIOS_2026.md
+(2026-08-21/22).
+
+### Arquitectura actual: Flash y Pro en procesos independientes
+
+| Componente | Puerto | Bind | LaunchAgent | Modo |
+|---|---|---|---|---|
+| Flash (qwen3-30b-a3b-instruct-Q4_K_M, alias `qwen3-30b-a3b-flash`) | 11500 | 192.168.1.102 (LAN, no loopback) | `cl.montuschi.llama-server.plist` | KeepAlive+RunAtLoad=true, SIEMPRE cargado |
+| Pro (qwen3-coder-next-80b-a3b-Q4_K_M, alias `qwen3-coder-next-80b-pro`) | 11501 | 192.168.1.102 (LAN, no loopback) | `cl.montuschi.llama-server-pro.plist` | KeepAlive=false, RunAtLoad=false, bajo demanda vía toggle manual |
+
+`-c` (contexto): Flash=65536 (mínimo duro exigido por Hermes Agent, ver más abajo),
+Pro=131072 (medido en vivo con Flash descargado, deja margen razonable; n_ctx_train
+real del modelo es 262144 pero no se usa completo por RAM).
+
+**Por qué se abandonó el router consolidado (`--models-preset`, un solo proceso :11500
+sirviendo ambos):** confirmado que esta build de llama-server (10280) no tiene forma
+de descargar un modelo específico sin matar el proceso completo — ni por flag, ni por
+endpoint HTTP (`DELETE /v1/models/{id}`, `POST /v1/models/{id}/unload` → 404 en
+ambos). El único mecanismo de gestión de memoria del router es `--models-max`
+(eviction automático tipo LRU), que no da control determinístico — Montu necesita un
+toggle manual, no un sistema que expulse modelos según qué request llegó primero
+(riesgo de thrashing si Rabín y Carlitos piden algo casi simultáneo). Se optó por dos
+LaunchAgents independientes.
+
+### Bugs de infraestructura reales encontrados y corregidos
+
+1. **Proceso huérfano de launchd:** el LaunchAgent de producción (entonces sirviendo
+   solo Pro) existía en disco con `KeepAlive=true` pero NO estaba cargado en launchd
+   (`launchctl list` → "Could not find service"). Corregido con `launchctl bootstrap`
+   propio durante el cutover.
+2. **Binding de red incorrecto:** Flash y Pro escuchaban en `127.0.0.1` —
+   inalcanzables desde serverX. Todas las pruebas de migración parecían pasar porque
+   el fallback automático a OpenRouter (ver abajo) es tan transparente que enmascaró
+   el fallo de red durante varias rondas de test. Corregido a `--host 192.168.1.102`
+   (decisión explícita de Montu: exponer solo la interfaz LAN, no `0.0.0.0`, dado el
+   plan de seguridad activo y la topología de red plana). Verificación posterior
+   exigió evidencia de log del proceso real (prompt_tokens/completion_tokens
+   coincidentes), no solo "llegó una respuesta".
+3. **Mínimo de contexto de Hermes Agent:** Hermes exige ≥64.000 tokens de contexto
+   para inicializar cualquier agente. Flash estaba en 32768 (heredado del preset de
+   testing de candidatos). Subido a 65536. Costo en RAM: solo ~3.1GB adicional
+   (arquitectura GQA de Qwen3, KV cache barato).
+4. **Scripts de toggle con URLs desactualizadas:** `~/bin/modo-carlitos` y
+   `~/bin/modo-normal` se construyeron y probaron ANTES del fix de binding de red,
+   quedando con sus chequeos de salud apuntando a `127.0.0.1` — corregidos a
+   `192.168.1.102`.
+
+### Migración de Rabín y Risko (Ollama → Flash/Pro)
+
+Configs: `/home/x/.hermes/config.yaml` (Rabín) y
+`/home/x/.hermes/profiles/risko/config.yaml` (Risko), idénticos en estructura.
+
+| Rol | Antes | Ahora |
+|---|---|---|
+| `model:` (primario) | Ollama :11434, `qwen3.6:35b-a3b` | Flash, `http://192.168.1.102:11500/v1`, `qwen3-30b-a3b-flash` |
+| `fallback_providers[0]` | Ollama :11434, `qwen3.5:9b` ("rabin-gateway") | eliminado; cae directo a `deepseek/deepseek-v4-flash` (OpenRouter) |
+| `delegation:` | Ollama :11434, `qwen3.6:35b-a3b` | Pro, `http://192.168.1.102:11501/v1`, `qwen3-coder-next-80b-pro` |
+
+`agent.system_prompt` de ambos actualizado para reflejar la arquitectura real.
+
+**Failover confirmado automático (código, no config):**
+`agent/conversation_loop.py`, función `_try_activate_fallback()`, se dispara tras
+`api_max_retries: 3` ante error de conexión/429/503/529/respuesta vacía. Probado en
+vivo bajando Flash: Rabín y Risko siguieron respondiendo (~9s, vía DeepSeek) y
+volvieron solos al primario al restaurar Flash.
+
+**delegate_task con Pro apagado (confirmado limpio):** falla con `APIConnectionError`
+en el primer intento, reintenta, cae al fallback (DeepSeek) en ~3s. No cuelga.
+
+### Toggle manual Flash ↔ Pro
+
+`~/bin/modo-carlitos` y `~/bin/modo-normal` (bash). Uso: comando suelto en Terminal
+(`~/bin` ya en PATH). `modo-carlitos` baja Flash y sube Pro (Rabín/Risko caen a
+fallback automático mientras tanto); `modo-normal` es el inverso. Idempotentes, con
+verificación real de respuesta HTTP antes de reportar éxito. **Decisión de diseño:**
+toggle manual, NO automatizado por horario — uso de Carlitos errático, no
+calendarizable.
+
+Bugs reales corregidos durante la construcción: sintaxis de `launchctl bootout`
+(requiere target combinado `"${DOMAIN}/${LABEL}"`), `RunAtLoad=false` en Pro requiere
+`launchctl kickstart -k` explícito tras bootstrap, falso negativo de
+`set -o pipefail` + `launchctl list | grep -q` (SIGPIPE) — corregido a
+`launchctl list "$LABEL" >/dev/null 2>&1` directo.
+
+### RAM: por qué NO conviene Flash+Pro cargados simultáneamente de forma permanente
+
+Medido en vivo: con ambos modelos cargados y KV cache real poblado, RSS combinado
+~76.9GB (Flash 28.2GB + Pro 48.7GB), dejando **65MB de RAM libre dura** y solo ~9.3GB
+en páginas reclamables (bajaron de ~48.8GB con Flash solo). Sin margen para backups
+nocturnos, Spotlight, o updates de macOS sin forzar swap real. Dado que el failover a
+DeepSeek ya es transparente (~9s), el toggle manual (un modelo cargado a la vez) es
+la arquitectura correcta.
+
+### Pendientes abiertos
+
+- **Ollama sigue activo** (`qwen3.6:35b-a3b`, `rabin-gateway:latest`) como red de
+  seguridad. Rabín y Risko ya no lo necesitan. **No verificado:** si Espinita
+  depende de Ollama — chequear antes de decomisionar.
+- **Modelos descartados en disco** (`qwen3.8-27b-Q4_K_M.gguf`,
+  `nemotron-3-nano-omni-30b-a3b-Q4_K_XL.gguf`, ~40GB): pendientes de borrado.
+- **Jan.ai:** su router interno (puerto 52383) se cayó solo durante la sesión (causa
+  no investigada). Su provider `llama_server_local` sigue apuntando a :11500 —con el
+  split, eso ahora es SOLO Flash. Falta un segundo provider para Pro (:11501) si se
+  quiere seguir usando desde Jan.
+
+---
+
+## Jan.ai — Entorno local de desarrollo (act. 2026-08-21)
 
 | Componente | Version | Puerto | Servicio | Huella |
 |---|---|---|---|---|
 | Jan.ai | v0.8.4 | UI: local | App Electron | brew cask install |
-| llama_server_local | llama.cpp | 11500 (127.0.0.1) | Qwen3-Coder-Next-80B-A3B Q4_K_M | settings.json |
+| llama_server_local | llama.cpp | 11500 (192.168.1.102, ya no 127.0.0.1) | **desactualizado 2026-08-21/22:** ahora sirve Flash (qwen3-30b-a3b-flash), no Pro — Pro se movio a :11501, sin provider en Jan todavia para ese puerto | settings.json |
 | ollama_local | Ollama 0.31.1 | 11434 (127.0.0.1) | qwen3.6:35b-a3b | settings.json |
 | Tunel SSH (Mac -> serverX) | autossh | 8888 reenviado | LaunchAgent com.montu.ssh-tunnel-serverx | para SearXNG |
 | LiteLLM proxy | ghcr.io/berriai/litellm:main-stable | 4141 | Docker en serverX, /home/x/litellm/ | para fallback a nube |
@@ -1300,6 +1416,7 @@ Limpieza de tags huerfanos (`carlitos:latest`, `aurora:latest`) completada 2026-
 | `filesystem` | `@modelcontextprotocol/server-filesystem` | `/Users/montu/MontuMS` únicamente | ✅ activo |
 | `sequential-thinking` | `@modelcontextprotocol/server-sequential-thinking` | — | ✅ activo |
 | `searxng` | `npx mcp-searxng` | http://127.0.0.1:8888 (túnel) | ✅ activo |
+| `risko-rag` | `npx -y mcp-remote http://192.168.1.111:8814/mcp --allow-http` | RAG OP Risk (serverX, `/home/x/ws/risko-rag-mcp/`, Docker puerto 8814) — bridge stdio→HTTP porque Jan 0.8.4 no soporta MCP remoto nativo por URL | ✅ activo (verificado 2026-08-21, ver LOG_CAMBIOS) |
 | Jan Browser MCP | — | — | ❌ inactivo |
 | browsermcp | — | — | ❌ inactivo |
 | serper | API key paga (serper.dev) | — | ❌ inactivo (costo, anti-tesis) |
@@ -1330,5 +1447,9 @@ Limpieza de tags huerfanos (`carlitos:latest`, `aurora:latest`) completada 2026-
 
 ---
 
-**Fin del documento (act 2026-08-20)**
+- **BACKLOG-OLLAMA-DECOMISION [NUEVO 2026-08-22]:** Rabin/Risko migrados completamente a Flash/Pro (primario, fallback, delegacion). Falta verificar si Espinita depende de Ollama antes de decomisionar. Ver seccion "Migracion Flash+Pro" para detalle.
+- **BACKLOG-MODELOS-DESCARTADOS-CLEANUP [NUEVO 2026-08-22]:** Borrar `qwen3.8-27b-Q4_K_M.gguf` y `nemotron-3-nano-omni-30b-a3b-Q4_K_XL.gguf` (~40GB) del Mac Studio, pendiente confirmacion de que no se necesitan para mas pruebas.
+- **BACKLOG-JAN-PRO-PROVIDER [NUEVO 2026-08-22]:** Jan.ai solo tiene provider para :11500 (ahora Flash). Agregar segundo provider para Pro (:11501) si se quiere seguir usando Pro desde Jan.
+
+**Fin del documento (act 2026-08-22)**
 

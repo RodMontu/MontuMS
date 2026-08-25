@@ -1,5 +1,8 @@
-"""Camino de escritura: usado exclusivamente por Aurora (la bibliotecaria).
-Ningun otro agente ni la futura UI debe llamar a esta funcion."""
+"""Camino de escritura al catalogo de La Biblioteca.
+Aurora (la bibliotecaria) fue descartada como agente el 2026-08-25 -- dejo de
+funcionar (invocacion colgada sin salida). Desde esa fecha, Miaude escribe
+directo en el catalogo. Ningun otro agente ni la futura UI debe llamar a esta
+funcion sin autorizacion explicita de Montu."""
 
 import sqlite3
 from datetime import datetime, timezone

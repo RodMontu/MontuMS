@@ -1,6 +1,44 @@
 # DOCUMENTO TÉCNICO MAESTRO
 
 
+## LibreChat + RAG OP Risk + Google Workspace — serverX (act. 2026-08-25)
+
+**Qué es:** chat web (reemplazo del concepto Risko/Hermes Agent) con rol de asistente personal — Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks por persona vía OAuth, más el RAG de OP Risk. Elegido sobre AnythingLLM por ser la única de las dos con OAuth por usuario nativo (AnythingLLM sigue siendo la opción correcta para Pecas, ver entrada siguiente).
+
+**Dónde:** `/srv/librechat/` en serverX. 6 contenedores docker compose: `api` (LibreChat), `admin-panel`, `chat-mongodb`, `chat-meilisearch`, `vectordb`, `rag_api`, más `google-workspace-mcp` (build propio de `taylorwilsdon/google_workspace_mcp`).
+
+**Puertos:** `192.168.1.111:3080` (chat, LAN only), `:3000` (admin panel), `:8815` (google-workspace-mcp). Modelos vía llama-server Mac Studio (`:11500` Flash, `:11501` Pro).
+
+**MCP conectados:** `risko-rag-mcp` (ya existente, `:8814`, verificado — herramienta `consultar_rag_op_risk`). `google-workspace-mcp` para rodrigo@montuschi.cl (Client ID `650446401695-f3vsnjrj73m2565c7b057qk07t4p36gi.apps.googleusercontent.com`, secret en `.env` de serverX y en `/Users/montu/Documents/OAuth_montuschi_LibreChat.md`) — registrado, pendiente autorización interactiva.
+
+**Cloudflare:** nuevo ingress `gauth.montuschi.cl` → `192.168.1.111:8815` (solo para el callback OAuth). Pendiente: DNS CNAME y política de Access (bypass en `/oauth2callback*`, allow `@montuschi.cl` en el resto).
+
+**Estado de validación:** login, risko-rag y arranque de google-workspace-mcp verificados con evidencia real (logs, no solo reporte de agente). Pendiente: autorización OAuth interactiva, workspaces "Familia"/"OP Risk", cuentas de Yerko/Chepu/Pecas. Detalle completo, decisión de arquitectura y RCA de los 10 problemas reales encontrados: ver `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md` y LOG_CAMBIOS_2026.md, entrada 2026-08-24/25.
+
+---
+
+
+## AnythingLLM — Docker multi-usuario en serverX (act. 2026-08-23)
+
+**Qué es:** capa de UI/orquestación multiusuario para chat contra LLM. Corre en serverX pero NO hace inferencia local — el backend es llama-server nativo en Mac Studio (192.168.1.102:11500, modelo Flash `qwen3-30b-a3b-flash`). No hay Ollama ni modelos locales instalados en serverX para esto.
+
+**Dónde:** `/home/x/ws/anythingllm/docker-compose.yml` — imagen `mintplexlabs/anythingllm:latest`, contenedor `anythingllm`.
+
+**Puertos:** publicado solo en `127.0.0.1:3001` (sin exposición LAN todavía — acceso vía SSH tunnel: `ssh -L 3001:127.0.0.1:3001 x@192.168.1.111`). Cloudflare Tunnel preparado pero NO aplicado (pendiente de autorización de Montu, ver LOG_CAMBIOS 2026-08-23).
+
+**Storage:** bind mount local `/home/x/ws/anythingllm/storage` (NUNCA `/mnt/extra` — SQLite WAL falla en NFS).
+
+**Decisión de conectividad:** AnythingLLM (serverX) → llama-server (Mac Studio, LAN) vía provider "Generic OpenAI", base path `http://192.168.1.102:11500/v1`, modelo `qwen3-30b-a3b-flash`.
+
+**Usuarios:**
+- `montu` — admin, acceso global.
+- `pecas` — rol Default, aislada a su propio workspace ("Pecas", slug `pecas`). No ve workspaces ni historial de Montu.
+
+**Estado de validación:** validado por CCa vía API + chat de prueba (login de ambas cuentas OK, chat end-to-end contra llama-server OK) — pendiente de confirmación visual por Montu en la UI. Detalle completo en LOG_CAMBIOS_2026.md, entrada 2026-08-23.
+
+---
+
+
 ## ESTADO ACTUAL VERIFICADO (act. 2026-07-19)
 
 **NOTA:** las secciones mas abajo en este documento (fechadas 2026-05/2026-07-02)
@@ -1450,6 +1488,12 @@ la arquitectura correcta.
 - **BACKLOG-OLLAMA-DECOMISION [NUEVO 2026-08-22]:** Rabin/Risko migrados completamente a Flash/Pro (primario, fallback, delegacion). Falta verificar si Espinita depende de Ollama antes de decomisionar. Ver seccion "Migracion Flash+Pro" para detalle.
 - **BACKLOG-MODELOS-DESCARTADOS-CLEANUP [NUEVO 2026-08-22]:** Borrar `qwen3.8-27b-Q4_K_M.gguf` y `nemotron-3-nano-omni-30b-a3b-Q4_K_XL.gguf` (~40GB) del Mac Studio, pendiente confirmacion de que no se necesitan para mas pruebas.
 - **BACKLOG-JAN-PRO-PROVIDER [NUEVO 2026-08-22]:** Jan.ai solo tiene provider para :11500 (ahora Flash). Agregar segundo provider para Pro (:11501) si se quiere seguir usando Pro desde Jan.
+- **BACKLOG-PI-PROVIDER-FIX [CERRADO 2026-08-22]:** `~/.pi/agent/models.json`
+  (provider `llama-local`, usado por `~/bin/Carlitos` y `~/bin/Aurora`) tenia el
+  mismo problema que Jan.ai y no habia quedado registrado. Corregido: `baseUrl`
+  ahora apunta a `http://192.168.1.102:11501/v1`. Verificado en vivo (ver
+  LOG_CAMBIOS_2026.md 2026-08-22).
+- **BACKLOG-LLAMATEST1-CLEANUP [CERRADO 2026-08-22]:** provider `llama-test-1` eliminado de `~/.pi/agent/models.json` — candidato de test ya descartado, generaba confusion de puerto con Pro. `llama-test-2` se dejo intacto (sigue en evaluacion).
 
 **Fin del documento (act 2026-08-22)**
 

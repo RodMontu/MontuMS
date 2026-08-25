@@ -1,3 +1,84 @@
+## 2026-08-24/25 — Deploy: LibreChat en serverX + RAG OP Risk + Google Workspace (rodrigo@montuschi.cl)
+
+**Contexto:** evaluación comparativa (LibreChat vs AnythingLLM vs Jan) para reemplazar el concepto de Risko/Hermes Agent por un chat web con LLMs locales del Mac Studio, con rol de asistente personal — Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks por persona + RAG de OP Risk. LibreChat elegido por ser la única con OAuth 2.1 nativo por usuario para Google Workspace (AnythingLLM queda estructuralmente bloqueada para esto — MCP global a la instancia, issue #3855 del repo sin resolver desde mayo 2025; se mantiene en producción para Pecas). Detalle completo, decisión de arquitectura, RCA de 10 problemas reales encontrados y pendientes: ver `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`.
+
+**Fase A (LibreChat base):** desplegado en `/srv/librechat/`, 6 contenedores (api, admin-panel, mongodb, meilisearch, vectordb, rag_api), conectado a llama-server del Mac Studio (Mac-Flash `qwen3-30b-a3b-flash`, verificado end-to-end; Mac-Pro preparado, proceso manual no siempre activo). Login funcional, primera cuenta (rodrigo@montuschi.cl) = admin automático.
+
+**Fase B (RAG + Google Workspace):** conectado `risko-rag-mcp` (ya existente, puerto 8814) — verificado, herramienta `consultar_rag_op_risk` disponible. Desplegado servidor MCP propio `google-workspace-mcp` (build de `taylorwilsdon/google_workspace_mcp`) para Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks. Cliente OAuth creado en GCP (proyecto `Clawdio-Mail-Service`, reutilizado), consentimiento Interno, redirect vía nuevo subdominio `gauth.montuschi.cl` (ingress de Cloudflare Tunnel agregado y validado). Servidor MCP registrado correctamente como "requiere OAuth" — falta que Montu complete la autorización desde la UI.
+
+**Validación realizada:** risko-rag conectado y verificado con evidencia real (logs + tool list). google-workspace-mcp arriba con credenciales reales, sin errores — pendiente solo la autorización interactiva (requiere navegador). Login HTTP 200 verificado en cada paso. No se tocó ningún otro contenedor/servicio de serverX (AnythingLLM, Pi-hole, nginx, SearXNG, etc.) en todo el proceso.
+
+**Pendiente:** Montu — DNS CNAME de `gauth.montuschi.cl` + política de Cloudflare Access (dos apps: bypass en `/oauth2callback*`, allow `@montuschi.cl` en el resto). Completar autorización OAuth desde LibreChat. Crear workspaces "Familia" y "OP Risk". Conectar cuentas de Yerko, Chepu, Pecas y la personal de Montu (cada una separada — no es confiable unificar múltiples cuentas Google en una sola instancia del MCP, documentado con evidencia de otros usuarios del mismo proyecto).
+
+---
+
+## 2026-08-23 — Deploy: AnythingLLM Docker multi-usuario en serverX (UI/orquestación, LLM en Mac Studio)
+
+**Contexto:** despliegue de AnythingLLM (`mintplexlabs/anythingllm:latest`) en serverX como capa de UI/orquestación multiusuario. El backend de inferencia NO vive en serverX: es llama-server nativo en Mac Studio (192.168.1.102:11500, modelo Flash — `qwen3-30b-a3b-flash`). No se instaló Ollama ni ningún modelo local en serverX. Ejecutado por CCa siguiendo master prompt de Montu.
+
+**Fase 0 (verificación pre-vuelo):**
+- `curl http://192.168.1.102:11500/v1/models` → 200 OK, modelo `qwen3-30b-a3b-flash` confirmado accesible desde serverX vía LAN.
+- Puerto 3001 en serverX: libre.
+- Redes Docker: risko-rag-mcp y SearXNG están en redes bridge nombradas separadas (`risko-rag-mcp_default`, `searxng_default`), sin red compartida entre sí. No relevante para este deploy — AnythingLLM habla con el Mac Studio por IP LAN, no por red Docker interna.
+- Disco `/home/x`: 228G disponibles de 468G (49% uso).
+
+**Deploy (Fase 1):** `/home/x/ws/anythingllm/docker-compose.yml`, imagen `mintplexlabs/anythingllm:latest`, puerto publicado solo en `127.0.0.1:3001` (sin exposición LAN por ahora). Volumen bind mount local `/home/x/ws/anythingllm/storage` (NUNCA en `/mnt/extra` — SQLite en WAL mode falla en NFS, ya documentado). Contenedor healthy, respondiendo 200 en `http://127.0.0.1:3001`.
+
+**Configuración (Fase 2, automatizada 100% vía API REST de AnythingLLM — sin pasar por la UI):**
+- Modo multiusuario activado. Admin creado: `montu`.
+- LLM Provider: Generic OpenAI → base path `http://192.168.1.102:11500/v1`, modelo `qwen3-30b-a3b-flash`, token limit 65536, max tokens de salida 4096.
+- Usuario `pecas` creado con rol **Default** (no Manager — evita visibilidad global sobre otros workspaces).
+- Workspace "Pecas" (slug `pecas`) creado y asignado exclusivamente a ese usuario. Confirmado vía `/admin/workspaces/1/users` que solo `pecas` (userId 2) tiene acceso.
+- Passwords iniciales entregadas por Montu directamente en el chat (no quedaron ni quedan registradas en ningún archivo de este repositorio de docs).
+
+**Validación realizada:** validado por CCa vía API + chat de prueba — pendiente de confirmación visual por Montu. Se hizo login de prueba con ambas cuentas (200 OK) y un chat real end-to-end vía `/workspace/pecas/stream-chat` (chatMode temporalmente cambiado a "chat" para el test, restaurado a "automatic" después): mensaje "Responde solo con la palabra: OK" → respuesta "OK" correcta desde llama-server, 142 tok/s, provider `GenericOpenAiLLM`. No se verificó aún desde el navegador de Montu.
+
+**Pendiente:**
+- Confirmación visual de Montu vía UI (tunnel SSH: `ssh -L 3001:127.0.0.1:3001 x@192.168.1.111`, entrar como `montu`).
+- Fase 4 (Cloudflare Tunnel): diff de ingress preparado pero NO aplicado — pendiente de mostrarlo a Montu y su autorización explícita antes de tocar `/etc/cloudflared/config.yml` en serveri3.
+
+---
+
+## 2026-08-22 — Cleanup: provider de test "llama-test-1" eliminado
+
+**Contexto:** limpieza acotada pedida por Miaude/Pecas (ejecutada por CCa). El provider `llama-test-1` en `~/.pi/agent/models.json` (Mac Studio) era un candidato de test — Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf — que apuntaba a `http://127.0.0.1:11501/v1`, mismo numero de puerto que usa Pro (`http://192.168.1.102:11501/v1`, interfaz distinta). No habia colision confirmada, pero generaba confusion al leer la config (ver nota abierta en la entrada anterior, 2026-08-22).
+
+**Investigacion previa (paso 1-2):** se verifico `lsof -i :11501`, `launchctl list` y `~/Library/LaunchAgents/` antes de tocar nada. Resultado: nada escuchaba en el puerto 11501 en ese momento — ni Pro (su plist `llama-server-pro.plist` existe pero no estaba corriendo) ni ningun proceso de test. No existia ningun LaunchAgent propio de `llama-test-1`. Conclusion: era config muerta, sin proceso real detras. No se detuvo ningun servicio.
+
+**Fix aplicado:** backup de `models.json` creado con timestamp. Se elimino el bloque completo `llama-test-1` de `~/.pi/agent/models.json`. Se verifico JSON valido tras el cambio y que `llama-local` y `llama-test-2` quedaron intactos.
+
+---
+
+## 2026-08-22 — Fix: Carlitos/Aurora reconectados tras split Flash+Pro (gap cerrado)
+
+**Contexto:** la migracion Flash+Pro (split en dos procesos, 2026-08-21/22) actualizo
+los toggles `~/bin/modo-carlitos`/`~/bin/modo-normal` y la documentacion de Jan.ai,
+pero no toco `~/.pi/agent/models.json` — el archivo que `~/bin/Carlitos` y
+`~/bin/Aurora` usan de verdad para conectarse a Pro. Resultado: ambos agentes
+fallaban con "Connection error" desde el cierre de esa sesion. Detectado y
+diagnosticado por Miaude en ventana de chat aparte, ejecutado por CCa.
+
+**Fix aplicado:** provider `llama-local` en `~/.pi/agent/models.json`, `baseUrl`
+corregido de `http://127.0.0.1:11500/v1` (obsoleto — ahi vive Flash, no Pro) a
+`http://192.168.1.102:11501/v1` (Pro real, tras el split). Sin cambios al `id` del
+modelo ni a los providers `llama-test-1`/`llama-test-2`.
+
+**Verificacion en vivo:** backup de `models.json` creado. Se activo Pro con
+`modo-carlitos`, se probo `Carlitos "responde solo con la palabra OK"` -> `OK`, se
+probo `Aurora "responde solo con la palabra OK"` -> `OK`, se restauro con
+`modo-normal`. Confirmado Flash arriba en :11500 y Pro abajo al finalizar — mismo
+estado en que se encontro el sistema.
+
+**Nota abierta, no resuelta:** `llama-test-1` usa el mismo puerto 11501 que Pro,
+pero bindeado a `127.0.0.1` en vez de `192.168.1.102` — sockets distintos, sin
+colision confirmada, no verificado en vivo por estar fuera de alcance.
+
+**Recordatorio operativo:** Pro sigue siendo manual — `~/bin/Carlitos`/`~/bin/Aurora`
+NO auto-activan `modo-carlitos`. Si Pro esta apagado, Carlitos fallara con el mismo
+"Connection error" hasta correr `modo-carlitos` primero.
+
+---
+
 ---
 
 ## 2026-08-21/22 — Split Flash+Pro, migración real de Rabín/Risko a inferencia local, hallazgos críticos de red y contexto

@@ -1,3 +1,17 @@
+## 2026-08-26 (tarde) — Fix de IP en Jan (127.0.0.1 vs 192.168.1.102) + limpieza y apodo "Lite" para gpt-oss-20b
+
+**Contexto:** Montu reportó que Jan no lograba usar gpt-oss-20b ("Generation failed", error de conexión contra `http://127.0.0.1:11502`).
+
+**RCA:** el LaunchAgent de gpt-oss-20b (y también el de Flash) escuchan explícitamente en `--host 192.168.1.102`, no en loopback ni `0.0.0.0`. Verificado con curl: `127.0.0.1:11502` → sin respuesta; `192.168.1.102:11502` → `HTTP 200`. El provider de Jan para gpt-oss usaba `127.0.0.1` — corregido a `192.168.1.102`. Se encontró que el provider de Flash (`llama_server_local`) tenía exactamente el mismo problema, nunca detectado porque el modelo que Montu venía usando en Jan en la práctica era otro (`ollama_local`, puerto 11434, sin relación). Corregido también, con autorización explícita.
+
+**Limpieza y reorganización del selector de Jan (a pedido de Montu):** se eliminó el provider `candidatos_conversacionales` (modelos ya descartados: qwen3.8-27b, nemotron-3-nano-omni-30b-a3b). Se corrigió que el provider de Flash tenía el nombre/archivo de Pro por error (arrastrado desde que se creó, nunca notado). Se creó por primera vez un provider dedicado para Pro (no existía como opción propia en Jan). Los tres quedaron con nombres consistentes y en primer lugar de la lista: **Flash qwen3:30b-a3b**, **Lite gpt-oss-20b** (apodo nuevo para gpt-oss-20b, a modo de prueba), **Pro qwen3-coder-next-80b-a3b**.
+
+**Nota:** Pro queda seleccionable en Jan pero fallará si se prueba ahora mismo — sigue apagado (modo-normal), es el comportamiento esperado del toggle Flash/Pro.
+
+**Detalle completo:** `MODELOS_CONVERSACIONALES_CANDIDATOS.md`.
+
+---
+
 ## 2026-08-26 — Creación de incidente_seguridad.md como documento ancla de seguridad
 
 Se creó `docs/incidente_seguridad.md`, documento ancla de seguridad de la

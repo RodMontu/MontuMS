@@ -64,6 +64,16 @@ liviana siempre disponible en LibreChat, Jan y Rabín (Hermes) — independiente
 toggle Flash/Pro. Detalle completo de esa integración en
 `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`, sección 9.
 
+**Apodo "Lite" (sesión 2026-08-26, prueba):** en Jan, el modelo se identifica como
+"Lite gpt-oss-20b" — parte de una limpieza del selector de Jan donde los tres
+modelos locales quedaron con nombres consistentes: "Flash qwen3:30b-a3b", "Lite
+gpt-oss-20b", "Pro qwen3-coder-next-80b-a3b", en ese orden, primero en la lista.
+De paso se corrigió que el provider de Flash tenía el nombre/archivo de Pro por
+error (nunca se había notado), se eliminó el provider `candidatos_conversacionales`
+(modelos ya descartados: qwen3.8-27b, nemotron-3-nano-omni-30b-a3b), y se creó por
+primera vez un provider dedicado para Pro en Jan (no existía). Es una convención de
+nombres a modo de prueba, no necesariamente definitiva.
+
 ## Pendiente
 
 - Jan.app: agregado el provider `llama_server_gptoss` en `settings.json`, pero

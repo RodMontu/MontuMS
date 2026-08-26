@@ -1,3 +1,25 @@
+## 2026-08-26 — Creación de incidente_seguridad.md como documento ancla de seguridad
+
+Se creó `docs/incidente_seguridad.md`, documento ancla de seguridad de la
+información de Montuschi Consultores. Consolida dos incidentes reales ocurridos
+en el mismo equipo (PROMETHEUS-AI-CORE, cliente Torres Ocaranza/OptiFierro): la
+saturación de tempdb en el SQL Server productivo por un batch sin acotar rango
+de fechas, y la exposición del servicio Ollama sin autenticación en el puerto
+11434 detectada en auditoría. Incluye también los compromisos surgidos en la
+reunión de aclaración posterior (no documentados en el informe escrito de TI),
+el hallazgo de que la recurrencia de la contraseña expirada de la cuenta
+OptiFierro ya se materializó cortando la sincronización con Cubigest, un punto
+de cultura de trabajo sobre uso de credenciales de terceros, los principios ya
+validados a mantener, y una tabla consolidada de trece pendientes. Se indexó en
+La Biblioteca (9 secciones, `catalogo.db`) con resúmenes de síntesis propios,
+verificados con `buscar_tema`.
+
+**Nota de infraestructura (no resuelta, fuera de alcance de esta tarea):**
+Ollama en el Mac Studio (192.168.1.102) solo escucha en `127.0.0.1:11434` (sin
+`OLLAMA_HOST` seteado, PID 855), por lo que `clasificar_directo.py` no puede
+conectar desde serverX. No se tocó esta configuración — es un cambio de
+infraestructura fuera del alcance de archivar este documento.
+
 ## 2026-08-26 — gpt-oss-20b: documentación retroactiva de su activación + conexión como modelo de respaldo en LibreChat/Jan/Rabín
 
 **Contexto:** dos piezas de trabajo distintas documentadas en esta entrada. Primero,

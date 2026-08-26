@@ -123,6 +123,40 @@ Ninguno se resolvió a ciegas — cada uno con causa raíz confirmada antes del 
 
 **Pecas — Google Workspace personal:** no tiene cuenta en el Workspace de montuschi.cl (no amerita el costo por asiento todavía). Usa su Gmail personal; Montu tiene acceso a esa cuenta y podría replicar el mismo trabajo de conexión MCP para ella — explícitamente diferido, no para esta sesión.
 
+## 9. Sesión 2026-08-26 — Mac-GPTOSS conectado como modelo de respaldo en LibreChat, Jan y Rabín
+
+**Contexto:** gpt-oss-20b ya venía corriendo persistente en el Mac Studio (puerto
+11502, LaunchAgent con `RunAtLoad`/`KeepAlive`, activado en una sesión anterior
+nunca documentada — ver `MODELOS_CONVERSACIONALES_CANDIDATOS.md` para el detalle
+completo de esa activación). Esta sesión lo conectó como modelo de respaldo/alternativa
+liviana en las tres aplicaciones que ya usan Flash/Pro, siempre disponible
+independientemente del toggle `modo-carlitos`/`modo-normal` — útil sobre todo cuando
+Pro está cargado en RAM y deja poco margen.
+
+**LibreChat:** nuevo endpoint custom **Mac-GPTOSS** agregado en `/srv/librechat/librechat.yaml`
+(serverX), mismo patrón que Mac-Flash/Mac-Pro (ver sección 3), `baseURL:
+http://192.168.1.102:11502/v1`. Contenedor `api` recreado para tomar el config nuevo.
+Verificado con `curl` contra el endpoint: `HTTP 200`, sin errores.
+
+**Jan (Mac Studio):** nuevo provider `llama_server_gptoss` agregado en `settings.json`,
+mismo patrón que el provider `llama_server_local` ya existente para Flash/Pro,
+`base_url: http://127.0.0.1:11502/v1`. **Pendiente, no crítico:** requiere reiniciar
+Jan para que el provider aparezca en el selector de modelos — no se reinició en esta
+sesión.
+
+**Rabín (Hermes, perfil `default` en serverX, `/home/x/.hermes/config.yaml`):**
+agregado como **primer** ítem de `fallback_providers` — antes de los dos existentes
+(`deepseek/deepseek-v4-flash` y `nvidia/nemotron-3-super-120b-a12b:free`, ambos vía
+OpenRouter). Entrada nueva con `provider: custom`, `base_url:
+http://192.168.1.102:11502/v1`. Gateway reiniciado con el comando propio `hermes
+gateway restart` (no se mataron procesos a mano) — verificado activo, sin errores en
+logs. Los perfiles `nacho` y `risko` **no se tocaron**.
+
+**AnythingLLM:** excluido explícitamente de este trabajo, decisión de Montu — ya no
+es la app elegida para el dominio público (`ia.montuschi.cl` apunta a LibreChat desde
+la sesión de 2026-08-25, ver sección 8), no vale la pena complicarlo con un endpoint
+adicional.
+
 ---
 *Ver también: sección 7 (Pendientes) para el estado previo a esta sesión.*
 

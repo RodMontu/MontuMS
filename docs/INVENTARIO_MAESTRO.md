@@ -1340,6 +1340,7 @@ diseño y supervisión de Miaude. Detalle narrativo completo en LOG_CAMBIOS_2026
 |---|---|---|---|---|
 | Flash (qwen3-30b-a3b-instruct-Q4_K_M, alias `qwen3-30b-a3b-flash`) | 11500 | 192.168.1.102 (LAN, no loopback) | `cl.montuschi.llama-server.plist` | KeepAlive+RunAtLoad=true, SIEMPRE cargado |
 | Pro (qwen3-coder-next-80b-a3b-Q4_K_M, alias `qwen3-coder-next-80b-pro`) | 11501 | 192.168.1.102 (LAN, no loopback) | `cl.montuschi.llama-server-pro.plist` | KeepAlive=false, RunAtLoad=false, bajo demanda vía toggle manual |
+| gpt-oss-20b (MXFP4 nativa, alias `gpt-oss-20b`) | 11502 | 192.168.1.102 (LAN, no loopback) | `cl.montuschi.llama-server-gptoss.plist` | KeepAlive+RunAtLoad=true, SIEMPRE cargado — tercer proceso independiente, no participa del toggle Flash/Pro |
 
 `-c` (contexto): Flash=65536 (mínimo duro exigido por Hermes Agent, ver más abajo),
 Pro=131072 (medido en vivo con Flash descargado, deja margen razonable; n_ctx_train
@@ -1435,6 +1436,36 @@ la arquitectura correcta.
   no investigada). Su provider `llama_server_local` sigue apuntando a :11500 —con el
   split, eso ahora es SOLO Flash. Falta un segundo provider para Pro (:11501) si se
   quiere seguir usando desde Jan.
+
+---
+
+## gpt-oss-20b — tercer modelo persistente en Mac Studio, respaldo para LibreChat/Jan/Rabín (act. 2026-08-26)
+
+**Estado:** activado y persistente desde una sesión anterior a 2026-08-26 (nunca
+documentado hasta ahora). Independiente del toggle Flash/Pro — corre siempre en
+paralelo, en el puerto 11502 (ver tabla de arriba). Detalle completo de la
+activación (specs, por qué se eligió, RAM medida) en
+`MODELOS_CONVERSACIONALES_CANDIDATOS.md`.
+
+**RAM medida (con Flash o Pro cargados simultáneamente):** Flash+gpt-oss ~16GB
+libres (sano). Pro+gpt-oss solo 551MB libres (ajustado pero funcional, sin margen
+para picos).
+
+**Conectado como respaldo (2026-08-26) en:**
+- **LibreChat:** endpoint custom `Mac-GPTOSS` en `/srv/librechat/librechat.yaml`
+  (serverX), `http://192.168.1.102:11502/v1`. Verificado `HTTP 200`.
+- **Jan (Mac Studio):** provider `llama_server_gptoss` en `settings.json`,
+  `http://127.0.0.1:11502/v1`. Pendiente reinicio de Jan para que aparezca en el
+  selector (no crítico).
+- **Rabín (Hermes, perfil `default`):** primer ítem de `fallback_providers` en
+  `/home/x/.hermes/config.yaml`, antes de DeepSeek/Nemotron vía OpenRouter,
+  `provider: custom`, `http://192.168.1.102:11502/v1`. Gateway reiniciado con
+  `hermes gateway restart`, verificado activo. Perfiles `nacho`/`risko` sin tocar.
+- **AnythingLLM:** excluido a propósito (decisión de Montu) — ya no es la app del
+  dominio público.
+
+Detalle narrativo completo: `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`, sección 9, y
+LOG_CAMBIOS_2026.md (2026-08-26).
 
 ---
 

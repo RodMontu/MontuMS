@@ -1,3 +1,54 @@
+## 2026-08-26 — gpt-oss-20b: documentación retroactiva de su activación + conexión como modelo de respaldo en LibreChat/Jan/Rabín
+
+**Contexto:** dos piezas de trabajo distintas documentadas en esta entrada. Primero,
+una activación real que ocurrió en una sesión ANTERIOR y nunca quedó registrada
+(catálogo de La Biblioteca desactualizado, ver aviso de Aurora abajo). Segundo, la
+conexión de hoy de ese modelo ya activo como respaldo en tres apps.
+
+**Parte A — gpt-oss-20b activado y persistente (sesión previa, sin documentar hasta hoy):**
+`/Users/montu/models/gpt-oss-20b-MXFP4.gguf` (~11.3GB, MXFP4 nativa), LaunchAgent
+`~/Library/LaunchAgents/cl.montuschi.llama-server-gptoss.plist` con
+`RunAtLoad=true`/`KeepAlive=true` (mismo criterio que Flash), puerto 11502
+(Flash=11500, Pro=11501), `--host 192.168.1.102`, `--alias gpt-oss-20b`, `--jinja`
+(obligatorio para el formato de chat Harmony), `-c 65536`. Elegido por ser MoE real
+(mismo perfil de eficiencia que Flash), esfuerzo de razonamiento ajustable, e
+historial ya probado — fue el modelo primario real de Rabín en julio 2026, ganó A/B
+test contra qwen3.5:9b. Se habían descartado antes Qwen3.8-27B y Nemotron-3-Nano-Omni
+(detalle en `MODELOS_CONVERSACIONALES_CANDIDATOS.md`). Validado con completion real;
+sobrevive el toggle completo Flash↔Pro sin caerse (~50 chequeos sin fallos) — los
+scripts de toggle no tocan gpt-oss ni el puerto 11502, es independiente y permanente.
+RAM medida: Flash+gpt-oss ~16GB libres (sano); Pro+gpt-oss solo 551MB libres
+(ajustado pero funcional). Anomalía investigada (RAM libre cruda cayendo a ~70MB tras
+volver a `modo-normal`): no es memory leak — `memory_pressure` mostró 66% libre real,
+macOS retenía ~33GB en páginas "inactive" reclamables (cache de disco de Pro),
+comportamiento normal.
+
+**Parte B — conectado hoy como modelo de respaldo en 3 apps:** propósito, modelo
+siempre cargado (independiente del toggle Flash/Pro) para usar cuando Pro está en RAM
+y deja poco margen. **LibreChat:** endpoint custom `Mac-GPTOSS` agregado en
+`/srv/librechat/librechat.yaml` (serverX), `http://192.168.1.102:11502/v1`, mismo
+patrón que Mac-Flash/Mac-Pro; contenedor recreado, verificado `HTTP 200`. **Jan (Mac
+Studio):** provider `llama_server_gptoss` agregado en `settings.json`, mismo patrón
+que `llama_server_local`, `http://127.0.0.1:11502/v1` — requiere reinicio de Jan para
+aparecer en el selector (pendiente, no crítico). **Rabín (Hermes, perfil `default`,
+`/home/x/.hermes/config.yaml`):** agregado como primer ítem de `fallback_providers`
+(antes de `deepseek/deepseek-v4-flash` y `nvidia/nemotron-3-super-120b-a12b:free` vía
+OpenRouter), `provider: custom`, `http://192.168.1.102:11502/v1`. Gateway reiniciado
+con `hermes gateway restart` (no se mataron procesos a mano), verificado activo sin
+errores. Perfiles `nacho` y `risko` no se tocaron. **AnythingLLM excluido**
+explícitamente (decisión de Montu) — ya no es la app del dominio público
+(`ia.montuschi.cl` es LibreChat desde 2026-08-25), no vale la pena complicarlo.
+
+**Nota operativa — Aurora descartada:** por decisión de Montu (2026-08-25, invocación
+colgada sin dar salida), la escritura al catálogo de La Biblioteca ya no pasa por
+Aurora — la hace CCa directo vía `registrar_cambio()` de
+`/home/x/MontuMS/biblioteca/mcp_tools/registrar_cambio.py`.
+
+**Detalle completo:** ver `MODELOS_CONVERSACIONALES_CANDIDATOS.md` (Parte A) y
+`RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`, sección 9 (Parte B).
+
+---
+
 ## 2026-08-25 (noche) — Jan conectado a Google Workspace, ia.montuschi.cl migrado a LibreChat, cuenta de Pecas creada
 
 **Contexto:** decisión de Montu tras confirmar el rumbo de LibreChat: migrar también a Pecas (de AnythingLLM a LibreChat), y sumar Jan.app como canal personal adicional para uso diario propio, conectado al mismo Google Workspace que LibreChat.

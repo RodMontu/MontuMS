@@ -109,5 +109,20 @@ Ninguno se resolvió a ciegas — cada uno con causa raíz confirmada antes del 
 - Personalización visual (logo, colores) y evaluación de extender LibreChat con módulos propios (Kanban, calendario, recordatorios) — viable técnicamente, pendiente decisión de negocio.
 - Verificar si el bug de RAG-compartido-en-Agent (#8322, repo LibreChat) sigue vigente en 0.8.7 antes de confiar en RAG compartido para OP Risk.
 
+## 8. Sesión 2026-08-25 (noche) — Jan conectado, swap de ia.montuschi.cl, cuenta de Pecas
+
+**Jan → Google Workspace:** agregado como servidor MCP en `mcp_config.json` de Jan (Mac Studio), mismo patrón `mcp-remote` que ya usa risko-rag: `npx -y mcp-remote http://192.168.1.111:8815/mcp --allow-http`. Comparte el mismo servidor y las mismas credenciales que LibreChat — no es una instancia nueva.
+
+**`ia.montuschi.cl`: de AnythingLLM a LibreChat.** Se decidió migrar también a Pecas a LibreChat (deja de ser AnythingLLM-only). Cambio de ingress en `/srv/cloudflared/config.yml`: el hostname ahora apunta a `http://localhost:3080` (LibreChat) en vez de `http://localhost:3001` (AnythingLLM). AnythingLLM **no se eliminó** — sigue corriendo puertas adentro (solo LAN) como red de contención hasta confirmar que Pecas está cómoda en LibreChat.
+
+**Cuenta de Pecas creada en LibreChat:** email `rivera.melgarejo@gmail.com`, usuario `pecas`, vía el script `config/create-user.js` del propio contenedor (no por autoregistro). Contraseña temporal generada y entregada a Montu por canal separado (no queda documentada acá).
+
+**`ALLOW_REGISTRATION` pasado a `false`:** con el dominio ya público apuntando a LibreChat, se cerró el autoregistro abierto — de ahora en más los usuarios se crean explícitamente.
+
+**Hallazgo importante (RCA, no ejecutado todavía):** el directorio `/srv/google-workspace-mcp/credentials/` está vacío — nadie completó nunca el consentimiento real de OAuth con Google, ni desde LibreChat ni desde Jan. Los logs del contenedor muestran intentos de conexión reales desde el Mac Studio (192.168.1.102) recibiendo `401` y hacienda correctamente el descubrimiento de endpoints OAuth — el cableado funciona, falta el paso humano de autorización. Como LibreChat y Jan comparten el mismo servidor y las mismas credenciales, autorizar una sola vez (desde cualquiera de las dos apps) destraba a ambas. Pendiente: DNS CNAME de `gauth.montuschi.cl` + verificar las 2 Aplicaciones de Access + completar el consentimiento desde la UI de LibreChat.
+
+**Pecas — Google Workspace personal:** no tiene cuenta en el Workspace de montuschi.cl (no amerita el costo por asiento todavía). Usa su Gmail personal; Montu tiene acceso a esa cuenta y podría replicar el mismo trabajo de conexión MCP para ella — explícitamente diferido, no para esta sesión.
+
 ---
-*Ver también: COMO_USAR_LA_BIBLIOTECA.md, REGLAS_CARDINALES_FLUJO_ORQUESTADO.md, arquitectura_web_montuschi.md, INVENTARIO_MAESTRO.md (entrada AnythingLLM 2026-08-23).*
+*Ver también: sección 7 (Pendientes) para el estado previo a esta sesión.*
+

@@ -1,24 +1,26 @@
 # DOCUMENTO TÉCNICO MAESTRO
 
 
-## LibreChat + RAG OP Risk + Google Workspace — serverX (act. 2026-08-25)
+## LibreChat + RAG OP Risk + Google Workspace — serverX (act. 2026-08-25, noche)
 
-**Qué es:** chat web (reemplazo del concepto Risko/Hermes Agent) con rol de asistente personal — Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks por persona vía OAuth, más el RAG de OP Risk. Elegido sobre AnythingLLM por ser la única de las dos con OAuth por usuario nativo (AnythingLLM sigue siendo la opción correcta para Pecas, ver entrada siguiente).
+**Qué es:** chat web (reemplazo del concepto Risko/Hermes Agent) con rol de asistente personal — Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks por persona vía OAuth, más el RAG de OP Risk. Elegido sobre AnythingLLM por ser la única de las dos con OAuth por usuario nativo. **`ia.montuschi.cl` ahora apunta a LibreChat** (antes AnythingLLM) — Pecas fue migrada también a LibreChat, tiene cuenta propia creada (`rivera.melgarejo@gmail.com`, usuario `pecas`). AnythingLLM no se eliminó, sigue corriendo solo por LAN como red de contención. `ALLOW_REGISTRATION=false` desde que el dominio quedó público.
 
 **Dónde:** `/srv/librechat/` en serverX. 6 contenedores docker compose: `api` (LibreChat), `admin-panel`, `chat-mongodb`, `chat-meilisearch`, `vectordb`, `rag_api`, más `google-workspace-mcp` (build propio de `taylorwilsdon/google_workspace_mcp`).
 
-**Puertos:** `192.168.1.111:3080` (chat, LAN only), `:3000` (admin panel), `:8815` (google-workspace-mcp). Modelos vía llama-server Mac Studio (`:11500` Flash, `:11501` Pro).
+**Puertos:** `192.168.1.111:3080` (chat, ahora también público en `ia.montuschi.cl` vía Cloudflare Tunnel), `:3000` (admin panel), `:8815` (google-workspace-mcp). Modelos vía llama-server Mac Studio (`:11500` Flash, `:11501` Pro).
 
-**MCP conectados:** `risko-rag-mcp` (ya existente, `:8814`, verificado — herramienta `consultar_rag_op_risk`). `google-workspace-mcp` para rodrigo@montuschi.cl (Client ID `650446401695-f3vsnjrj73m2565c7b057qk07t4p36gi.apps.googleusercontent.com`, secret en `.env` de serverX y en `/Users/montu/Documents/OAuth_montuschi_LibreChat.md`) — registrado, pendiente autorización interactiva.
+**MCP conectados:** `risko-rag-mcp` (ya existente, `:8814`, verificado — herramienta `consultar_rag_op_risk`). `google-workspace-mcp` para rodrigo@montuschi.cl (Client ID `650446401695-f3vsnjrj73m2565c7b057qk07t4p36gi.apps.googleusercontent.com`, secret en `.env` de serverX y en `/Users/montu/Documents/OAuth_montuschi_LibreChat.md`) — registrado, **directorio de credenciales confirmado vacío, nadie completó el consentimiento real con Google todavía**. Jan (Mac Studio) también conectado al mismo servidor MCP vía `mcp-remote` (`mcp_config.json`) — comparte credenciales con LibreChat, se autoriza una sola vez para ambos.
 
-**Cloudflare:** nuevo ingress `gauth.montuschi.cl` → `192.168.1.111:8815` (solo para el callback OAuth). Pendiente: DNS CNAME y política de Access (bypass en `/oauth2callback*`, allow `@montuschi.cl` en el resto).
+**Cloudflare:** ingress `gauth.montuschi.cl` → `192.168.1.111:8815` (solo para el callback OAuth). Pendiente: DNS CNAME y confirmar las 2 Aplicaciones de Access (bypass en `/oauth2callback*`, allow `@montuschi.cl` en el resto) — Montu reportó estar verificándolo.
 
 **Estado de validación:** login, risko-rag y arranque de google-workspace-mcp verificados con evidencia real (logs, no solo reporte de agente). Pendiente: autorización OAuth interactiva, workspaces "Familia"/"OP Risk", cuentas de Yerko/Chepu/Pecas. Detalle completo, decisión de arquitectura y RCA de los 10 problemas reales encontrados: ver `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md` y LOG_CAMBIOS_2026.md, entrada 2026-08-24/25.
 
 ---
 
 
-## AnythingLLM — Docker multi-usuario en serverX (act. 2026-08-23)
+## AnythingLLM — Docker multi-usuario en serverX (act. 2026-08-23, nota 2026-08-25)
+
+**Actualización 2026-08-25:** `ia.montuschi.cl` ya NO apunta a AnythingLLM — el ingress de Cloudflare Tunnel se cambió para apuntar a LibreChat (ver entrada de arriba). AnythingLLM sigue corriendo, solo accesible por LAN/túnel SSH, como red de contención mientras se confirma la migración de Pecas a LibreChat. No se ha decidido si se retira definitivamente.
 
 **Qué es:** capa de UI/orquestación multiusuario para chat contra LLM. Corre en serverX pero NO hace inferencia local — el backend es llama-server nativo en Mac Studio (192.168.1.102:11500, modelo Flash `qwen3-30b-a3b-flash`). No hay Ollama ni modelos locales instalados en serverX para esto.
 

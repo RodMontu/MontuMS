@@ -1,3 +1,21 @@
+## 2026-08-25 (noche) — Jan conectado a Google Workspace, ia.montuschi.cl migrado a LibreChat, cuenta de Pecas creada
+
+**Contexto:** decisión de Montu tras confirmar el rumbo de LibreChat: migrar también a Pecas (de AnythingLLM a LibreChat), y sumar Jan.app como canal personal adicional para uso diario propio, conectado al mismo Google Workspace que LibreChat.
+
+**Jan → google-workspace-mcp:** agregada entrada nueva en `mcp_config.json` (Mac Studio) usando el mismo puente `mcp-remote` que ya usa risko-rag: `npx -y mcp-remote http://192.168.1.111:8815/mcp --allow-http`. Comparte servidor y credenciales con LibreChat — no es una instancia separada, se autoriza una sola vez para ambos.
+
+**`ia.montuschi.cl`: AnythingLLM → LibreChat.** Ingress de `/srv/cloudflared/config.yml` cambiado de `http://localhost:3001` a `http://localhost:3080`. Validado y cloudflared reiniciado, `HTTP_200` confirmado. AnythingLLM no se eliminó — sigue vivo solo por LAN como red de contención.
+
+**Cuenta de Pecas en LibreChat:** creada vía `docker compose exec api node config/create-user.js` (no por autoregistro) — email `rivera.melgarejo@gmail.com`, usuario `pecas`, email verificado. Contraseña temporal entregada a Montu por canal separado.
+
+**`ALLOW_REGISTRATION=false`:** aplicado ahora que el dominio quedó público, para que no se puedan crear cuentas sin control.
+
+**RCA — por qué ni LibreChat ni Jan pueden usar Gmail todavía:** se confirmó que `/srv/google-workspace-mcp/credentials/` está completamente vacío — el consentimiento real de OAuth con Google nunca se completó, para ninguna de las dos apps. Los logs del contenedor muestran intentos de conexión reales desde el Mac Studio (192.168.1.102) recibiendo `401` y hacienda correctamente el descubrimiento de endpoints OAuth (`.well-known/oauth-protected-resource`, `.well-known/oauth-authorization-server`) — el cableado funciona, falta el paso humano de autorización. Como ambas apps comparten el mismo servidor, se resuelve una sola vez.
+
+**Pendiente:** DNS CNAME de `gauth.montuschi.cl` (Montu reportó estar verificando la política de Access asociada), completar el consentimiento OAuth desde la UI de LibreChat, y evaluar más adelante conectar el Gmail personal de Pecas (deferido explícitamente, no para esta sesión).
+
+---
+
 ## 2026-08-24/25 — Deploy: LibreChat en serverX + RAG OP Risk + Google Workspace (rodrigo@montuschi.cl)
 
 **Contexto:** evaluación comparativa (LibreChat vs AnythingLLM vs Jan) para reemplazar el concepto de Risko/Hermes Agent por un chat web con LLMs locales del Mac Studio, con rol de asistente personal — Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks por persona + RAG de OP Risk. LibreChat elegido por ser la única con OAuth 2.1 nativo por usuario para Google Workspace (AnythingLLM queda estructuralmente bloqueada para esto — MCP global a la instancia, issue #3855 del repo sin resolver desde mayo 2025; se mantiene en producción para Pecas). Detalle completo, decisión de arquitectura, RCA de 10 problemas reales encontrados y pendientes: ver `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`.

@@ -1,3 +1,11 @@
+## 2026-08-26 — Creación de procedimiento_trabajo_seguro.md v1.0
+
+Se crea procedimiento_trabajo_seguro.md v1.0 — procedimiento vinculante de
+trabajo seguro con datos e infraestructura de clientes, aplicado desde ahora
+a los pendientes de Torres Ocaranza/OptiFierro. Ver docs/procedimiento_trabajo_seguro.md.
+
+---
+
 ## 2026-08-26 (tarde) — Fix de IP en Jan (127.0.0.1 vs 192.168.1.102) + limpieza y apodo "Lite" para gpt-oss-20b
 
 **Contexto:** Montu reportó que Jan no lograba usar gpt-oss-20b ("Generation failed", error de conexión contra `http://127.0.0.1:11502`).

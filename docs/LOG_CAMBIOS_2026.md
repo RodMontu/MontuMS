@@ -1,3 +1,154 @@
+═══════════════════════════════════════════════
+2026-08-28 — Se crea pendientes_sistema_planificador.md
+═══════════════════════════════════════════════
+Documento vivo de trazabilidad de pendientes con TI Torres Ocaranza, post-reunion
+con Roberto/Rene/Gustavo. Se actualizara frecuentemente, sin versionado formal.
+
+═══════════════════════════════════════════════
+2026-08-28 (correccion) — RAM "al limite" fue una falsa alarma
+═══════════════════════════════════════════════
+La entrada de hoy sobre "Restriccion de RAM" en INVENTARIO_MAESTRO.md se
+basaba en RSS de `ps aux` y "unused" crudo de `top`, ambos enganosos para
+procesos llama-server: cuentan como memoria del proceso las paginas del
+.gguf mapeado via mmap() (~17GB por proceso, 0B dirty, confirmado con
+vmmap --summary), que en realidad son cache de archivo reclamable al
+instante, no memoria privada real. Confirmado con `footprint <pid>` (coincide
+exacto con Monitor de Actividad: ~6.1GB reales por proceso Flash/coder-flash,
+no ~24GB) y `memory_pressure` (~40% libre real, presion verde). Mismo
+fenomeno ya documentado el 2026-08-26 con Pro/gpt-oss en
+MODELOS_CONVERSACIONALES_CANDIDATOS.md -- no es un hallazgo nuevo, es una
+alarma reciclada por no haber aplicado la leccion ya aprendida antes de
+escribir la doc de hoy.
+
+Metrica correcta de ahora en adelante para juzgar salud de RAM: memory_pressure
+o footprint <pid> / Monitor de Actividad. Nunca RSS de ps aux ni "unused" de
+top para procesos llama-server (o cualquier proceso que use mmap de archivos
+grandes).
+
+Los numeros de "Flash+Pro" y "Solo Pro" de la entrada original de hoy quedan
+sin re-verificar con la metrica correcta -- no se confirma que sean sanos ni
+que sean criticos, son directamente no confiables tal como estaban escritos.
+
+═══════════════════════════════════════════════
+2026-08-28 — Benchmark coder-flash vs Pro + reestructuracion de modos
+═══════════════════════════════════════════════
+Sesion completa de benchmark (via Miaude, API directa a llama-server, sin
+Pi/tools de por medio) comparando coder-flash (Qwen3-Coder-30B-A3B) contra
+Pro (Qwen3-Coder-Next-80B) para el rol de Carlitos.
+
+Ronda 1 (Flash coexistiendo, tareas cortas): 9 pruebas easy/medium/hard cada
+uno, 18/18 PASS. coder-flash 1.6x mas rapido (86 vs 53 tok/s promedio).
+
+Ronda 2 (modelos aislados, mayor rigor): reproducibilidad 2/2 en ambos (LRU
+Cache, DP con restriccion de tiempo), 1 prueba dura nueva (Mediana de flujo,
+two-heap) PASS en ambos, y una sesion larga de 7 turnos (~3.6-6.2 min,
+sistema de reservas de salas con requisitos acumulativos: recurrencia
+todo-o-nada, timezones, auditoria, prioridad con desplazamiento) para
+estresar coherencia bajo contexto largo.
+
+Hallazgo de velocidad: tok/s de generacion se degrada con el contexto en
+ambos modelos, pero mas en coder-flash (-35%, 84->54 tok/s) que en Pro
+(-12%, 53->47 tok/s) -- Pro maneja sesiones muy largas con mas estabilidad
+relativa (ventana nativa mayor, 131K vs 65K), aunque sigue mas lento en
+terminos absolutos en todo momento.
+
+Hallazgo de fiabilidad bajo complejidad acumulada: ambos modelos produjeron
+UN bug real distinto al cierre de la sesion de 7 turnos (8/10 y 9/10 checks
+de verificacion via API publica). coder-flash: bug de aritmetica de fecha en
+reservas recurrentes + desplazamiento por prioridad validado pero nunca
+ejecutado. Pro: perdida silenciosa de la validacion de solapamiento para el
+caso de prioridad default ('media', el mas comun) -- regresion mas severa
+por afectar la ruta principal, aunque Pro solo tuvo 1 bug contra 2 de
+coder-flash. Ambos bugs de coder-flash corregidos y re-verificados (11/11
+tras el fix, incluyendo un caso de interaccion nuevo). El bug de Pro quedo
+documentado, no corregido (no es el modelo de produccion diaria).
+
+Decision: coder-flash queda como driver diario de Carlitos. Pro reservado
+para tareas de coding realmente dificiles. Sin evidencia de que Pro sea mas
+confiable bajo carga -- la leccion real es que ningun modelo local exime de
+verificacion de cierre en sesiones largas (ya cubierto por el protocolo de
+verificacion de Carlitos).
+
+Cambio de infraestructura: modo-normal y modo-carlitos (solo manejaban
+Flash/Pro) quedan deprecados, renombrados a .bak. Se crean modo-flash
+(Flash+coder-flash, default diario), modo-coder (Pro+Lite, tareas dificiles),
+modo-chat (Flash+Lite, conversacional puro) en ~/bin/, mismo patron de
+idempotencia/verificacion de salud de los scripts anteriores.
+
+Ver seccion "Mac Studio M2 Max -- inferencia local" en INVENTARIO_MAESTRO.md
+(actualizada hoy) para el detalle de los 4 modelos, formas de conexion, y
+tabla de modos.
+
+## 2026-08-27 — Google Workspace MCP: intermitencia resuelta (recorte de tools), dos bugs de OAuth en LibreChat, y confiabilidad de tool-calling en modelos locales
+
+**Contexto:** sesión completa sobre `google-workspace-mcp` (contenedor en
+`/srv/librechat/`, sirve a Jan.app vía `gauth.montuschi.cl` y a LibreChat por red
+interna), disparada por reporte de intermitencia en Jan ("a veces conectado, a
+veces no").
+
+**1. RCA intermitencia — hipótesis del fix de cloudflared descartada.**
+RCA inicial encontró `journalctl -u cloudflared` con `context canceled` cada 3-5
+min sobre `originService=http://192.168.1.111:8815`, coincidiendo con timeouts en
+el log de Jan. Se aplicó `originRequest: connectTimeout: 30s, keepAliveTimeout:
+120s` en el ingress de `gauth.montuschi.cl` (backup
+`config.yml.bak_20260827_190347`). **Verificado en vivo que NO resolvió nada** —
+mismo patrón después del restart. Queda aplicado (no dañino) pero descartado como
+causa raíz real.
+
+**2. Causa raíz real (probable): 121 tools cargadas por defecto → recortadas a 27.**
+Inventario vía `tools/list` directo: **121 tools** (Gmail 14, Calendar 7, Tasks 6,
+Drive 13, Docs 19, Sheets 16, Slides 6, Forms 6, Chat 6, Contacts 8, Apps Script
+13, otros 5). Un chat vacío en Jan consumía ~28K tokens solo en definiciones de
+tools. **Fix:** `TOOLS=gmail calendar tasks` agregado como env var al servicio
+`google-workspace-mcp` en `docker-compose.override.yml` (entrypoint ya soportaba
+`${TOOLS:+--tools $TOOLS}` nativo, sin tocar código). Confirmado por logs: OAuth
+ahora pide solo scopes de Gmail+Calendar+Tasks. Resto de servicios queda
+disponible para activar después, solo cambiando esa variable.
+**Efecto colateral (ya resuelto):** recrear el contenedor resetea la sesión OAuth
+2.1 (vive en memoria, no en disco, documentado por el propio proyecto). Forzó
+re-autenticación de Jan (cache stale limpiado en `~/.mcp-auth/mcp-remote-v1/`,
+backup en `/tmp/mcpauth_bak_20260827_201413/`) y de LibreChat (ver punto 3).
+
+**3. LibreChat: dos bugs de configuración distintos, ambos corregidos.**
+- **Bug A — desajuste de resource metadata (RFC 9728 §3.3):** `librechat.yaml`
+  apuntaba al MCP por URL interna Docker (`http://google-workspace-mcp:8815/mcp`),
+  pero el servidor se anuncia con `WORKSPACE_EXTERNAL_URL=https://gauth.montuschi.cl`.
+  LibreChat rechazaba el OAuth por diseño (resource metadata no coincidía con la
+  URL real). **Fix:** `url` cambiada a `https://gauth.montuschi.cl/mcp` en
+  `librechat.yaml` (backup `librechat.yaml.bak_20260827_210120`). No hizo falta
+  tocar `mcpSettings.allowedAddresses` (esa lista es solo SSRF-exemption para
+  IPs/hosts privados; un dominio público no la necesita).
+- **Bug B — `DOMAIN_CLIENT`/`DOMAIN_SERVER` en `localhost:3080`:** con el bug A
+  resuelto, el OAuth avanzó hasta el callback, pero el `redirect_uri` usaba
+  `http://localhost:3080/...` (valor de desarrollo nunca corregido) — el
+  navegador de Montu intentaba volver a su propia máquina, `ERR_CONNECTION_REFUSED`.
+  **Fix:** ambas variables cambiadas a `https://ia.montuschi.cl` en `.env` (backup
+  `.env.bak_20260827_210504`, permisos 600). Contenedor `api` (nombre visible
+  `LibreChat`) recreado con `--force-recreate` (bind-mounts de config no disparan
+  recreación con `up -d` simple).
+Ambos fixes verificados: `montuschi.cl`, `oprisk.cl`, `ia.montuschi.cl` respondiendo
+con normalidad tras cada restart, sin downtime del resto del túnel.
+
+**4. LibreChat hereda el recorte automáticamente; Nacho no usa este MCP.**
+Confirmado que LibreChat apunta al mismo contenedor (recorte aplica sin trabajo
+extra). Nacho (Hermes, Telegram) usa integración nativa separada (`gws_bridge.py`,
+OAuth propio), ya con scopes más amplios (Drive/Sheets/Docs/Contacts de solo
+lectura además de Gmail/Calendar/Tasks). Reducir su scope requeriría
+re-autorización completa (misma fricción que Jan/LibreChat) — evaluado, no
+aplicado, pendiente de decisión de Montu.
+
+**5. Confiabilidad de tool-calling de modelos locales — tres pruebas reales.**
+Detalle completo en `MODELOS_CONVERSACIONALES_CANDIDATOS.md`. Resumen: Gmail
+funciona de forma confiable con Flash cuando la tarea se atomiza en un turno por
+acción. Calendar (`manage_event`) falló en las tres pruebas (Lite y Flash, tarea
+compuesta y atomizada, temperatura default y baja) — el modelo omite
+consistentemente `start_time`/`end_time` incluso dados explícitos en el mismo
+mensaje. Además, ante el error de validación del servidor, se observó un loop de
+reintento del mismo payload fallido decenas de veces sin autocorregirse —
+requiere detención manual.
+
+---
+
 ## 2026-08-26 — Creación de procedimiento_trabajo_seguro.md v1.0
 
 Se crea procedimiento_trabajo_seguro.md v1.0 — procedimiento vinculante de

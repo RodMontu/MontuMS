@@ -1,30 +1,48 @@
 # Pendientes — Sistema Planificador de la Producción (Torres Ocaranza)
+**Documento vivo — sin versionado formal, se actualiza frecuentemente**
+**Última actualización:** 2026-09-06
 
-**Documento vivo — se actualiza frecuentemente, sin versionado formal.** Sirve como trazabilidad rápida entre ventanas de chat distintas: cualquier sesión nueva puede leer esto para saber en qué estamos, sin depender de recordar en qué chat quedó cada cosa.
+## Grupo A — TI / Seguridad / Coordinación con Roberto
+| # | Punto | Estado |
+|---|---|---|
+| A1 | GRANT solo lectura Cubigest | Aprobado |
+| A2 | Llave SSH Mac-TO | Aprobado y en uso |
+| A3 | Auto-login servidor TO | Listo para ejecutar - falta que Montu corra el paso con la contraseña real |
+| A4 | Sincronizacion horaria a Cubigest (fusionado con A9 - levantar queries reales) | Pendiente levantar las queries actuales antes de enviarlas a Roberto |
+| A5 | Cuenta dedicada sistema de averias | Resuelto - acceso alternativo encontrado via DevTools, misma cuenta sirve para Cuadre INET y Averias |
+| A6 | Correo a Roberto - cuenta de servicio sin expiracion | Borrador listo, sin enviar |
+| A7 | Reunion 1:1 con Roberto sobre averias | Cerrado - se resuelve junto con A5 |
+| A8 | Monitoreo de carga propio durante consultas | Cerrado - es practica manual (Miaude/CCa vigilan la carga de Cubigest durante estudios puntuales), no requiere infraestructura nueva |
+| A9 | Entregar queries actuales a Roberto | Fusionado con A4 |
+| A11 | Cadencia de extraccion de turnos_programados (semanal vs diaria, para CENSURA_JORNADA del Motor de Tiempos) | Documentado, decision pendiente - posible conversacion con Roberto |
 
-**Última actualización:** 2026-08-28, tras reunión con Roberto, René y Gustavo (TI Torres Ocaranza).
+## Grupo B — Funcional / Producto (jefes de planta)
+| # | Punto | Estado |
+|---|---|---|
+| B1 | PRIORIDAD 1 - Posible sistema OptiSteel con programacion real de fabricacion por planta/jornada, hallado por Montu via Cubigest | Investigar - podria resolver de fondo el problema de fecha despacho/fabricacion |
+| B2 | Repartir etiquetas entre 2+ maquinas (cajita) - opcion manual por trabajo, habilitar en las 3 plantas | Pendiente, prioridad justo detras de B1 |
+| B6 | Bloqueo de dias para Remiz/Francisco/Jose | Sin confirmar |
+| B7 | Confirmar con Roberto lectura de columna prioridad Cubigest | Sin confirmar |
+| B8 | Mejorar presentacion de tiempos con ayudantes | Sin confirmar |
+| B11 | Actualizar GeoVictoria - Dylan (Coronel) | Sin estrategia aun |
+| B12 | Generar programacion de turno noche | Probablemente simple (turnos semanales ya existen) - sin confirmar si se ejecuto |
 
-## Aprobado / resuelto
-- GRANT de solo lectura en Cubigest para el agente de desarrollo local — aprobado.
-- Llave SSH (Mac Studio ↔ servidor TO) — aprobado y formalizado.
-- Auto-login / continuidad del servidor tras corte de energía — lo resuelve Rodrigo directamente (ya validado en su propia máquina de pruebas); avisa por correo cuando quede aplicado en el servidor de TO.
-- Documento de seguimiento de 3 columnas (compromiso de Roberto) — cerrado, ya no aplica; superado por el protocolo de aviso + bitácora.
+(B3, B4, B5 retirados - viven en el Motor de Tiempos. B9 cerrado junto con B1.
+B10 retirado - no aplica, era mala transcripcion de "EURA"/"pasadas", tema
+operativo sin relacion con OptiFierro.)
 
-## En progreso
-- **Sincronización horaria a Cubigest** — intervalo confirmado: **1 hora**. Es de las últimas tareas en desplegarse. Antes: enviar las consultas reales a Roberto, pasarlas por su optimizador de índices, y respetar las ventanas horarias acordadas para trabajo pesado (5:00–8:00 AM y 18:00–20:00 PM).
-- **Cuenta dedicada para el sistema de averías** (reemplaza la cuenta personal de Gustavo, hoy hardcodeada en `scraper_cuadre_inet.py`) — reconocido abiertamente en la reunión, sin urgencia. Pendiente de una reunión 1:1 con Roberto.
-- **Cuenta de servicio sin expiración de contraseña** — planteada por Rodrigo como prioridad uno en la reunión. **Sin confirmación explícita de Roberto capturada en la transcripción** — pendiente de que Rodrigo lo confirme directamente.
-
-## Nuevo, fuera de los 5 puntos originales de la presentación
-- Reunión 1:1 con Roberto sobre el sistema de averías — Rodrigo tiene un error de diseño propio, necesita ayuda para resolver dónde enganchar la extracción de datos.
-- Monitoreo de carga propio durante consultas a Cubigest — compromiso explícito: si se detecta sobrecarga del sistema, se detiene la consulta.
-- Protocolo de aviso, refinado respecto al PTS original — no todo requiere correo previo. Trabajo automatizado y liviano en régimen (ej. el sync horario ya funcionando) no necesita aviso cada vez; sí lo requiere trabajo de largo aliento o de impacto significativo.
-- Entregar a Roberto todas las queries que hoy hace OptiFierro contra Cubigest, para revisión y posible optimización de su lado. No urgente.
-
-## Borrador pendiente — no enviado aún
-Correo a Roberto combinando (1) cuenta dedicada para el sistema de averías y (2) cuenta de servicio sin expiración de contraseña. Rodrigo lo retomará después de resolver otro tema primero — queda en pausa, recordar cuando se retome.
+## Grupo C — Compromisos con Mauricio Torres (dueno, reunion 30-jul)
+| # | Punto | Estado |
+|---|---|---|
+| C2 | Conciliacion de volumenes semanales (583/196/135 ton) | Pendiente - hay pista de un informe dentro de Cubigest |
+| C3 | Metrica ton/hora | En paralelo - ventana Motor de Tiempos |
+| C6 | Ronda de validacion con jefes de planta | Primera ronda cumplida (Cerrillos, Coronel); segunda ronda pendiente, despues de que los cambios actuales esten en produccion |
+| C7 | Reunion de seguimiento Mauricio-Rodrigo | No aplica todavia - se hace una vez consolidado todo lo demas |
 
 ## Fuentes
-- Transcripción de la reunión con TI Torres Ocaranza, 28-08-2026 (Roberto, René, Gustavo).
-- Presentación "Sistema Planificador — Seguridad y Plan de Trabajo" (misma fecha).
-- Procedimiento de Trabajo Seguro v1.0 (`procedimiento_trabajo_seguro.md`).
+- Transcripcion reunion TI Torres Ocaranza, 28-08-2026 (Roberto, Rene, Gustavo)
+- Acta consolidada de inducciones - Jose Auger (Cerrillos) y Remiz Rivano/Nelson Bustos (Coronel), 28-07-2026
+- Minuta de reunion con Mauricio Torres, 30-07-2026
+- TAREA_REINTERPRETACION_ESTADO_TURNOS_2.md + trabajo de CCa, 06-09-2026
+- Presentacion "Sistema Planificador - Seguridad y Plan de Trabajo"
+- Procedimiento de Trabajo Seguro v1.0

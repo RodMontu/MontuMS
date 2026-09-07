@@ -19,7 +19,7 @@
 ## Grupo B — Funcional / Producto (jefes de planta)
 | # | Punto | Estado |
 |---|---|---|
-| B1 | PRIORIDAD 1 - Posible sistema OptiSteel con programacion real de fabricacion por planta/jornada, hallado por Montu via Cubigest | Investigar - podria resolver de fondo el problema de fecha despacho/fabricacion |
+| B1 | PRIORIDAD 1 - Posible sistema OptiSteel con programacion real de fabricacion por planta/jornada, hallado por Montu via Cubigest | OptiSteel = export CSV via DescargarOptistel.aspx (piezas NO variables), nivel tag individual, campo Producido reemplaza heuristica de fecha despacho-1/2. Pendiente: decidir mecanismo de ingesta a OF V2. Ver docs/analisis_optisteel_export.md |
 | B2 | Repartir etiquetas entre 2+ maquinas (cajita) - opcion manual por trabajo, habilitar en las 3 plantas | Pendiente, prioridad justo detras de B1 |
 | B6 | Bloqueo de dias para Remiz/Francisco/Jose | Sin confirmar |
 | B7 | Confirmar con Roberto lectura de columna prioridad Cubigest | Sin confirmar |

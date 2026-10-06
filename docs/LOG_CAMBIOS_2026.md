@@ -1,3111 +1,498 @@
 ═══════════════════════════════════════════════
-2026-09-06 — Se consolida y reescribe pendientes_sistema_planificador.md
+2026-10-06 — FIX URGENTES: colisión jcastillo, avería manual sin cerrar (COIL 14), gris/candado en fallback histórico, VersionWatcher frontend, 7 bajas (commit 47c72c7)
 ═══════════════════════════════════════════════
-Se consolida y reescribe pendientes_sistema_planificador.md con los tres
-grupos completos (TI/Roberto, Funcional/plantas, Compromisos Mauricio Torres)
-tras cruzar todas las minutas disponibles.
+**Quién:** CCa-37 (jcastillo + averías, informe `docs/agentes/CCa37_urgentes_20261006.md`), CCa-38/39 (iniciaron, Miaude terminó y commiteó), Miaude (migraciones, merge, deploy).
 
-═══════════════════════════════════════════════
-2026-08-28 — Se crea pendientes_sistema_planificador.md
-═══════════════════════════════════════════════
-Documento vivo de trazabilidad de pendientes con TI Torres Ocaranza, post-reunion
-con Roberto/Rene/Gustavo. Se actualizara frecuentemente, sin versionado formal.
+**Contexto:** QA en vivo de Montu el 06-10 ~08:00, con jornada a carga completa en las 3 plantas (incluido adelanto). Ola previa: Ola 1 (05-10).
 
-═══════════════════════════════════════════════
-2026-08-28 (correccion) — RAM "al limite" fue una falsa alarma
-═══════════════════════════════════════════════
-La entrada de hoy sobre "Restriccion de RAM" en INVENTARIO_MAESTRO.md se
-basaba en RSS de `ps aux` y "unused" crudo de `top`, ambos enganosos para
-procesos llama-server: cuentan como memoria del proceso las paginas del
-.gguf mapeado via mmap() (~17GB por proceso, 0B dirty, confirmado con
-vmmap --summary), que en realidad son cache de archivo reclamable al
-instante, no memoria privada real. Confirmado con `footprint <pid>` (coincide
-exacto con Monitor de Actividad: ~6.1GB reales por proceso Flash/coder-flash,
-no ~24GB) y `memory_pressure` (~40% libre real, presion verde). Mismo
-fenomeno ya documentado el 2026-08-26 con Pro/gpt-oss en
-MODELOS_CONVERSACIONALES_CANDIDATOS.md -- no es un hallazgo nuevo, es una
-alarma reciclada por no haber aplicado la leccion ya aprendida antes de
-escribir la doc de hoy.
+1. **Colisión de usuario "jcastillo" (Calama).** Causa raíz: `sincronizar_operadores_desde_gv` (`routers/admin.py`) deriva el username sin chequear colisión entre candidatos nuevos del mismo lote; dos personas con el mismo apellido paterno (Joan Ignacio Castillo Valderrama, Ayte; Joan Manuel Castillo Cisternas, Supervisor) quedaron con `Operador='jcastillo'` ambas, afectando también `PUT /api/operadores/{id}` (editaba las dos filas a la vez). Fix: desambiguación en el sync (`_desambiguar_username`). Decisión de Montu: el Supervisor conserva `jcastillo`; el Ayudante pasa a `jcastillov`. Migración `migrate_fix_jcastillo_20261006.py` ejecutada contra producción.
+2. **Avería manual sin cerrar — COIL 14 (Calama).** Las 3 hipótesis del ticket (tests de ayer contaminando la BD, scheduler caído, bug de fusión) quedaron descartadas con evidencia: el sync corre cada 30 min y está al día. La causa real: una avería MANUAL de COIL 14 del 2026-03-23 nunca se cerró, y `estado_maquinas.py` no caduca la fuente manual por diseño (para que el jefe de planta la vea). Migración `migrate_levantar_coil14_20261006.py` ejecutada. Recomendación pendiente (no implementada): alertar en el frontend cuando una avería manual supere cierta antigüedad.
+3. **Gris/candado no sobrevivía al fallback histórico.** Al leer un día sin eventos en memoria (p. ej. un día pasado, cayendo a `programacion_guardada`), `obtener_programacion` no reaplicaba `_marcar_etapas_congeladas` sobre el snapshot guardado — una cajita ya confirmada en Cubigest podía perder el gris al verla como historial. Fix: una llamada adicional a la función existente (`routers/programacion.py`). Gap documentado, no implementado: no existe una "vista de día completo en gris" como modo explícito — el mecanismo sigue siendo cajita por cajita.
+4. **VersionWatcher no detectaba despliegues de solo-frontend** (como el fix del 05-10 de noche). Ahora compara también el bundle de Vite servido en `/` (por hash) contra el cargado en el documento, sin endpoint nuevo.
+5. **7 bajas aplicadas** (regla: desaparecer del roster completo de Geovictoria, re-verificado contra el roster de HOY, no solo 30 días de asistencia): Aníbal García (Coronel), Héctor Acuña y Giovanni Acuña (Coronel, habituales de Dobladora 3/Línea Corte Coronel y Dobladora 4 respectivamente — limpiados también esos campos, que guardan NOMBRE completo, no username), Fabián Quezada, Jofran Medina, Miguel Gutiérrez, Gabriel Sepúlveda (Cerrillos). Migración `migrate_baja_desvinculados_20261006.py`. `operadores_matriz`: 70 → 63 filas.
 
-Metrica correcta de ahora en adelante para juzgar salud de RAM: memory_pressure
-o footprint <pid> / Monitor de Actividad. Nunca RSS de ps aux ni "unused" de
-top para procesos llama-server (o cualquier proceso que use mmap de archivos
-grandes).
+**Proceso — Graphify no se consultó antes de estas 3 tareas** (miss de Miaude en los prompts de hoy, a diferencia del preludio de la Ola 1). Se consultó retroactivamente antes de integrar: sin colisiones de riesgo detectadas entre los archivos tocados. Regenerado tras el deploy (commit `47c72c7`): 6.801 nodos / 7.747 enlaces — **casi duplicó el conteo de ayer (3.745/4.680) sin una razón clara**; posible acumulación del workspace de Graphify entre regeneraciones sucesivas (modo "watch", no limpieza previa). Pendiente investigar antes de confiar en el conteo absoluto; las consultas de impacto por archivo (no afectadas por esto) siguen siendo confiables.
 
-Los numeros de "Flash+Pro" y "Solo Pro" de la entrada original de hoy quedan
-sin re-verificar con la metrica correcta -- no se confirma que sean sanos ni
-que sean criticos, son directamente no confiables tal como estaban escritos.
+**Verificado en vivo (06-10, ~15:10):** `/api/version` responde; Calama (`sucursal_id=1`) Carro de Corte y COIL 14 operativas; operadores de Coronel = kgallegos, elara, rneira, dneira (los 7 de baja ya no aparecen); `integrity_check` = ok antes y después de las 3 migraciones.
+
+**Pendiente:** prompt de prueba de SSH para Antigravity (agy) pendiente de que Montu confirme si pudo correrlo interactivamente (headless vía MCP quedó bloqueado); registro de hoy en La Biblioteca.
+═══════════════════════════════════════════════
+2026-10-05 — FIX GAN2: tras pulsar "Generar" el Gantt volvía a dibujar 1 cajita por etiqueta (commit 46f91fa)
+═══════════════════════════════════════════════
+**Quién:** Miaude (directo).
+
+**Síntoma (reportado por Montu, ≈17:44):** en Coronel el Gantt mostraba 1 cajita por etiqueta (47 cajitas, tooltip "Etiqueta 19 de 29") en vez de 1 por viaje.
+
+**Causa raíz (con evidencia):** el backend respondía bien: `GET /api/programacion` devolvía 4 eventos agrupados (`cantidad_etiquetas` 15/2/10/20, `rango_etiquetas`). La agrupación GAN2 (`_agrupar_cajitas_por_viaje`, commit `19c2148`) se aplica solo al LEER (`GET`). Pero `handleGenerar` (`GestorProgramacion.tsx`, botón "Generar") reemplaza el estado del Gantt con las tareas crudas, por etiqueta, de la respuesta de `POST /api/programacion/generar`, y no vuelve a leer. El log del backend registra un `POST /generar` de Coronel a las ≈17:43. Es un defecto latente de GAN2 desde el 29-09 (no lo causó el deploy de la Ola 1, aunque el reinicio del backend y el nuevo pool de operadores llevaron a regenerar Coronel). Los demás flujos (reprogramar, deshacer, aplicar reparto) sí releen el GET.
+
+**Fix:** `await fetchData(true)` al final de la rama de éxito de `handleGenerar` (4 líneas, frontend). Solo se reconstruyó y reinició el frontend (el backend no se tocó, no se perdieron planes en memoria). `tsc` limpio. Verificado en el navegador de Montu tras recargar: cajitas agrupadas ("Etiquetas 8-15 de 19 — Viaje ASR-277/1"), bundle `index--lYF-0dZ.js`.
+
+**Pendiente derivado:** el vigilante de versión (F9) solo compara la versión del BACKEND: un despliegue solo de frontend no dispara la recarga automática (las pestañas abiertas necesitan F5 esta vez). Hay que agregar un identificador de build del frontend a la comparación.
 
 ═══════════════════════════════════════════════
-2026-08-28 — Benchmark coder-flash vs Pro + reestructuracion de modos
+2026-10-05 — DEPLOY Ola 1 del QA SPP: operadores por cargo, ribetes desde el Cuadro, Vista Semanal = Cuadro, recarga por versión + reparación de índices SQLite
 ═══════════════════════════════════════════════
-Sesion completa de benchmark (via Miaude, API directa a llama-server, sin
-Pi/tools de por medio) comparando coder-flash (Qwen3-Coder-30B-A3B) contra
-Pro (Qwen3-Coder-Next-80B) para el rol de Carlitos.
-
-Ronda 1 (Flash coexistiendo, tareas cortas): 9 pruebas easy/medium/hard cada
-uno, 18/18 PASS. coder-flash 1.6x mas rapido (86 vs 53 tok/s promedio).
-
-Ronda 2 (modelos aislados, mayor rigor): reproducibilidad 2/2 en ambos (LRU
-Cache, DP con restriccion de tiempo), 1 prueba dura nueva (Mediana de flujo,
-two-heap) PASS en ambos, y una sesion larga de 7 turnos (~3.6-6.2 min,
-sistema de reservas de salas con requisitos acumulativos: recurrencia
-todo-o-nada, timezones, auditoria, prioridad con desplazamiento) para
-estresar coherencia bajo contexto largo.
-
-Hallazgo de velocidad: tok/s de generacion se degrada con el contexto en
-ambos modelos, pero mas en coder-flash (-35%, 84->54 tok/s) que en Pro
-(-12%, 53->47 tok/s) -- Pro maneja sesiones muy largas con mas estabilidad
-relativa (ventana nativa mayor, 131K vs 65K), aunque sigue mas lento en
-terminos absolutos en todo momento.
-
-Hallazgo de fiabilidad bajo complejidad acumulada: ambos modelos produjeron
-UN bug real distinto al cierre de la sesion de 7 turnos (8/10 y 9/10 checks
-de verificacion via API publica). coder-flash: bug de aritmetica de fecha en
-reservas recurrentes + desplazamiento por prioridad validado pero nunca
-ejecutado. Pro: perdida silenciosa de la validacion de solapamiento para el
-caso de prioridad default ('media', el mas comun) -- regresion mas severa
-por afectar la ruta principal, aunque Pro solo tuvo 1 bug contra 2 de
-coder-flash. Ambos bugs de coder-flash corregidos y re-verificados (11/11
-tras el fix, incluyendo un caso de interaccion nuevo). El bug de Pro quedo
-documentado, no corregido (no es el modelo de produccion diaria).
-
-Decision: coder-flash queda como driver diario de Carlitos. Pro reservado
-para tareas de coding realmente dificiles. Sin evidencia de que Pro sea mas
-confiable bajo carga -- la leccion real es que ningun modelo local exime de
-verificacion de cierre en sesiones largas (ya cubierto por el protocolo de
-verificacion de Carlitos).
-
-Cambio de infraestructura: modo-normal y modo-carlitos (solo manejaban
-Flash/Pro) quedan deprecados, renombrados a .bak. Se crean modo-flash
-(Flash+coder-flash, default diario), modo-coder (Pro+Lite, tareas dificiles),
-modo-chat (Flash+Lite, conversacional puro) en ~/bin/, mismo patron de
-idempotencia/verificacion de salud de los scripts anteriores.
-
-Ver seccion "Mac Studio M2 Max -- inferencia local" en INVENTARIO_MAESTRO.md
-(actualizada hoy) para el detalle de los 4 modelos, formas de conexion, y
-tabla de modos.
-
-## 2026-08-27 — Google Workspace MCP: intermitencia resuelta (recorte de tools), dos bugs de OAuth en LibreChat, y confiabilidad de tool-calling en modelos locales
-
-**Contexto:** sesión completa sobre `google-workspace-mcp` (contenedor en
-`/srv/librechat/`, sirve a Jan.app vía `gauth.montuschi.cl` y a LibreChat por red
-interna), disparada por reporte de intermitencia en Jan ("a veces conectado, a
-veces no").
-
-**1. RCA intermitencia — hipótesis del fix de cloudflared descartada.**
-RCA inicial encontró `journalctl -u cloudflared` con `context canceled` cada 3-5
-min sobre `originService=http://192.168.1.111:8815`, coincidiendo con timeouts en
-el log de Jan. Se aplicó `originRequest: connectTimeout: 30s, keepAliveTimeout:
-120s` en el ingress de `gauth.montuschi.cl` (backup
-`config.yml.bak_20260827_190347`). **Verificado en vivo que NO resolvió nada** —
-mismo patrón después del restart. Queda aplicado (no dañino) pero descartado como
-causa raíz real.
-
-**2. Causa raíz real (probable): 121 tools cargadas por defecto → recortadas a 27.**
-Inventario vía `tools/list` directo: **121 tools** (Gmail 14, Calendar 7, Tasks 6,
-Drive 13, Docs 19, Sheets 16, Slides 6, Forms 6, Chat 6, Contacts 8, Apps Script
-13, otros 5). Un chat vacío en Jan consumía ~28K tokens solo en definiciones de
-tools. **Fix:** `TOOLS=gmail calendar tasks` agregado como env var al servicio
-`google-workspace-mcp` en `docker-compose.override.yml` (entrypoint ya soportaba
-`${TOOLS:+--tools $TOOLS}` nativo, sin tocar código). Confirmado por logs: OAuth
-ahora pide solo scopes de Gmail+Calendar+Tasks. Resto de servicios queda
-disponible para activar después, solo cambiando esa variable.
-**Efecto colateral (ya resuelto):** recrear el contenedor resetea la sesión OAuth
-2.1 (vive en memoria, no en disco, documentado por el propio proyecto). Forzó
-re-autenticación de Jan (cache stale limpiado en `~/.mcp-auth/mcp-remote-v1/`,
-backup en `/tmp/mcpauth_bak_20260827_201413/`) y de LibreChat (ver punto 3).
-
-**3. LibreChat: dos bugs de configuración distintos, ambos corregidos.**
-- **Bug A — desajuste de resource metadata (RFC 9728 §3.3):** `librechat.yaml`
-  apuntaba al MCP por URL interna Docker (`http://google-workspace-mcp:8815/mcp`),
-  pero el servidor se anuncia con `WORKSPACE_EXTERNAL_URL=https://gauth.montuschi.cl`.
-  LibreChat rechazaba el OAuth por diseño (resource metadata no coincidía con la
-  URL real). **Fix:** `url` cambiada a `https://gauth.montuschi.cl/mcp` en
-  `librechat.yaml` (backup `librechat.yaml.bak_20260827_210120`). No hizo falta
-  tocar `mcpSettings.allowedAddresses` (esa lista es solo SSRF-exemption para
-  IPs/hosts privados; un dominio público no la necesita).
-- **Bug B — `DOMAIN_CLIENT`/`DOMAIN_SERVER` en `localhost:3080`:** con el bug A
-  resuelto, el OAuth avanzó hasta el callback, pero el `redirect_uri` usaba
-  `http://localhost:3080/...` (valor de desarrollo nunca corregido) — el
-  navegador de Montu intentaba volver a su propia máquina, `ERR_CONNECTION_REFUSED`.
-  **Fix:** ambas variables cambiadas a `https://ia.montuschi.cl` en `.env` (backup
-  `.env.bak_20260827_210504`, permisos 600). Contenedor `api` (nombre visible
-  `LibreChat`) recreado con `--force-recreate` (bind-mounts de config no disparan
-  recreación con `up -d` simple).
-Ambos fixes verificados: `montuschi.cl`, `oprisk.cl`, `ia.montuschi.cl` respondiendo
-con normalidad tras cada restart, sin downtime del resto del túnel.
-
-**4. LibreChat hereda el recorte automáticamente; Nacho no usa este MCP.**
-Confirmado que LibreChat apunta al mismo contenedor (recorte aplica sin trabajo
-extra). Nacho (Hermes, Telegram) usa integración nativa separada (`gws_bridge.py`,
-OAuth propio), ya con scopes más amplios (Drive/Sheets/Docs/Contacts de solo
-lectura además de Gmail/Calendar/Tasks). Reducir su scope requeriría
-re-autorización completa (misma fricción que Jan/LibreChat) — evaluado, no
-aplicado, pendiente de decisión de Montu.
-
-**5. Confiabilidad de tool-calling de modelos locales — tres pruebas reales.**
-Detalle completo en `MODELOS_CONVERSACIONALES_CANDIDATOS.md`. Resumen: Gmail
-funciona de forma confiable con Flash cuando la tarea se atomiza en un turno por
-acción. Calendar (`manage_event`) falló en las tres pruebas (Lite y Flash, tarea
-compuesta y atomizada, temperatura default y baja) — el modelo omite
-consistentemente `start_time`/`end_time` incluso dados explícitos en el mismo
-mensaje. Además, ante el error de validación del servidor, se observó un loop de
-reintento del mismo payload fallido decenas de veces sin autocorregirse —
-requiere detención manual.
-
----
-
-## 2026-08-26 — Creación de procedimiento_trabajo_seguro.md v1.0
-
-Se crea procedimiento_trabajo_seguro.md v1.0 — procedimiento vinculante de
-trabajo seguro con datos e infraestructura de clientes, aplicado desde ahora
-a los pendientes de Torres Ocaranza/OptiFierro. Ver docs/procedimiento_trabajo_seguro.md.
-
----
-
-## 2026-08-26 (tarde) — Fix de IP en Jan (127.0.0.1 vs 192.168.1.102) + limpieza y apodo "Lite" para gpt-oss-20b
-
-**Contexto:** Montu reportó que Jan no lograba usar gpt-oss-20b ("Generation failed", error de conexión contra `http://127.0.0.1:11502`).
-
-**RCA:** el LaunchAgent de gpt-oss-20b (y también el de Flash) escuchan explícitamente en `--host 192.168.1.102`, no en loopback ni `0.0.0.0`. Verificado con curl: `127.0.0.1:11502` → sin respuesta; `192.168.1.102:11502` → `HTTP 200`. El provider de Jan para gpt-oss usaba `127.0.0.1` — corregido a `192.168.1.102`. Se encontró que el provider de Flash (`llama_server_local`) tenía exactamente el mismo problema, nunca detectado porque el modelo que Montu venía usando en Jan en la práctica era otro (`ollama_local`, puerto 11434, sin relación). Corregido también, con autorización explícita.
-
-**Limpieza y reorganización del selector de Jan (a pedido de Montu):** se eliminó el provider `candidatos_conversacionales` (modelos ya descartados: qwen3.8-27b, nemotron-3-nano-omni-30b-a3b). Se corrigió que el provider de Flash tenía el nombre/archivo de Pro por error (arrastrado desde que se creó, nunca notado). Se creó por primera vez un provider dedicado para Pro (no existía como opción propia en Jan). Los tres quedaron con nombres consistentes y en primer lugar de la lista: **Flash qwen3:30b-a3b**, **Lite gpt-oss-20b** (apodo nuevo para gpt-oss-20b, a modo de prueba), **Pro qwen3-coder-next-80b-a3b**.
-
-**Nota:** Pro queda seleccionable en Jan pero fallará si se prueba ahora mismo — sigue apagado (modo-normal), es el comportamiento esperado del toggle Flash/Pro.
-
-**Detalle completo:** `MODELOS_CONVERSACIONALES_CANDIDATOS.md`.
-
----
-
-## 2026-08-26 — Creación de incidente_seguridad.md como documento ancla de seguridad
-
-Se creó `docs/incidente_seguridad.md`, documento ancla de seguridad de la
-información de Montuschi Consultores. Consolida dos incidentes reales ocurridos
-en el mismo equipo (PROMETHEUS-AI-CORE, cliente Torres Ocaranza/OptiFierro): la
-saturación de tempdb en el SQL Server productivo por un batch sin acotar rango
-de fechas, y la exposición del servicio Ollama sin autenticación en el puerto
-11434 detectada en auditoría. Incluye también los compromisos surgidos en la
-reunión de aclaración posterior (no documentados en el informe escrito de TI),
-el hallazgo de que la recurrencia de la contraseña expirada de la cuenta
-OptiFierro ya se materializó cortando la sincronización con Cubigest, un punto
-de cultura de trabajo sobre uso de credenciales de terceros, los principios ya
-validados a mantener, y una tabla consolidada de trece pendientes. Se indexó en
-La Biblioteca (9 secciones, `catalogo.db`) con resúmenes de síntesis propios,
-verificados con `buscar_tema`.
-
-**Nota de infraestructura (no resuelta, fuera de alcance de esta tarea):**
-Ollama en el Mac Studio (192.168.1.102) solo escucha en `127.0.0.1:11434` (sin
-`OLLAMA_HOST` seteado, PID 855), por lo que `clasificar_directo.py` no puede
-conectar desde serverX. No se tocó esta configuración — es un cambio de
-infraestructura fuera del alcance de archivar este documento.
-
-## 2026-08-26 — gpt-oss-20b: documentación retroactiva de su activación + conexión como modelo de respaldo en LibreChat/Jan/Rabín
-
-**Contexto:** dos piezas de trabajo distintas documentadas en esta entrada. Primero,
-una activación real que ocurrió en una sesión ANTERIOR y nunca quedó registrada
-(catálogo de La Biblioteca desactualizado, ver aviso de Aurora abajo). Segundo, la
-conexión de hoy de ese modelo ya activo como respaldo en tres apps.
-
-**Parte A — gpt-oss-20b activado y persistente (sesión previa, sin documentar hasta hoy):**
-`/Users/montu/models/gpt-oss-20b-MXFP4.gguf` (~11.3GB, MXFP4 nativa), LaunchAgent
-`~/Library/LaunchAgents/cl.montuschi.llama-server-gptoss.plist` con
-`RunAtLoad=true`/`KeepAlive=true` (mismo criterio que Flash), puerto 11502
-(Flash=11500, Pro=11501), `--host 192.168.1.102`, `--alias gpt-oss-20b`, `--jinja`
-(obligatorio para el formato de chat Harmony), `-c 65536`. Elegido por ser MoE real
-(mismo perfil de eficiencia que Flash), esfuerzo de razonamiento ajustable, e
-historial ya probado — fue el modelo primario real de Rabín en julio 2026, ganó A/B
-test contra qwen3.5:9b. Se habían descartado antes Qwen3.8-27B y Nemotron-3-Nano-Omni
-(detalle en `MODELOS_CONVERSACIONALES_CANDIDATOS.md`). Validado con completion real;
-sobrevive el toggle completo Flash↔Pro sin caerse (~50 chequeos sin fallos) — los
-scripts de toggle no tocan gpt-oss ni el puerto 11502, es independiente y permanente.
-RAM medida: Flash+gpt-oss ~16GB libres (sano); Pro+gpt-oss solo 551MB libres
-(ajustado pero funcional). Anomalía investigada (RAM libre cruda cayendo a ~70MB tras
-volver a `modo-normal`): no es memory leak — `memory_pressure` mostró 66% libre real,
-macOS retenía ~33GB en páginas "inactive" reclamables (cache de disco de Pro),
-comportamiento normal.
-
-**Parte B — conectado hoy como modelo de respaldo en 3 apps:** propósito, modelo
-siempre cargado (independiente del toggle Flash/Pro) para usar cuando Pro está en RAM
-y deja poco margen. **LibreChat:** endpoint custom `Mac-GPTOSS` agregado en
-`/srv/librechat/librechat.yaml` (serverX), `http://192.168.1.102:11502/v1`, mismo
-patrón que Mac-Flash/Mac-Pro; contenedor recreado, verificado `HTTP 200`. **Jan (Mac
-Studio):** provider `llama_server_gptoss` agregado en `settings.json`, mismo patrón
-que `llama_server_local`, `http://127.0.0.1:11502/v1` — requiere reinicio de Jan para
-aparecer en el selector (pendiente, no crítico). **Rabín (Hermes, perfil `default`,
-`/home/x/.hermes/config.yaml`):** agregado como primer ítem de `fallback_providers`
-(antes de `deepseek/deepseek-v4-flash` y `nvidia/nemotron-3-super-120b-a12b:free` vía
-OpenRouter), `provider: custom`, `http://192.168.1.102:11502/v1`. Gateway reiniciado
-con `hermes gateway restart` (no se mataron procesos a mano), verificado activo sin
-errores. Perfiles `nacho` y `risko` no se tocaron. **AnythingLLM excluido**
-explícitamente (decisión de Montu) — ya no es la app del dominio público
-(`ia.montuschi.cl` es LibreChat desde 2026-08-25), no vale la pena complicarlo.
-
-**Nota operativa — Aurora descartada:** por decisión de Montu (2026-08-25, invocación
-colgada sin dar salida), la escritura al catálogo de La Biblioteca ya no pasa por
-Aurora — la hace CCa directo vía `registrar_cambio()` de
-`/home/x/MontuMS/biblioteca/mcp_tools/registrar_cambio.py`.
-
-**Detalle completo:** ver `MODELOS_CONVERSACIONALES_CANDIDATOS.md` (Parte A) y
-`RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`, sección 9 (Parte B).
-
----
-
-## 2026-08-25 (noche) — Jan conectado a Google Workspace, ia.montuschi.cl migrado a LibreChat, cuenta de Pecas creada
-
-**Contexto:** decisión de Montu tras confirmar el rumbo de LibreChat: migrar también a Pecas (de AnythingLLM a LibreChat), y sumar Jan.app como canal personal adicional para uso diario propio, conectado al mismo Google Workspace que LibreChat.
-
-**Jan → google-workspace-mcp:** agregada entrada nueva en `mcp_config.json` (Mac Studio) usando el mismo puente `mcp-remote` que ya usa risko-rag: `npx -y mcp-remote http://192.168.1.111:8815/mcp --allow-http`. Comparte servidor y credenciales con LibreChat — no es una instancia separada, se autoriza una sola vez para ambos.
-
-**`ia.montuschi.cl`: AnythingLLM → LibreChat.** Ingress de `/srv/cloudflared/config.yml` cambiado de `http://localhost:3001` a `http://localhost:3080`. Validado y cloudflared reiniciado, `HTTP_200` confirmado. AnythingLLM no se eliminó — sigue vivo solo por LAN como red de contención.
-
-**Cuenta de Pecas en LibreChat:** creada vía `docker compose exec api node config/create-user.js` (no por autoregistro) — email `rivera.melgarejo@gmail.com`, usuario `pecas`, email verificado. Contraseña temporal entregada a Montu por canal separado.
-
-**`ALLOW_REGISTRATION=false`:** aplicado ahora que el dominio quedó público, para que no se puedan crear cuentas sin control.
-
-**RCA — por qué ni LibreChat ni Jan pueden usar Gmail todavía:** se confirmó que `/srv/google-workspace-mcp/credentials/` está completamente vacío — el consentimiento real de OAuth con Google nunca se completó, para ninguna de las dos apps. Los logs del contenedor muestran intentos de conexión reales desde el Mac Studio (192.168.1.102) recibiendo `401` y hacienda correctamente el descubrimiento de endpoints OAuth (`.well-known/oauth-protected-resource`, `.well-known/oauth-authorization-server`) — el cableado funciona, falta el paso humano de autorización. Como ambas apps comparten el mismo servidor, se resuelve una sola vez.
-
-**Pendiente:** DNS CNAME de `gauth.montuschi.cl` (Montu reportó estar verificando la política de Access asociada), completar el consentimiento OAuth desde la UI de LibreChat, y evaluar más adelante conectar el Gmail personal de Pecas (deferido explícitamente, no para esta sesión).
-
----
-
-## 2026-08-24/25 — Deploy: LibreChat en serverX + RAG OP Risk + Google Workspace (rodrigo@montuschi.cl)
-
-**Contexto:** evaluación comparativa (LibreChat vs AnythingLLM vs Jan) para reemplazar el concepto de Risko/Hermes Agent por un chat web con LLMs locales del Mac Studio, con rol de asistente personal — Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks por persona + RAG de OP Risk. LibreChat elegido por ser la única con OAuth 2.1 nativo por usuario para Google Workspace (AnythingLLM queda estructuralmente bloqueada para esto — MCP global a la instancia, issue #3855 del repo sin resolver desde mayo 2025; se mantiene en producción para Pecas). Detalle completo, decisión de arquitectura, RCA de 10 problemas reales encontrados y pendientes: ver `RISKO_LIBRECHAT_GOOGLE_WORKSPACE.md`.
-
-**Fase A (LibreChat base):** desplegado en `/srv/librechat/`, 6 contenedores (api, admin-panel, mongodb, meilisearch, vectordb, rag_api), conectado a llama-server del Mac Studio (Mac-Flash `qwen3-30b-a3b-flash`, verificado end-to-end; Mac-Pro preparado, proceso manual no siempre activo). Login funcional, primera cuenta (rodrigo@montuschi.cl) = admin automático.
-
-**Fase B (RAG + Google Workspace):** conectado `risko-rag-mcp` (ya existente, puerto 8814) — verificado, herramienta `consultar_rag_op_risk` disponible. Desplegado servidor MCP propio `google-workspace-mcp` (build de `taylorwilsdon/google_workspace_mcp`) para Gmail/Calendar/Drive/Docs/Sheets/Slides/Tasks. Cliente OAuth creado en GCP (proyecto `Clawdio-Mail-Service`, reutilizado), consentimiento Interno, redirect vía nuevo subdominio `gauth.montuschi.cl` (ingress de Cloudflare Tunnel agregado y validado). Servidor MCP registrado correctamente como "requiere OAuth" — falta que Montu complete la autorización desde la UI.
-
-**Validación realizada:** risko-rag conectado y verificado con evidencia real (logs + tool list). google-workspace-mcp arriba con credenciales reales, sin errores — pendiente solo la autorización interactiva (requiere navegador). Login HTTP 200 verificado en cada paso. No se tocó ningún otro contenedor/servicio de serverX (AnythingLLM, Pi-hole, nginx, SearXNG, etc.) en todo el proceso.
-
-**Pendiente:** Montu — DNS CNAME de `gauth.montuschi.cl` + política de Cloudflare Access (dos apps: bypass en `/oauth2callback*`, allow `@montuschi.cl` en el resto). Completar autorización OAuth desde LibreChat. Crear workspaces "Familia" y "OP Risk". Conectar cuentas de Yerko, Chepu, Pecas y la personal de Montu (cada una separada — no es confiable unificar múltiples cuentas Google en una sola instancia del MCP, documentado con evidencia de otros usuarios del mismo proyecto).
-
----
-
-## 2026-08-23 — Deploy: AnythingLLM Docker multi-usuario en serverX (UI/orquestación, LLM en Mac Studio)
-
-**Contexto:** despliegue de AnythingLLM (`mintplexlabs/anythingllm:latest`) en serverX como capa de UI/orquestación multiusuario. El backend de inferencia NO vive en serverX: es llama-server nativo en Mac Studio (192.168.1.102:11500, modelo Flash — `qwen3-30b-a3b-flash`). No se instaló Ollama ni ningún modelo local en serverX. Ejecutado por CCa siguiendo master prompt de Montu.
-
-**Fase 0 (verificación pre-vuelo):**
-- `curl http://192.168.1.102:11500/v1/models` → 200 OK, modelo `qwen3-30b-a3b-flash` confirmado accesible desde serverX vía LAN.
-- Puerto 3001 en serverX: libre.
-- Redes Docker: risko-rag-mcp y SearXNG están en redes bridge nombradas separadas (`risko-rag-mcp_default`, `searxng_default`), sin red compartida entre sí. No relevante para este deploy — AnythingLLM habla con el Mac Studio por IP LAN, no por red Docker interna.
-- Disco `/home/x`: 228G disponibles de 468G (49% uso).
-
-**Deploy (Fase 1):** `/home/x/ws/anythingllm/docker-compose.yml`, imagen `mintplexlabs/anythingllm:latest`, puerto publicado solo en `127.0.0.1:3001` (sin exposición LAN por ahora). Volumen bind mount local `/home/x/ws/anythingllm/storage` (NUNCA en `/mnt/extra` — SQLite en WAL mode falla en NFS, ya documentado). Contenedor healthy, respondiendo 200 en `http://127.0.0.1:3001`.
-
-**Configuración (Fase 2, automatizada 100% vía API REST de AnythingLLM — sin pasar por la UI):**
-- Modo multiusuario activado. Admin creado: `montu`.
-- LLM Provider: Generic OpenAI → base path `http://192.168.1.102:11500/v1`, modelo `qwen3-30b-a3b-flash`, token limit 65536, max tokens de salida 4096.
-- Usuario `pecas` creado con rol **Default** (no Manager — evita visibilidad global sobre otros workspaces).
-- Workspace "Pecas" (slug `pecas`) creado y asignado exclusivamente a ese usuario. Confirmado vía `/admin/workspaces/1/users` que solo `pecas` (userId 2) tiene acceso.
-- Passwords iniciales entregadas por Montu directamente en el chat (no quedaron ni quedan registradas en ningún archivo de este repositorio de docs).
-
-**Validación realizada:** validado por CCa vía API + chat de prueba — pendiente de confirmación visual por Montu. Se hizo login de prueba con ambas cuentas (200 OK) y un chat real end-to-end vía `/workspace/pecas/stream-chat` (chatMode temporalmente cambiado a "chat" para el test, restaurado a "automatic" después): mensaje "Responde solo con la palabra: OK" → respuesta "OK" correcta desde llama-server, 142 tok/s, provider `GenericOpenAiLLM`. No se verificó aún desde el navegador de Montu.
-
-**Pendiente:**
-- Confirmación visual de Montu vía UI (tunnel SSH: `ssh -L 3001:127.0.0.1:3001 x@192.168.1.111`, entrar como `montu`).
-- Fase 4 (Cloudflare Tunnel): diff de ingress preparado pero NO aplicado — pendiente de mostrarlo a Montu y su autorización explícita antes de tocar `/etc/cloudflared/config.yml` en serveri3.
-
----
-
-## 2026-08-22 — Cleanup: provider de test "llama-test-1" eliminado
-
-**Contexto:** limpieza acotada pedida por Miaude/Pecas (ejecutada por CCa). El provider `llama-test-1` en `~/.pi/agent/models.json` (Mac Studio) era un candidato de test — Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf — que apuntaba a `http://127.0.0.1:11501/v1`, mismo numero de puerto que usa Pro (`http://192.168.1.102:11501/v1`, interfaz distinta). No habia colision confirmada, pero generaba confusion al leer la config (ver nota abierta en la entrada anterior, 2026-08-22).
-
-**Investigacion previa (paso 1-2):** se verifico `lsof -i :11501`, `launchctl list` y `~/Library/LaunchAgents/` antes de tocar nada. Resultado: nada escuchaba en el puerto 11501 en ese momento — ni Pro (su plist `llama-server-pro.plist` existe pero no estaba corriendo) ni ningun proceso de test. No existia ningun LaunchAgent propio de `llama-test-1`. Conclusion: era config muerta, sin proceso real detras. No se detuvo ningun servicio.
-
-**Fix aplicado:** backup de `models.json` creado con timestamp. Se elimino el bloque completo `llama-test-1` de `~/.pi/agent/models.json`. Se verifico JSON valido tras el cambio y que `llama-local` y `llama-test-2` quedaron intactos.
-
----
-
-## 2026-08-22 — Fix: Carlitos/Aurora reconectados tras split Flash+Pro (gap cerrado)
-
-**Contexto:** la migracion Flash+Pro (split en dos procesos, 2026-08-21/22) actualizo
-los toggles `~/bin/modo-carlitos`/`~/bin/modo-normal` y la documentacion de Jan.ai,
-pero no toco `~/.pi/agent/models.json` — el archivo que `~/bin/Carlitos` y
-`~/bin/Aurora` usan de verdad para conectarse a Pro. Resultado: ambos agentes
-fallaban con "Connection error" desde el cierre de esa sesion. Detectado y
-diagnosticado por Miaude en ventana de chat aparte, ejecutado por CCa.
-
-**Fix aplicado:** provider `llama-local` en `~/.pi/agent/models.json`, `baseUrl`
-corregido de `http://127.0.0.1:11500/v1` (obsoleto — ahi vive Flash, no Pro) a
-`http://192.168.1.102:11501/v1` (Pro real, tras el split). Sin cambios al `id` del
-modelo ni a los providers `llama-test-1`/`llama-test-2`.
-
-**Verificacion en vivo:** backup de `models.json` creado. Se activo Pro con
-`modo-carlitos`, se probo `Carlitos "responde solo con la palabra OK"` -> `OK`, se
-probo `Aurora "responde solo con la palabra OK"` -> `OK`, se restauro con
-`modo-normal`. Confirmado Flash arriba en :11500 y Pro abajo al finalizar — mismo
-estado en que se encontro el sistema.
-
-**Nota abierta, no resuelta:** `llama-test-1` usa el mismo puerto 11501 que Pro,
-pero bindeado a `127.0.0.1` en vez de `192.168.1.102` — sockets distintos, sin
-colision confirmada, no verificado en vivo por estar fuera de alcance.
-
-**Recordatorio operativo:** Pro sigue siendo manual — `~/bin/Carlitos`/`~/bin/Aurora`
-NO auto-activan `modo-carlitos`. Si Pro esta apagado, Carlitos fallara con el mismo
-"Connection error" hasta correr `modo-carlitos` primero.
-
----
-
----
-
-## 2026-08-21/22 — Split Flash+Pro, migración real de Rabín/Risko a inferencia local, hallazgos críticos de red y contexto
-
-**Contexto:** Sesión larga continuando el trabajo de consolidación Pro+Flash del mismo
-día (ver entrada anterior "Jan.app + LLMs locales" / router_candidatos.ini). Objetivo
-original: un solo proceso llama-server en modo router sirviendo Pro (coding,
-Carlitos/Aurora) y Flash (conversacional, Rabín/Risko/Espinita) simultáneamente.
-Terminó en una arquitectura distinta y más simple tras encontrar limitaciones reales
-del binario y varios bugs de infraestructura no triviales.
-
-**Cambios ejecutados (CCa, credenciales Pecas, bajo diseño/supervisión de Miaude — RCA
-en cada paso, checkpoints explícitos antes de tocar producción compartida por
-Yerko/Chepu vía Risko):**
-
-1. Consolidación inicial en router (`--models-preset`) confirmada NO viable para el
-   caso de uso: sin mecanismo de descarga individual de modelo (404 en todos los
-   endpoints candidatos probados), solo eviction automático vía `--models-max` — no
-   da el control determinístico que necesita un toggle manual.
-2. Reemplazado por dos procesos independientes: Flash (`cl.montuschi.llama-server.plist`,
-   :11500, siempre cargado) y Pro (`cl.montuschi.llama-server-pro.plist`, :11501, bajo
-   demanda, `RunAtLoad=false`).
-3. Encontrado y corregido: el LaunchAgent de producción existía con `KeepAlive=true`
-   pero estaba huérfano (no cargado en launchd realmente) — sin protección real ante
-   caídas.
-4. Migrados Rabín y Risko (`/home/x/.hermes/config.yaml` y
-   `/home/x/.hermes/profiles/risko/config.yaml`): primario Ollama→Flash, delegación
-   Ollama→Pro, fallback local muerto (Ollama) eliminado de la cadena. `system_prompt`
-   de ambos actualizado.
-5. **Bug crítico encontrado tarde:** Flash/Pro bindeados a `127.0.0.1` — inalcanzables
-   desde serverX. Todas las pruebas de migración "pasaban" porque el failover
-   automático a OpenRouter/DeepSeek es tan rápido y transparente que enmascaró el
-   fallo real de red en varias rondas de verificación. Corregido a
-   `--host 192.168.1.102` (decisión explícita de Montu de exponer solo la interfaz
-   LAN, no `0.0.0.0`, tras explicarle la diferencia de superficie de exposición en su
-   red plana).
-6. **Segundo bug encontrado tras el primero:** Hermes exige mínimo 64.000 tokens de
-   contexto para inicializar cualquier agente; Flash estaba en 32768 (heredado del
-   preset de testing de candidatos de la sesión anterior). Subido a 65536 — costo
-   real en RAM solo ~3.1GB (arquitectura GQA de Qwen3, KV cache barato).
-7. Construidos `~/bin/modo-carlitos` y `~/bin/modo-normal` (toggle manual, no
-   automatizado por horario — decisión explícita de Montu, uso de Carlitos
-   errático/no calendarizable). Tres bugs de bash encontrados y corregidos en la
-   construcción: sintaxis de `bootout` (target combinado, no dos argumentos), falta
-   de `kickstart -k` explícito para plist con `RunAtLoad=false`, falso negativo de
-   `pipefail` + `grep -q` sobre `launchctl list`.
-8. **Cuarto bug, encontrado por el propio Montu al usar el script manualmente:** los
-   toggles se construyeron y probaron ANTES del fix de red (paso 5), quedando con sus
-   chequeos de salud apuntando a `127.0.0.1` — corregido a `192.168.1.102` en ambos
-   scripts.
-9. Test de estrés de RAM (Flash+Pro cargados simultáneamente, apps normales de Montu
-   corriendo): RSS combinado ~76.9GB, dejando solo 65MB de RAM libre dura (9.3GB en
-   páginas reclamables). Conclusión: no vale la pena mantener ambos cargados de forma
-   permanente — el toggle es la arquitectura correcta, dado que el failover ya es
-   transparente y rápido (~9s).
-10. Limpieza menor: borrado `~/Library/LaunchAgents/ollama.carlitos.plist.DISABLED`
-    (remanente muerto del Carlitos-vía-Ollama de marzo, ya deshabilitado, sin efecto
-    funcional).
-
-**Validación:** Confirmado end-to-end con evidencia de log real (no solo "llegó una
-respuesta", que fue justo lo que ocultó el bug de red la primera vez) —
-`prompt_tokens`/`completion_tokens` de la respuesta HTTP coincidentes con las entradas
-del log del proceso `llama-server` real, para Rabín (vía Telegram, mensaje real
-enviado por Montu) y Risko (vía método interno `hermes chat -q`, para no exponer un
-mensaje de prueba a Yerko/Chepu sin su conocimiento). Failover automático a DeepSeek
-confirmado en vivo bajando Flash a propósito, con reversión automática al restaurar.
-
-**Decisión de seguridad tomada en el camino:** exponer Flash/Pro en `192.168.1.102`
-(interfaz LAN específica) en vez de `0.0.0.0` (todas las interfaces) — más simple hoy
-que un túnel SSH, pero reconocido como exposición sin autenticación en una red plana;
-revisitar cuando se ejecute la segmentación VLAN ya planeada.
-
-**Nota sobre proceso:** CCa rechazó correctamente, sin que se lo pidieran dos veces,
-una instrucción de Miaude que le pedía inyectar un Update sintético de Telegram para
-simular un mensaje entrante de Montu — señaló (con razón) que eso es fabricar un
-evento que no ocurrió, más allá de que el destinatario final fuera el propio Montu.
-Se corrigió: el mensaje de prueba real lo mandó Montu desde su Telegram.
-
-**Pendiente:**
-- Verificar si Espinita depende de Ollama antes de decomisionarlo (Rabín/Risko ya no
-  lo necesitan).
-- Borrar modelos descartados en disco (`qwen3.8-27b`, `nemotron-3-nano-omni`, ~40GB),
-  pendiente confirmación de Montu.
-- Jan.ai: su router interno se cayó solo durante la sesión (causa no investigada);
-  además su provider `llama_server_local` sigue apuntando a :11500, que ahora es solo
-  Flash — falta un segundo provider para Pro (:11501) si se quiere seguir usando
-  desde ahí.
-
----
-
-## 2026-08-21 — RAG OP Risk conectado a Jan.app (MCP)
-
-**Contexto:** El índice RAG de OP Risk (FTS5 + embeddings BGE-M3, `/home/x/ws/risko-rag/`,
-23 documentos, 1651 fragmentos, verificado en vivo el 2026-08-20) ya estaba indexado
-pero sin ninguna vía de consulta en tiempo real — ni skill, ni MCP, ni endpoint. Montu
-instaló Jan.app para evaluar modelos conversacionales candidatos y necesitaba que esos
-modelos pudieran usar contenido real de OP Risk durante las pruebas.
-
-**Cambios (ejecutados por CCa en Mac Studio, credenciales Pecas, bajo diseño/supervisión
-de Miaude — RCA antes de construir, sin tocar el pipeline de indexación existente):**
-- Investigación previa: Jan.app v0.8.4 sí es cliente MCP (tenía `fetch`, `filesystem`,
-  `sequential-thinking`, `searxng` activos vía stdio antes de tocar nada), pero su
-  `mcp_config.json` solo acepta servidores por stdio — no remotos por URL, pese a
-  tener el código Rust `rmcp` (sse_client / streamable_http_client) compilado sin
-  exponer en el schema real de esta versión.
-- Servidor MCP nuevo en serverX: `/home/x/ws/risko-rag-mcp/` (Docker, puerto 8814,
-  sin colisión con puertos ya ocupados). Reutiliza `query.py`/`db.py` de
-  `/home/x/ws/risko-rag/` sin modificarlos (montados read-only). Expone la tool
-  `consultar_rag_op_risk(pregunta: str, top_k: int = 5)`.
-- Conectado a Jan.app vía bridge `mcp-remote` (npm, stdio→HTTP) en
-  `~/Library/Application Support/Jan/data/mcp_config.json` — backup en
-  `mcp_config.json.bak_carlitos_20260821_085241`. Requirió deshabilitar
-  `enable_dns_rebinding_protection` en `TransportSecuritySettings` de FastMCP (por
-  defecto solo aceptaba `Host: localhost`, rechazaba llamadas desde la LAN con 421).
-
-**Validación:** Consulta de prueba vía protocolo MCP completo (`initialize` →
-`tools/list` → `tools/call`) con la pregunta "de que trata el plan estrategico de OP
-Risk" devolvió fragmentos reales de `PLAN ESTRATÉGICO 2026.docx` (scores vectoriales
-y bm25 reales, no respuesta genérica). Log de Jan.app confirma `MCP server risko-rag
-initialized successfully` tras reiniciar la app.
-
-**Limitación conocida:** Jan.app 0.8.4 no soporta servidores MCP remotos nativos por
-URL — de ahí la dependencia del bridge `mcp-remote` (proceso npx adicional). Si una
-versión futura de Jan agrega soporte nativo, se puede simplificar quitando el bridge.
-
-**Pendiente:** confirmación visual de Montu abriendo Jan.app y preguntando algo real
-de OP Risk — no se automatizó esa parte de la UI. Sigue abierta también la pregunta
-de cómo indexar las 3 representaciones de cada reunión (audio .m4a / transcripción
-.txt / minuta .docx) — hoy solo se indexa el .docx.
-
-## 2026-07-30 — Upgrade Hermes Agent en serverX (Rabín) de v0.18.2 a v0.19.0
-
-**Contexto:** Montu solicito research comparando la version instalada de Hermes Agent contra las release notes de NousResearch/hermes-agent para verificar si habia actualizaciones relevantes pendientes.
-
-**Cambios:**
-- Version anterior real: v0.18.2 (2026.7.7.2), confirmada via `pip show` dentro del venv `/home/x/.hermes/hermes-agent/venv`. Nota: INVENTARIO_MAESTRO.md la documentaba historicamente como v0.14.0 — discrepancia por auto-update que nunca quedo registrado en LOG_CAMBIOS.
-- Version nueva: v0.19.0 (2026.7.20) "The Quicksilver Release", confirmada via `pip show` y `hermes --version` post-upgrade (estado "Up to date").
-- Comando ejecutado: `pip install --upgrade hermes-agent` dentro del venv, luego `systemctl --user restart hermes-gateway.service`.
-- Verificacion post-upgrade: servicio activo y estable.
-
-**Hallazgos:**
-- approvals.mode se mantuvo en "manual" (no fue sobreescrito por el nuevo default "smart approvals" que introduce v0.19.0).
-- Telegram conecto limpio al primer intento, sin el loop de reconexion/TimedOut observado antes del upgrade.
-- Warning de WhatsApp "not paired, no creds.json" persiste igual que antes del upgrade (preexistente desde 28-jul, no relacionado a esta accion).
-- Se confirmo que el salto v0.14.0 → v0.18.2 fue un auto-update intermedio que nunca quedo registrado en LOG_CAMBIOS_2026.md — gap de trazabilidad a tener presente hacia adelante.
-
-**Siguiente paso:** ninguno por ahora; servicio estable tras upgrade.
-
-## 2026-07-13: Incidente Visual-Voice — ExitCode 128 + STT ffmpeg missing
-
-### Parte 1 — Contenedor caído (NVML Driver Not Loaded)
-- **Síntoma:** HTTP 502 en https://visual-voice.montuschi.cl. Contenedor caído desde 2026-07-12 07:11 UTC (38h downtime).
-- **Root Cause:** docker-compose.yml tenía runtime: nvidia + deploy.resources.reservations.devices: [gpu]. GPU P104-100 está bajo vfio-pci (VFIO passthrough a VM Windows) → NVML no disponible en host → ExitCode=128 al crear la task.
-- **Fix:** Eliminados runtime: nvidia y bloque deploy.resources.reservations del compose /home/x/visual-voice/docker-compose.yml. Backup: docker-compose.yml.bak.20260713_*.
-- **Justificación:** Pipeline post-2026-07-10 no requiere GPU en serverX. Todo el cómputo IA reside en Mac Studio (STT mlx-whisper :8765, Ollama :11434 gpt-oss:20b, Metal M2 Max).
-
-### Parte 2 — STT 500 Error (ffmpeg no instalado en Mac Studio)
-- **Síntoma:** Transcripción OK en chunks S1-S6 (0-60min), S7-S11 retornaban vacío silencioso.
-- **Root Cause:** ffmpeg no estaba instalado en Mac Studio. stt-mac lo requiere internamente para preprocesar audio antes de mlx-whisper. Chunks 1-6 eran legibles nativamente; S7+ requirieron conversión → FileNotFoundError: ffmpeg → HTTP 500.
-- **Fix:** brew install ffmpeg (v8.1.2_1) en Mac Studio + launchctl kickstart -k gui/501/cl.montuschi.stt-mac.
-- **Aclaración arquitectural:** El .env de Visual-Voice tiene OLLAMA_BASE_URL=http://192.168.1.111:11434 (serverX, obsoleto — ignorado por el código). El main.py hardcodea http://192.168.1.102:11434 (Mac Studio). Ollama nunca corrió en serverX.
-- **Estado post-fix:** Contenedor Up, puerto 8502 LISTEN, stt-mac PID 35364 operativo, test HTTP 200 confirmado.
-
-## 2026-06-01 — Setup escritorio virtual serverX + fix bridge Clawdio Mac
-
-**serverX — Nuevas instalaciones:**
-- Google Chrome stable (repo oficial Google, apt)
-- Claude Desktop v1.9255.2 (aaddrick/claude-desktop-debian, apt)
-- Antigravity CLI → /home/x/.local/bin/agy
-- Antigravity IDE → /home/x/.local/share/antigravity-ide/ (Electron, launcher en .local/bin)
-- Extensión cafetechne.antigravity-link-extension-1.0.16-universal
-
-**MCPs configurados en serverX (~/.config/Claude/claude_desktop_config.json):**
-- clawdio: /home/x/bin/hermes-mcp-bridge → SSH a i3@192.168.1.211 (hermes mcp serve)
-- desktop-commander: npx @wonderwhy-er/desktop-commander
-- antigravity-link: node ~/.antigravity-ide/extensions/cafetechne.antigravity-link-extension-1.0.16-universal/mcp-server.mjs
-
-**SSH key nueva:** x@serverX → i3@serveri3
-- Archivo: ~/.ssh/id_ed25519_serveri3
-- Agregada a authorized_keys de serveri3 ✅
-
-**Mac — Fix bridge Clawdio:**
-- Archivo: /Users/montu/hermes-mcp-bridge-v2
-- Problema: apuntaba a docker exec clawdio-v2 (contenedor ya no existe)
-- Fix: reemplazado por SSH directo a /home/i3/.hermes/hermes-agent/venv/bin/hermes mcp serve --accept-hooks
-- Estado: running ✅
-
-**Pendiente:** Rotar API key OpenRouter expuesta en sesión de hoy
-
-## 2026-05-30 — Rabín: migración definitiva a DeepSeek V4 Flash + fixes estructurales
-
-**Contexto:** openrouter/owl-alpha presentaba identidad propia alterada (respondía como "OWL de ZOO company"
-en vez de Clawdio Rabín — no respetaba SOUL.md). gemini-2.5-flash con créditos agotados (HTTP 429).
-Migración completa a OpenRouter como provider único.
-
-**Stack de modelos (nuevo):**
-| Slot | Modelo | Provider | Costo |
-|---|---|---|---|
-| Principal | deepseek/deepseek-v4-flash | OpenRouter | ~$0,10/M tokens |
-| Fallback 1 | nousresearch/hermes-3-llama-3.1-405b:free | OpenRouter | Free |
-| Fallback 2 | nvidia/nemotron-3-super-120b-a12b:free | OpenRouter | Free |
-
-**Cambios en /home/i3/.hermes/config.yaml (serveri3):**
-- model.provider: gemini → openrouter
-- model.default: openrouter/owl-alpha → deepseek/deepseek-v4-flash
-- browser.engine: disabled (fix HTTP 404 "No endpoints found that support tool use")
-- compression.enabled: false
-- Todos los auxiliary providers: auto → openrouter (elimina intentos a Gemini → 429)
-- cron: [] — 10 crons eliminados
-- Backup: config.yaml.bak.20260530 creado
-
-**Crons eliminados (los 10):**
-- Documentados: monitor-manana, monitor-noche, briefing-manana, ideas-pendientes, resumen-semanal
-- No documentados (descubiertos en log): Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube,
-  inbox-miaude-check, Hermes Agent al día
-
-**Docker clawdio-v2:** DETENIDO (docker stop). Corría con config antiguo (gemini-2.5-flash) y competía
-por polling de Telegram con el gateway nativo. PENDIENTE: docker rm clawdio-v2.
-
-**Bugs documentados (Hermes v0.14.0):**
-1. NameError: _pool_may_recover_from_rate_limit — crons fallan al usar Gemini. Regresión del framework.
-2. auxiliary_client.py línea 427: _OPENROUTER_MODEL = "google/gemini-2.5-flash" hardcodeado como
-   fallback — causa que provider:auto intente Gemini si hay GOOGLE_API_KEY en .env.
-
-**Modelos descartados:**
-- openrouter/owl-alpha: identidad propia alterada ("Soy OWL de ZOO company")
-- gemini-2.5-flash: doble falla (NameError + créditos agotados)
-
-**Archivos modificados en este repo:**
-- docs/INVENTARIO_MAESTRO.md — sección 8 actualizada
-- docs/LOG_CAMBIOS_2026.md — este registro (nuevo)
-- docs/CLAWDIO_ASISTENTE_PERSONAL.md — Stack modelos + Pendientes actualizados
-
----
-
----
-## 2026-05-29 — Fix Rabín: modelo principal + eliminación de crons
-
-**Contexto:** Créditos Gemini agotados. Fallo del switch /model session-only con
-sufijo :free (RuntimeError: No LLM provider configured). Se migra OpenRouter como
-provider primario. Se eliminan 10 crons (5 no documentados descubiertos en log).
-
-**Cambios en /home/i3/.hermes/config.yaml (serveri3):**
-- model.provider: gemini → openrouter
-- model.default: gemini-2.5-flash → openrouter/owl-alpha
-- fallback_providers reordenados:
-  1. openrouter/nousresearch/hermes-3-llama-3.1-405b:free (nuevo, del equipo Hermes)
-  2. gemini/gemini-2.5-flash (degradado a fallback 2)
-  3. openrouter/nvidia/nemotron-3-super-120b-a12b:free (degradado a fallback 3)
-- cron: [] — eliminados 10 crons (5 documentados + 5 no documentados)
-
-**RCA del fallo /model:free:**
-El comando /model en Hermes es session-only. El sufijo :free en OpenRouter
-falla cuando el provider primario en config.yaml es gemini, porque el switch
-de sesión no hereda el contexto del proveedor fallback.
-Solución definitiva: OpenRouter como provider primario en config.yaml.
-
-**Bug Hermes v0.14.0 detectado:**
-NameError: _pool_may_recover_from_rate_limit en contexto de ejecución de crons.
-Afecta: Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube,
-Hermes Agent al día. Regresión del framework, no de config.
-
-**Crons no documentados encontrados:**
-Monitor Mañana, Monitor Noche, Recordatorio Terminal Miau-Nube,
-inbox-miaude-check, Hermes Agent al día.
-
-**Archivos modificados:**
-- /home/i3/.hermes/config.yaml — MODIFICADO
-- /home/i3/.hermes/config.yaml.bak.20260529 — BACKUP creado
-- INVENTARIO_MAESTRO.md — secciones Clawdio actualizadas
-- LOG_CAMBIOS_2026.md — este registro
----
-
-## 2026-05-24 -- BIBLIOTECA_PROMPTS_MS v1.1 - Bloque B completado
-
-**Contexto:** Meta-prompt iterativo (codigo 61) aplicado a la v1.0. Abogado del Diablo identifico 3 problemas sistemicos y mejoras en 11 de 14 templates.
-
-**Cambios:**
-- Indice rapido de 14 filas por situacion (nuevo)
-- Tiempo de completar en cada template (nuevo, criterio <60s)
-- Placeholders de accion eliminados de campos de dato
-- Campo Servidor agregado en templates 2.1 y 2.2
-- Campo componentes_existentes agregado en template 3.2
-- Campo longitud agregado en output de template 3.1
-- Template 1.3 simplificado: infra como bloque opcional separado
-- Template 1.4 agrega campo Prioridad y Confirmar antes de ejecutar
-- Template 2.3 agrega git log --oneline -3 en pre_deploy
-- Template 3.4 agrega probabilidad estimada y limite de 2 paginas
-- Templates 3.3 y 4.2 validados como APTOS sin cambios
-- Nota operacional agregada en seccion 5: Gemini CLI fuera de directorio raiz
-## 2026-05-24 — Rabín 2.0 Docker + fixes NVML + diagnóstico SSH
-
-### Rabín 2.0 — instalación completa
-- Migrado de systemd nativo a Docker (clawdio-v2 en /home/i3/clawdio-v2/)
-- Path interno: /opt/data/ — Crons en /opt/data/cron/jobs.json
-- Modelo: gemini-3-flash-preview vía Gemini API directa
-- 9 skills: cotidianas (3) + infra (2) + MS (5 incluyendo canal Miaude↔Rabín)
-- DB migrada: 23 deberes + 1 idea + tabla miaude_inbox nueva
-- SSH contenedor→serverX: /opt/data/.ssh/id_ed25519 con fix -F /dev/null
-- briefing-manana: retry automático ante HTTP 503
-- MCP bridge v2 activo en Claude Desktop
-- SOUL.md: limitación SSH a serveri3 documentada (comportamiento esperado)
-- /sethome: canal home = Rodrigo Montuschi (8357148621)
-
-### Fix NVML serverX
-- Causa: apt upgrade nvidia 580.126→580.159 sin reboot
-- Fix: sudo systemctl stop ollama && sudo reboot
-- Post-reboot: GPU P104-100 operativa, todos los contenedores up en 54s
-
-### Pendientes registrados
-- BACKLOG-RABIN-01: webhook HTTP canal Miaude→Rabín autónomo
-
-### Equipos afectados
-- serveri3 (clawdio-v2), serverX (GPU fix), MacBook (bridge MCP v2)
-
----
-
-## 2026-05-24 — Rabín 2.0 instalado en Docker + fixes de confiabilidad
-
-### Contexto
-Rabín 1.x (Hermes systemd nativo) reemplazado por Rabín 2.0 en Docker
-por problemas de confiabilidad: crons incompletos, drift de skills,
-tool use frágil con Gemini 2.5 Flash.
-
-### Cambios aplicados
-- Hermes Agent migrado de systemd nativo → Docker (contenedor: clawdio-v2)
-- Directorio base host: /home/i3/clawdio-v2/ en serveri3
-- Path interno contenedor: /opt/data/ (no /root/.hermes/)
-- Crons en: /opt/data/cron/jobs.json (no en config.yaml)
-- Modelo: gemini-3-flash-preview vía Gemini API directa
-  (reemplaza gemini-2.5-flash-preview vía OpenRouter)
-- 9 skills creadas:
-  - Cotidianas: deberes-ideas, google-workspace, supermercado
-  - Infra: infra-monitor, infra-docker-check
-  - MS: ms-canal-miaude-a-rabin, ms-canal-rabin-a-miaude,
-        ms-protocolo-comunicacion, ms-doc-updater, ms-handoff-reader
-- DB migrada desde Rabín 1.x: 23 deberes + 1 idea
-- Tabla miaude_inbox agregada a clawdio_db.sqlite (canal asíncrono Miaude↔Rabín)
-- SSH key contenedor→serverX: /opt/data/.ssh/id_ed25519
-  Fix: symlink /root/.ssh → /opt/data/.ssh (permisos hermes/root)
-  Fix monitor.sh: ssh con -F /dev/null -i /root/.ssh/id_ed25519
-- briefing-manana: retry automático ante HTTP 503 Gemini
-- MCP bridge v2: ~/hermes-mcp-bridge-v2 activo en Claude Desktop
-- /sethome configurado: canal home = Rodrigo Montuschi (8357148621)
-
-### Pendientes registrados
-- BACKLOG-RABIN-01: webhook HTTP para canal Miaude→Rabín autónomo
-  (hoy MCP solo permite Miaude→Montu, no instrucciones directas a Rabín)
-- BACKLOG-SERVERX-01: CERRADO (ver entrada siguiente)
-
-### Equipos afectados
-- serveri3 (192.168.1.211) — contenedor clawdio-v2 nuevo
-- MacBook Pro — bridge MCP v2 activo en Claude Desktop
-
----
-
-## 2026-05-24 — Fix NVML serverX: driver/library version mismatch
-
-### Contexto
-nvidia-smi reportaba "Failed to initialize NVML: Driver/library version mismatch"
-Detectado en reporte monitor.sh de Rabín 2.0.
-
-### RCA
-Actualización de paquetes nvidia-driver-580-server 580.126.09 → 580.159.03
-ejecutada sin reboot. Módulo viejo (580.126.09) quedó cargado en RAM
-mientras librerías en disco pasaron a 580.159.03. NVML detecta mismatch
-y se niega a inicializar. Sin daño de hardware.
-
-### Fix aplicado
-Reboot controlado con cierre previo de Ollama:
-sudo systemctl stop ollama && sudo reboot
-
-### Estado post-reboot
-- nvidia-smi: 580.159.03 ✅ (módulo y librería sincronizados)
-- GPU P104-100: 34°C, 0MiB usados, operativa
-- CUDA display 13.0 en nvidia-smi = versión máxima del driver,
-  no versión runtime. Ollama usa CUDA 12.x internamente. Sin impacto.
-- Todos los contenedores up en ~54s post-reboot:
-  ollama, pegas_v2, visual-voice, cutx-app, retroassembly, portainer ✅
-
-### Equipos afectados
-- serverX (192.168.1.111)
-
----
-
-## 2026-05-24 — Biblioteca de Prompts MS v3.0 — Bloque A
-
-**Contexto:** Primera versión de la biblioteca de prompts reutilizables de la MS v3.0, construida aplicando códigos de prompt engineering de la infografía "100 Códigos" (01 XML Maestro, 04 Primero Piensa, 08 Paso a Paso, 15 Motor de Disparo, 44 SOP).
-
-**Cambios:**
-- Archivo nuevo: `docs/BIBLIOTECA_PROMPTS_MS.md` (292 líneas)
-- Sección 1: Inicio de sesión — 4 templates con Motor de Disparo (trigger phrase ACTIVAR_MS_V3)
-- Sección 2: Delegación CCa — templates base, RCA y deploy con estructura Paso a Paso
-- Sección 3: Delegación Gemini — templates análisis, frontend, documentación y Abogado del Diablo
-- Sección 4: Actualización docs vía Rabín — SOP estándar y template cambio infra
-- Código 12 (Contrarian) integrado como template de revisión arquitectónica
-
----
-## 2026-05-17 — Actualización Hermes/Clawdio Rabín a v0.14.0 + fixes de confiabilidad
-
-### Cambios aplicados
-- Hermes Agent: v0.12.0 → v0.14.0 "The Foundation Release" (1693 commits, 545 issues cerrados, 12 P0)
-- Fix nativo bug cron output (código Python crudo en Telegram) — resuelto en v0.13+
-- Secret redaction: ON por defecto (corrige bug de patch corruption de v0.12)
-- SOUL.md: 3 reglas técnicas canónicas agregadas (comunicación proactiva, protocolo SSH write_file→scp→ssh, formato cron)
-- Memory provider: holographic activado (SQLite FTS5 + HRR local, sin cloud)
-- Cron "Hermes Agent al día": prompt reescrito + deliver explícito telegram:8357148621
-
-### Estado post-cambios
-✅ Hermes v0.14.0 activo | ✅ Gateway corriendo | ✅ Holographic memory | ✅ SOUL.md 113 líneas limpio
-## 2026-05-17 — Hermes v0.14.0 + fixes confiabilidad Rabín
-
-- Hermes Agent: v0.12.0 → v0.14.0 "The Foundation Release" (1693 commits, 545 issues, 12 P0)
-- Fix cron output: toolset web → search (web requería API keys no configuradas)
-- SOUL.md: 3 reglas técnicas canónicas (comunicación proactiva, protocolo SSH, formato cron)
-- Memory provider: holographic activado (SQLite FTS5 + HRR local)
-- Config: provider gemini corregido (corrupción por replace múltiple), config v19 funcional
-- Cron "Hermes Agent al día": prompt reescrito + deliver telegram:8357148621 + toolset search
-
-Estado: ✅ v0.14.0 | ✅ Gateway activo | ✅ Holographic memory | ✅ SOUL.md 113 líneas | ✅ doctor sin errores críticos
-## 2026-05-18 — QA OptiFierro V2: 9/9 PASS + fixes post-entrega Gustavo
-
-### Contexto
-QA completo ejecutado sobre los fixes solicitados por Gustavo Godoy (Torres Ocaranza) post-entrega del 13 de mayo. 9 checks verificados, todos PASS. BACKLOG-MP01-ROBERTO cerrado: Roberto confirmó que el acceso a Cubigest para Calama y Coronel ya existe. Docker Desktop en TO configurado para autoarranque y resiliencia de contenedores.
-
-### Fixes aplicados (commits en Optifierro-V2)
-- `2fa552f` fix(#1): asistencia muestra VACACIONES/LICENCIA/PERMISO desde GV
-- `f5fce4d` fix(#6): cache 15min en obtener_estado_maquinas (Cubigest)
-- `a3a9f51` fix: bolsa de trabajo vacía al montar (id_tarea undefined)
-- `1021b73` fix: turno noche clasificado como FALTA en presencia
-- `7589f0a` fix: operadores repetidos entre turnos (guard sucursal_id==10 removido)
-- `5be1c05` fix: prompt Argumento mejorado con diámetros, carga, ITs rechazadas
-- `af38ced` chore: OLLAMA_URL fallback en docker-compose.yml
-- fix UI: input hora jornada como text HH:MM (fix AM/PM locale) — sin commit aún
-
-### Backlog cerrado
-- **BACKLOG-MP01-ROBERTO:** CERRADO. Roberto confirmó que el acceso a Cubigest para Calama y Coronel ya existe. No requería gestión adicional.
-
-### Infra TO (PROMETHEUS-AI-CORE 192.168.1.65)
-- Docker Desktop: Start on login ✅ configurado
-- Todos los contenedores: restart policy `always` o `unless-stopped` ✅
-- `OLLAMA_URL=http://host.docker.internal:11434` configurado en docker-compose.yml como fallback
-
-### Equipos afectados
-- TO (PROMETHEUS-AI-CORE 192.168.1.65) — OptiFierro V2
-
-### Estado post-cambios
-✅ 9/9 QA PASS — sistema estable post-entrega a Gustavo
-
----
-
-## 2026-05-17 — Actualización Hermes/Clawdio Rabín a v0.14.0 + fixes de confiabilidad
-
-### Cambios aplicados
-- Hermes Agent: v0.12.0 → v0.14.0 "The Foundation Release" (1693 commits, 545 issues cerrados, 12 P0)
-- Fix nativo bug cron output (código Python crudo en Telegram) — resuelto en v0.13+
-- Secret redaction: ON por defecto (corrige bug de patch corruption de v0.12)
-- SOUL.md: 3 reglas técnicas canónicas agregadas (comunicación proactiva, protocolo SSH write_file→scp→ssh, formato cron)
-- Memory provider: holographic activado (SQLite FTS5 + HRR local, sin cloud)
-- Cron "Hermes Agent al día": prompt reescrito + deliver explícito telegram:8357148621
-
-### Estado post-cambios
-✅ Hermes v0.14.0 activo | ✅ Gateway corriendo | ✅ Holographic memory | ✅ SOUL.md 113 líneas limpio## 2026-05-16 — Fix NoMachine serverX: escritorio remoto KDE operativo
-
-### Problema
-NoMachine conectaba pero mostraba pantalla negra con solo cursor del mouse.
-
-### RCA (Root Cause Analysis)
-Tres capas de problema identificadas y resueltas en secuencia:
-1. `/etc/X11/Xwrapper.config` tenía `allowed_users=console` → Xorg no podía arrancar como usuario nx
-2. Paquete `dbus-x11` no instalado post-reinstalación → `dbus-launch` ausente → exit code 127 en startplasma-x11
-3. Servicio `xvfb.service` corriendo en `:0` → NoMachine detectaba Xorg "activo" y no creaba display virtual propio
-
-### Solución aplicada
-- `/etc/X11/Xwrapper.config` → `allowed_users=anybody` + `needs_root_rights=yes`
-- `sudo apt-get install -y dbus-x11`
-- `sudo systemctl stop xvfb && sudo systemctl disable xvfb`
-- `sudo /etc/NX/nxserver --restart`
-- En cliente Mac: aceptar creación de nueva pantalla virtual → KDE Plasma levanta correctamente
-
-### Estado final
-✅ NoMachine operativo desde MacBook Pro → serverX vía LAN
-✅ KDE Plasma 5.27 corriendo en display virtual NoMachine
-✅ xvfb.service deshabilitado permanentemente
-✅ dbus-x11 instalado
-✅ Xwrapper.config corregido
-
-### Notas
-- serverX tiene TV 42" 4K conectado vía HDMI como pantalla de emergencia, pero no se usa como display manager
-- NoMachine crea display virtual bajo demanda (sin display manager activo)
-- Checkbox "Crear siempre nueva pantalla en este servidor" activado en cliente
----
-═══════════════════════════════════════════════════
-FECHA: 2026-05-15
-PROYECTO: Infraestructura NAS — Migración SMB → NFS
-═══════════════════════════════════════════════════
-
-[MIGRACIÓN NAS SERVERX]
-RCA final: cliente SMB de macOS Sequoia tiene bug con Samba/Linux
-que produce fts_read: Permission denied en readdir, irresolvible
-por configuración (afecta Finder, Terminal y todos los procesos).
-SOLUCIÓN: Migrado a NFS nativo.
-- serverX: nfs-kernel-server activo, exports en /etc/exports:
-  /mnt/extra y /home/x exportados a 192.168.1.41 (rw,no_root_squash)
-- Mac: mounts en ~/Miau-Nube y ~/Home-X via mount -t nfs
-- LaunchAgent: com.user.nfs-serverx (automontaje cada 5 min)
-- Samba: smb.conf actualizado con config 2026 para macOS (por si acaso)
-Estado: ✅ NFS funcionando. SMB deprecado para acceso desde Mac.
----
----
-===================================================
-FECHA: 2026-05-15
-SESION: Fix Clawdio - ModuleNotFoundError init_db
-===================================================
-
-#### Fix Clawdio: ModuleNotFoundError init_db
-
-- **Sintoma:** Clawdio fallaba con execute_code para deberes/ideas. Error: ModuleNotFoundError: No module named init_db. Ruta incorrecta generada en runtime: /home/i3/.hermes/skills/productivity/personal-productivity-db/scripts
-
-- **RCA:** init_db.py esta en /home/i3/.hermes/init_db.py (raiz directa). MEMORY.md no documentaba el patron de importacion correcto, Gemini Flash inferia la ruta y la alucinaba. Bug de contexto ausente, no de codigo.
-
-- **Fix aplicado por Miaude via Control Your Mac:**
-  - Bloque PATRON DE IMPORTACION DB - OBLIGATORIO agregado en /home/i3/.hermes/memories/MEMORY.md
-  - Patron correcto: sys.path.insert(0, /home/i3/.hermes) — nunca subdirectorios
-  - Hermes reiniciado. Smoke test: import exitoso
-
-- **Aprendizaje:** LLM sin ground truth en contexto inventa rutas plausibles pero falsas. Solucion: anclar la verdad en MEMORY.md.
-
-
----
-═══════════════════════════════════════════════════
-FECHA: 2026-05-08
-SESIÓN: Fix MCP y VPN Respaldo
-═══════════════════════════════════════════════════
-
-#### Fix MCP bridge Clawdio en Claude Desktop
-- Síntoma: "Could not attach to MCP server clawdio" en Claude Desktop
-- Causa raíz: /usr/local/bin/hermes-mcp-bridge sin bit de ejecución (-rw-r--r-- en vez de -rwxr-xr-x)
-- Fix: chmod +x /usr/local/bin/hermes-mcp-bridge
-- Verificación: hermes v0.12.0 responde en /home/i3/.local/bin/hermes — path correcto
-- Estado: RUNNING ✅
-- Pendiente: hermes 850 commits behind — evaluar hermes update en serveri3
-
-#### VPN TO: script de respaldo actualizado
-- Script ~/conectar_to_vpn.sh actualizado en MacBook
-- IP anterior (GTD): 152.230.125.218
-- IP nueva (TLINK, respaldo): 45.4.1.234
-- Causa: caída del proveedor principal GTD, conexión de respaldo TLINK activada
-
----
-
-═══════════════════════════════════════════════════
-FECHA: 2026-05-07
-PROYECTO: OptiFierro V2 — QA Pre-Entrega + Fixes
-SESIÓN: QA completo 7 secciones + 10 fixes aplicados + verificación Fase 2
-═══════════════════════════════════════════════════
-
-### Fixes aplicados (todos verificados PASS por Codex CLI)
-
-**Backend — Torres Ocaranza (PROMETHEUS-AI-CORE 192.168.1.65)**
-- AV-02 backend: POST /api/averias ahora retorna `requires_reprogram: True` en el JSON de respuesta. Archivo: routers/averias.py línea 108.
-- OP-01 DB: maquinas_info.Operador_Habitual corregido de 'OmRamirez' a 'oramirez' (1 fila). SQLite: optifierro_v2.db.
-- OP-01 código: routers/maquinas.py — query de nombre_map cambiada a LEFT JOIN con LOWER() case-insensitive entre maquinas_info y operadores_matriz.
-- OP-02 DB: operadores_matriz id=18, username=ctrujillo — nombre actualizado de '(Nombre Pendiente - confirmar con RRHH)' a 'Carlos Alexis Rogers Trujillo'. Fuente: asistencia.db de scrap-geovictoria.
-
-**Frontend — Torres Ocaranza**
-- AV-01: window.confirm() reemplazado por modal React en GestorAverias.tsx. Texto: "Confirma lo siguiente: [resumen falla]".
-- AV-02 frontend: Banner auto-dismiss 8s en GestorAverias.tsx cuando response.requires_reprogram === true. Texto: "Averia registrada. Para reflejar el cambio en la planificacion ejecuta Reprogramar".
-- PROG-03: Math.min eliminado en GestorProgramacion.tsx línea 488. porcentajeCarga ahora muestra valor real sin cap. Si >100% muestra barra roja.
-- PROG-05: Fallback hora inicio turno corregido de '08:15'/'20:15' a '08:00'/'20:10' en GestorProgramacion.tsx líneas 792, 816, 1170.
-- PROG-06: Función getTextColorForBackground() implementada en GestorProgramacion.tsx con WCAG_AA_CONTRAST_RATIO = 4.5. Las cajitas del Gantt calculan automáticamente texto blanco o negro según contraste del fondo.
-- PROG-07: Condición lista_etiqueta_ids.length > 1 cambiada a >= 1 en GestorProgramacion.tsx línea 945. Modal ahora muestra etiquetas aunque haya solo 1.
-- VS-01: Indicador de sucursal activa en VistaSemanal.tsx corregido. Dot ahora usa flex items-center gap-1.5 (inline izquierda del nombre).
-
-**Build y deploy**
-- npm run build: PASS exit 0. Solo warning pre-existente de chunk size Vite (no bloqueante).
-- docker compose restart backend: ejecutado post-fixes backend.
-- docker compose restart frontend: ejecutado 3 veces durante la sesión (post-cada batch de fixes).
-
-### Metodología usada en esta sesión
-- Miaude_sin_Montu Skill activa: CCa + Gemini CLI + Codex CLI en paralelo sin intervención manual de Montu.
-- CCa (Mac): diagnóstico, análisis de código fuente.
-- Codex CLI (TO, GPT-5.5): fixes backend + fixes frontend + QA verificación. Acceso directo al filesystem de TO sin SSH desde Mac.
-- Gemini CLI (Mac): intentado para frontend pero bloqueado por falta de SSH configurado hacia TO. Reemplazado por Codex en TO.
-- Fase 2 verificación: 10/10 checks PASS.
-
-### Pendientes críticos post-sesión
-- BACKLOG-MP01-ROBERTO (PRIORIDAD MÁXIMA): Usuario OptiFierro necesita GRANT SELECT en SQL Server Cubigest para bases de Calama (TOLTDA/TOREN/TORREON1) y Coronel (TOSOL/TOGENUA/TMAESTRANZA) sobre tabla INFORMAT_Vista_OrdenesCompra. Contactar a Roberto en TO. Sin esto, obtener_oc_pendientes_inet retorna {} para Calama y Coronel.
-- PROG-02 pendiente: Operador en tooltip/modal Gantt no coincide con operador asignado. Requiere investigación más profunda del flujo de datos. Fase siguiente.
-- Fase 2 (post-entrega): ADMIN-01 (turno noche marcado FALTA), RCA#4 (semántica Turno A/B), MAQ-MEJORA-01 (restricciones al motor), PROG-OBS-01 (argumento LLM).
-
-
-## 2026-05-06 — cctol habilitado en MacBook (Devstral remoto vía VPN)
-- Alias cctol agregado en /Users/montu/.zshrc
-- Patrón: ANTHROPIC_BASE_URL=http://192.168.1.65:11434 ANTHROPIC_API_KEY=ollama /Users/montu/.local/bin/claude --model devstral --dangerously-skip-permissions
-- Ollama en TO (192.168.1.65) ya escuchaba en 0.0.0.0:11434 sin cambios necesarios
-- Test funcional end-to-end: CCTOL_MAC_OK ✅
-- Restricción operacional: VPN TO activa en un solo equipo a la vez (nunca simultáneos)
-- GPU TO: RTX 5060 Ti 16GB, modelo devstral
-
-## 2026-05-06 — MS v3.0 aprobada: incorporación Equipo OpenAI
-- Metodología Sinérgica actualizada a v3.0
-- Nueva capa de equipo incorporada: Equipo OpenAI (ChatGPT como Subgerente/cerebro secundario, Codex CLI como ejecutor)
-- Estructura de 4 capas:
-  1. ARQUITECTO: Claude (Miaude)
-  2. LÍDERES/SUBGERENTES: Gemini (chat) + ChatGPT
-  3. COORDINADOR/ORQUESTADOR: Clawdio Rabín
-  4. EJECUTORES: CCa + CC's + Gemini CLI + Antigravity + Codex CLI
-- Codex CLI instalado: Mac (v0.120.0, /usr/local/bin/codex), TO (v0.128.0, user OptiFierro)
-- Codex asignado como ejecutor preferente en Windows/PowerShell (TO) y fallback de CCa por cuota
-- Deuda técnica: verificar versión en serverX y serveri3; autenticación OpenAI pendiente en todos los equipos
-
-## 2026-05-05/06 — Clawdio: desacoplamiento de serverX
-- terminal.backend cambiado de ssh → local en /home/i3/.hermes/config.yaml
-- terminal.backend cambiado de ssh → local en /home/i3/.hermes/config.yaml
-- terminal.cwd cambiado de /home/x → /home/i3
-- Fix supermercado.json: eliminado prefijo ```json corrupto, lista_mes_actual reactivada con 3 productos (vinagre blanco, leche almendras Orasi, galletas Gran Cereal cacao)
-- Ejecutado con Codex CLI desde MacBook
-- Backup: /home/i3/.hermes/config.yaml.bak.20260506_1034
-- Deuda: productos_habituales vacío, reconstruir lista completa con Pecas
-
----
-
-
-## 2026-05-03 — MontuMS completado + MS-Flow operativo
-
-**Repo:** github.com/RodMontu/MontuMS (privado)
-**Commit:** 036e6c5
-
-**Archivos creados:**
-- agentes.md — catálogo completo MS Team (11 agentes Claude + equipo Gemini + coordinadores)
-- proyectos.md — estado de 5 proyectos activos + pipeline TO
-- convenciones.md — IPs, aliases, reglas operativas, rutas clave, URLs raw GitHub
-- docs/INVENTARIO_MAESTRO.md — migrado desde Samba (fuente de verdad → GitHub)
-- docs/LOG_CAMBIOS_2026.md — migrado desde Samba
-- docs/CLAWDIO_ASISTENTE_PERSONAL.md — migrado desde Samba
-
-**Decisiones:**
-- GitHub MontuMS reemplaza carpeta DOCUMENTOS_TECNICOS como fuente de verdad activa
-- Samba /mnt/extra/DOCUMENTOS_TECNICOS/ queda como archivo histórico
-- Gemini Lead (Gem) configurado con system prompt MS-Flow + conocimientos cargados
-- MS-Flow bautizado oficialmente como protocolo de coordinación de la MS
-
-## 2026-05-03 — MS-Flow inaugurado + repo MontuMS
-
-**MS-Flow:** protocolo de coordinación de la Metodología Sinérgica (MS).
-Sistema nervioso compartido entre Miaude, AG, CC y Clawdio.
-
-**Infraestructura creada:**
-- Repo GitHub privado: github.com/RodMontu/MontuMS
-- SSH key serverX → GitHub: id_ed25519_github (registrada en GitHub/settings/keys)
-- Git identity serverX: ce3wkc@gmail.com / RodMontu
-- /home/x/MontuMS/ — clone local del repo en serverX
-- /home/x/handoff/handoff_actual.md → symlink a /home/x/MontuMS/handoff_actual.md
-- Aliases serverX: handoff, handoff-edit, sesion, montu-ms
-- README.md con estructura MS + MS-Flow + convenciones globales
-- handoff_actual.md con estado al 2026-05-03
-
-**Primer commit:** 145813e — pusheado a main
-
-## 2026-05-03 — Fix monitor.sh + SOUL.md registro lingüístico
-
-**monitor.sh (`/home/i3/.hermes/scripts/monitor.sh`):**
-- Root cause: comillas triples `'''` para escapar awk dentro de bloque SSH — sintaxis frágil que generaba `unterminated string literal` en línea 15.
-- Fix: reescritura del bloque SSH usando heredoc (`<<'EOF'`) — elimina todo el escaping anidado.
-- Verificado: serveri3 + serverX + GPU + montuschi.cl reportan correctamente.
-
-**SOUL.md (`/home/i3/.hermes/SOUL.md`):**
-- Root cause: sección `## Idioma` no incluía "puta" en la lista de términos prohibidos, lo que le daba permiso implícito al modelo.
-- Fix: sección reescrita con registro permitido explícito, lista de prohibidos ampliada, y criterio de oro como regla autónoma de decisión para el modelo.
-- Hermes reiniciado para aplicar cambios.
-
-## 2026-05-02 al 2026-05-03 — Expansión de Infraestructura y OpenRouter
-
-**Contexto:** Fortalecimiento del stack de modelos vía OpenRouter y habilitación de entorno gráfico avanzado en serveri3 para automatización de browser.
-
-**Cambios en serveri3 (192.168.1.211):**
-- **Gemini CLI v0.40.1:** Instalado globalmente en `/home/i3/.hermes/node/bin/gemini`. Autenticado con Google One AI Pro. PATH actualizado en `~/.bashrc`.
-- **Entorno Gráfico:** Instalación de NoMachine Server v9.4.14, XFCE4 + goodies, x11vnc y noVNC para gestión remota liviana.
-- **Google Chrome:** Instalado (deb nativo, v147) en `/usr/bin/google-chrome`.
-- **Camoufox operativo:** better-sqlite3 recompilado para Node v22. Puerto 9377. Sesión persistente de Lider.cl (Anastasia Rivera) funcional.
-
-**Cambios en serverX (192.168.1.111):**
-- **Aliases OpenRouter:** Configurados 5 nuevos aliases (`ccor1` a `ccor5`) integrando modelos de OpenRouter (GPT-OSS, Nemotron, DeepSeek v4 Flash/Pro).
-- **Hook Post-Tool-Use:** Actualizado script `post-tool-use.sh` con contador de llamadas. Alertas automáticas a Telegram (@clawdio_dev_local_bot) al llegar a 80 (aviso) y 100 (crítico) calls.
-- **Presupuesto:** Carga inicial de $15 USD en OpenRouter (Saldo: ~$14.76).
-
-**Nomenclatura y Alertas:**
-- **Clawdio Rabín (@pantero_bot):** Alias coloquial "Rabín" para el asistente personal.
-- **Clawdio Dev (@clawdio_dev_local_bot):** Bot dedicado exclusivamente a alertas TI e infraestructura.
-- **Miaude:** Alias fonético para Claude en el contexto de Mi TI.
-
-**Gastos IA mensuales consolidados:**
-- Claude Pro ($20) + Gemini Pro ($20) + Google API Gemini ($10) + OpenRouter ($15). Total est: ~$65 USD/mes.
-
----
-## 2026-05-02 — Superpoderes Clawdio: Fase 1, 2 y 3 + Nuevo Sistema de Trabajo
-
-**Contexto:** Sesión completa de mejoras a Clawdio (Hermes Agent) basada en investigación previa de arena.ai sobre maximizar el potencial de Hermes. Paralelamente, definición del nuevo sistema de trabajo orquestado Claude + Clawdio + Gemini.
-
-**Cambios en Hermes / Clawdio (serveri3):**
-- Hermes actualizado v0.11.0 → v0.12.0 (307 commits, pip install -e .)
-- terminal.backend: local → ssh (apuntando a serverX 192.168.1.111, user x)
-- Llave pública i3→serverX establecida (authorized_keys)
-- display.busy_input_mode: interrupt → steer
-- display.background_process_notifications: all → result
-- security.website_blocklist activado (localhost, 192.168.1.195, portainer.internal)
-- Permisos 600 en .env y config.yaml
-- MEMORY.md creado en ~/.hermes/memories/ (60 líneas, infra + proyectos activos)
-- 3 crons nuevos: briefing-manana (09:00), ideas-pendientes (17:00 lun-vie), resumen-semanal (10:00 viernes)
-- Total crons activos: 5
-
-**Integración Claude Desktop ↔ Clawdio (MCP):**
-- Bridge SSH creado en Mac: /usr/local/bin/hermes-mcp-bridge
-- claude_desktop_config.json actualizado: mcpServers.clawdio → bridge SSH
-- Estado: RUNNING (verificado en Claude Desktop → Configuración → Desarrollador)
-- Claude Desktop puede ahora delegar tareas a Clawdio y recibir resultados vía MCP
-
-**Canal de retorno Clawdio → Claude (Opción A):**
-- Directorio: /home/i3/.hermes/agent_results/
-- Helper: write_result.py (escribe resultados en formato MD estandarizado)
-- Skill: ~/.hermes/skills/desarrollo/agent_results.md
-- Flujo: Claude delega → Clawdio ejecuta en agente → escribe .md → Claude lee vía MCP
-
-**Nuevo sistema de trabajo — Reglas Cardinales:**
-- Documento creado: REGLAS_CARDINALES_FLUJO_ORQUESTADO.md
-- Stack de modelos definido: Claude Sonnet (arquitectura), Gemini Pro (análisis/relay), Gemini Flash (Clawdio/orquestación), Qwen3 Coder 480B:free (coding rutinario), Nemotron 3 Super:free (análisis mixto), qwen2.5-coder:7b local (privacidad/offline)
-- Flujo orquestado 6 pasos: Montu define → Clawdio recolecta contexto → Claude planifica → Clawdio distribuye → Claude evalúa → Clawdio notifica
-- Variante Gemini relay: handoff_actual.md en repo para continuidad cuando se agota cuota Claude
-- Regla de seguridad cardinal: instrucciones correctivas siempre van de Montu directo a Claude, nunca mediadas por Clawdio
-
-**Archivos nuevos en /mnt/extra/DOCUMENTOS_TECNICOS/:**
-- REGLAS_CARDINALES_FLUJO_ORQUESTADO.md (nuevo — brújula del sistema de trabajo)
-
-**Deuda técnica registrada:**
-- Gemini CLI: verificar instalación en serverX y serveri3 (necesario para Fase siguiente)
-- OpenRouter: configurar CC con Qwen3 Coder 480B:free como alias en serverX
-- Handoff automático: implementar escritura de handoff_actual.md al inicio de sesiones de desarrollo
-
----
-## 2026-04-25 al 2026-05-01 — Implementación completa de Clawdio
-
-**Contexto:** Migración de OpenClaw a Hermes Agent. Implementación de Clawdio como asistente personal para Montu y Pecas.
-
-**Cambios realizados:**
-- Hermes Agent instalado en serveri3, gateway como user service systemd con linger
-- Bot Telegram @pantero_bot activo con 2 usuarios autorizados
-- Stack de modelos: Gemini 2.5 Flash (principal) + Nemotron free + llama3.1:8b local
-- SOUL.md creado con personalidad Clawdio (tono culto-informal, español chileno)
-- Google Workspace autenticado: 3 cuentas Gmail + Calendar (OAuth2)
-- Lista supermercado Lider: 61 productos habituales en supermercado.json
-- DB SQLite deberes e ideas: init_db.py con funciones CRUD completas
-- STT voz: faster-whisper instalado en venv, stt-local.sh wrapper activo
-- Monitoreo automático: monitor.sh + 2 crons Hermes (08:00 y 20:00)
-- MEMORY.md y USER.md con manual operativo completo de herramientas
-- session_reset cambiado de "both" a "session" para preservar perfil usuario
-- Pasos intermedios suprimidos en Telegram (tool_progress: none)
-- Node.js 20.x instalado para soporte Camofox (browser automation)
-- ByteRover CLI instalado pero desactivado como provider (incompatibilidad Gemini 2.5 Flash)
-
-**Deuda técnica registrada:**
-- Lider.cl requiere login manual una vez via Camofox
-- Hooks en serverX settings.json pendientes de fix
-
----
-## 2026-04-19 — Instalación de Gemini CLI en Nodo Cliente (MacBook Pro)
-
-**Contexto:** Se requiere un motor de IA nativo en terminal para telemetría remota hacia la infraestructura local, dado que la App visual nativa de Gemini no soporta la arquitectura x64 (Intel). Para asegurar la sincronización de contexto entre los distintos LLMs del ecosistema (Gemini / Claude), se documenta explícitamente el stack cognitivo de esta nueva herramienta.
-
-**Ejecución y Topología:**
-- Instalación global de `@google/gemini-cli` vía NPM en entorno Node.js v24.13.0.
-- Autenticación OAuth exitosa heredando cuota compartida de Google One AI Pro.
-- **Stack Cognitivo Integrado:** El CLI opera con **Gemini 3.1 Pro** para tareas de análisis sistémico y razonamiento profundo, y utiliza el motor de **Gemini Code Assist** para la generación y validación de comandos shell.
-- **Nuevo vector de control:** La terminal de macOS funciona ahora como un "HUD Ejecutivo". El CLI genera e inyecta comandos SSH autónomos hacia `x@192.168.1.111` y `i3@192.168.1.211` para analizar logs y gestionar contenedores Docker sin salir del prompt local.
-- **Smoke Test:** Lectura remota exitosa del runtime de `ollama` en serverX vía SSH.
-
----
-## 2026-04-10 — SSO Cloudflare Access + Exposición de Apps
-
-**Contexto:** Se implementó autenticación centralizada vía Cloudflare Access para las aplicaciones personales, eliminando la necesidad de validación individual por app. Se expusieron nuevas apps vía Cloudflare Tunnel y se actualizó El Tablero con URLs HTTPS públicas.
-
-**Cambios en Cloudflare Tunnel (`/srv/cloudflared/config.yml` en serveri3):**
-- AGREGADO: `tablero.montuschi.cl` → `http://localhost:8080`
-- AGREGADO: `visual-voice.montuschi.cl` → `http://192.168.1.111:8502`
-- AGREGADO: `cutx.montuschi.cl` → `http://192.168.1.111:8600` *(pendiente DNS/Access)*
-- ELIMINADO: `sim.montuschi.cl`
-- ELIMINADO: `sim-ws.montuschi.cl`
-- CORREGIDO: catch-all `http_status:418` → `http_status:404`
-
-**Cloudflare Access — nuevas políticas creadas:**
-- `tablero.montuschi.cl` → política "Acceso Autorizado" (Allow por correo)
-- `visual-voice.montuschi.cl` → política "Acceso Autorizado" (Allow por correo)
-- `superagente.montuschi.cl` → política "Acceso Autorizado" (Allow por correo)
-
-**El Tablero (`/srv/web/var/www/html/tablero/index.html`):**
-- SuperAgente: URL actualizada de `192.168.1.111:18080` → `https://superagente.montuschi.cl`
-- Visual Voice: URL actualizada de `192.168.1.111:8502` → `https://visual-voice.montuschi.cl`
-- CutX: URL actualizada de `192.168.1.111:8600` → `https://cutx.montuschi.cl`
-- Backup guardado: `index.html.bak`
-
-**Decisiones de arquitectura tomadas en esta sesión:**
-- Cloudflare Access es el portero único (no se construyó backend de autorización propio)
-- OptiFierro mantiene login nativo (sin Access, por diseño)
-- Pegas y n8n se mantienen en tunnel pero sin política Access aún (desarrollo activo)
-- ia.montuschi.cl se mantiene en tunnel pendiente decisión de reciclaje
-- WARP identity (Beta) no activada — pendiente enrollment completo en ambos equipos
-
----
-## [2026-04-04] Sesión: Fix Ollama GPU + Compose Formal
-
-### Problema resuelto
-- Ollama consumía RAM del sistema (~60%) y CPU al arrancar, en vez de mantenerse en VRAM.
-- GPU caía a CPU intermitentemente, requiriendo watchdog como parche.
-
-### Causa raíz identificada
-1. `OLLAMA_MAX_LOADED_MODELS=0` (ilimitado): múltiples modelos se cargaban simultáneamente agotando VRAM y desbordando a RAM.
-2. `runtime: runc` en vez de `nvidia`: acceso a GPU frágil ante reinicios y eventos del sistema.
-3. Ollama levantado con `docker run` manual sin compose formal.
-
-### Acciones ejecutadas
-- Creado compose formal: `/srv/stack/ollama/docker-compose.yml`
-- Runtime cambiado a `nvidia`
-- Variables aplicadas: `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_KEEP_ALIVE=0`, `OLLAMA_GPU_OVERHEAD=536870912`
-- Watchdog `ollama-gpu-watchdog.timer` detenido y deshabilitado permanentemente
-- Open WebUI eliminado permanentemente (red `ia-net` eliminada)
-- Modelo `deepseek-r1:7b` (4.9GB) descargado como modelo principal para Clawdio
-
-### Verificación
-- `ollama ps` confirma: `deepseek-r1:7b → 100% GPU`
-- RAM del sistema: 12% (normal, sin desborde)
-
-### Archivos modificados
-- `/srv/stack/ollama/docker-compose.yml` — CREADO
-- `INVENTARIO_MAESTRO.md` — actualizado
-- `INVENTARIO_LLMS_LOCALES.md` — actualizado
-- `gpu_intermitente_en_ollama_docker_server_x_p_104_100.md` — ELIMINADO (obsoleto)
----
-
-═══════════════════════════════════════════════════
-FECHA: 2026-03-30
-PROYECTO: Almacenamiento "ARCA" & Backup Remoto
-═══════════════════════════════════════════════════
-
-[ESTRATEGIA ARCA]
-- Creación del disco "ARCA" en serverX (/dev/sda1) como repositorio central de datos históricos (745 GB).
-- Reciclaje de disco Toshiba USB como "RESPALDO_ARCA" (formato ext4).
-- Implementación de sistema de respaldo automatizado desde serveri3 a serverX vía rsync + cron (05:11 AM).
-- Configuración de SSH Keys para sincronización sin contraseña i3 → X.
-- Auditoría y limpieza de serverX: Liberación de 537 GB de backups obsoletos.
-
-[IA & DESARROLLO - CLAUDE CODE HÍBRIDO]
-- Upgrade de Ollama: v0.12.10 → v0.19.0 (Docker).
-- Ingesta de nuevo modelo: `qwen3.5:9b` para razonamiento avanzado.
-- Implementación de aliases (~/.bashrc) para Claude Code local:
-  - `ccoder` (qwen2.5-coder:7b)
-  - `creason` (qwen3.5:9b)
-- Optimización de tráfico: `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` habilitado en ejecución local.
-
-═══════════════════════════════════════════════════
-FECHA: 2026-03-28
-PROYECTO: Infraestructura (NAS & Samba)
-═══════════════════════════════════════════════════
-
-[NAS MIAU-NUBE]
-- Implementación de almacenamiento centralizado (NAS) en serverX usando disco /dev/sdc1 (/mnt/extra).
-- Configuración de Samba para acceso LAN/Externo (Cloudflare WARP).
-- Despliegue de scripts de automontaje (~/Miau-Nube) en Mac Rodrigo y Mac Pecas vía Launch Agents.
-- Documentación completa integrada en INVENTARIO_MAESTRO.md (Sección 8).
-
-═══════════════════════════════════════════════════
-FECHA: 2026-03-23 (jornada completa + madrugada 24)
-PROYECTO: OptiFierro V2 + Scraper Geovictoria
-═══════════════════════════════════════════════════
-
-[SCRAPER GEOVICTORIA]
-- Reescritura completa del scraper: nuevo reporte "Gestión de Asistencia" con horas reales.
-- Nuevos campos: hora_ingreso, hora_salida, cargo, turno, permiso, HEA/HEC/HNT/HT, empresa, planta.
-- Mapeo sucursal_id corregido: Vista Clara → 10.
-- Creado repo independiente: github.com/RodMontu/scrap-geovictoria
-- Deploy en TO: contenedores geovictoria-api (:8002) y geovictoria-scheduler.
-- Backfill marzo 2026: 1.610 registros, 70 personas.
-
-[INTEGRACIÓN GEOVICTORIA ↔ OPTIFIERRO]
-- Motor consulta Geovictoria antes de programar: GET /asistencia/operadores_presentes/{id}
-- Cruce RUT→Cubigest Trabajador→username implementado (regla nombre chileno).
-- Variable GEOVICTORIA_API_URL=http://host.docker.internal:8002. Fallback configurado.
-- Nombres reales poblados en operadores_matriz.Nombre.
-
-[OPTIFIERRO — FIXES CRÍTICOS]
-- BUG mapa_maq_nro_nombre resuelto: reconstruido desde SQLite. Cerrillos pasó de 0 a 18 asignadas.
-- BUG sucursal_id Cerrillos resuelto: homologado a 10 en constants.ts.
-- BUG tabla averias: ALTER TABLE aplicado para columnas faltantes.
-- BUG DB optifierro_v2.db corrupta en TO: Reconstruida, migrada y agregada a .gitignore.
-
-[OPTIFIERRO — DATOS REALES DESDE CUBIGEST]
-- Sprint 3 re-ejecutado: 19 máquinas con operador habitual real, diámetros reales 2 años, 5.600 registros compatibilidad_formas.
-- Matriz operador×máquina repoblada (6 meses).
-
-[OPTIFIERRO — UI]
-- Facelift visual: accent=#f97316, sidebar=#111827.
-- Branding: Cambio a "Sistema de Planificación de la Producción". Eliminadas referencias a OptiFierro y Torres Ocaranza.
-
-[RESULTADOS MOTOR AL CIERRE]
-- Calama: 31/63 asignadas ✅
-- Cerrillos: 18/41 asignadas ✅
-- Coronel: 1/54 asignadas ⚠️
-
-[PENDIENTES ACTIVOS]
-- [ ] Diagnóstico Motor Coronel (1/54).
-- [ ] BUG-05/06/07: Gestor Materia Prima.
-- [ ] Repoblar compatibilidad_formas con datos reales 2 años.
-- [ ] Verificar join diámetros Coronel.
-- [ ] UI Geovictoria: dashboard KPIs asistencia (en desarrollo).
-
-**ACTUALIZACIÓN OPTIFIERRO (2026-02-20):**
-- **Servicio:** OptiFierro UI (Prototipo HTML/JS Dashboard)
-- **Host:** serverX (192.168.1.111)
-- **Puerto Activo:** 8080 (tablero_proyecto.html)
-- **Ruta de Datos:** Simulador generar_datos_demo.py activo.
-
-## [2026-02-26] Despliegue OptiFierro v2 - Fase 4 (Exposición UI)
-- **Acción:** Dockerización final de Streamlit y exposición a internet.
-- **Configuración Docker:** `serverX`. Mapeo de volumen local (`/home/x/optifierro:/app`). Dependencias inyectadas vía `requirements.txt`. Redirección de red a `0.0.0.0:8501`.
-- **Configuración Red:** Ingress en `serveri3` (`/srv/cloudflared/config.yml`) apuntando a `http://192.168.1.111:8501`.
-- **Estado:** App visible en optifierro.montuschi.cl (HTTP 200 OK).
-- **Pendiente inmediato:** Asegurar endpoint con Cloudflare Zero Trust.
-
-### LOG DE CAMBIOS (Update)
-- **Fecha:** 2026-03-02
-- **Versión:** 0.5.0
-- **Hito:** Implementación de UI Completa y Lógica Core.
-- **Cambios:** Capa de Login (Admin/Visualizador), Sidebar con 8 secciones, Banner de Alerta Global (Discovery Engine), y Hub de Administración con 4 tarjetas (Usuarios, Sucursales, Logs, Geovictoria).
-- **Fixes:** Solución definitiva a la pérdida de estado en DataFrames de Streamlit usando mutación de índices y copia de objetos.
-
-- **Fecha:** 2026-03-01
-- **Servicio:** OptiFierro V2 (Motor de Orquestación)
-- **Host:** `serverX` (192.168.1.111)
-- **Path:** `/home/x/stack/optifierro_v2/`
-- **Puertos Asignados:** `8000` (API/Backend) / `8503` (UI Frontend Streamlit - Auto-asignado por colisión con V1).
-- **Base de Datos:** `optifierro_db` en Postgres (Puerto `5433`)
-- **Estado:** Fase Antigravity Atómica - Sección 1 (Estable)
----
-
-> **FECHA:** 2026-03-04
-> **PROYECTO:** OptiFierro V2
-> **EVENTO:** Estabilización de Infraestructura de Red y Resolución de Conflictos Proxy.
-> **CAMBIOS A NIVEL INFRAESTRUCTURA (CLOUDFLARE):** > - Se eliminó por completo la aplicación de Cloudflare Access (Zero Trust / Google Auth) para el subdominio `optifierro.montuschi.cl`. 
-> - **Causa:** Colisión de políticas entre la interceptación de cookies asincrónicas de Cloudflare y los motores de "Tracking Prevention" de navegadores (Edge/Safari), lo cual bloqueaba la descarga de assets estáticos (JS/CSS) y WebSockets de Streamlit.
-> - **Resolución:** La seguridad perimetral se delega al 100% a la capa de aplicación (Login nativo de Python en Streamlit). El túnel Cloudflare ahora actúa como un conducto de transporte puro (Clean Pipe) sin inspección de sesión.
-> **DESCUBRIMIENTO DE RED (FALLBACK):**
-> - Se mapeó la IP virtual asignada a `serverX` por la VPN FortiClient del cliente: `10.212.134.171`. 
-> - Se validó el acceso "Client-to-Client" exitoso en el puerto `8503`, permitiendo un bypass total de internet público en caso de caídas de DNS o cachés envenenadas en el borde.
----
-
-## 2026-03-06: Pivot Arquitectónico OptiFierro V2 (Integración IA Local)
-- **Decisión:** Eliminación de n8n como middleware. Comunicación Frontend (Streamlit) <-> Backend (Python) 100% nativa.
-- **Nuevas Capacidades UI:** 1. Recálculo en caliente (Reprogramar Turno vía `sucursal_id`).
-  2. Componentes de ingesta NLP (texto libre a JSON).
-  3. Renderizado XAI (Explainable AI) para justificación de ruteos.
-  4. Sistema inmunológico visual (Toast alerts) para anomalías del motor.
-
-  ## [ACTUALIZACIÓN ARQUITECTÓNICA] Backend y Motor V2 — Fecha: 2026-03-07
-- **Eliminación de n8n:** Se descartó el uso de n8n como orquestador debido a riesgos de inestabilidad y loops. Todo el backend será un demonio monolítico en Python puro.
-- **Topología Híbrida Definida:** 1. Frontend: Streamlit (`app.py`).
-  2. Base de Datos Local: SQLite (`optifierro_v2.db`) para reglas duras y capacidades, reemplazando el archivo Excel manual.
-  3. Motor Matemático: Heurística en Python (`motor_optimizacion.py`) determinista.
-  4. Capa Cognitiva: Ollama local en serverX para NLP y Explainable AI (XAI).
-- **Nuevo Criterio de Programación:** El ruteo ahora se calcula priorizando: 1) Días Atrasados, 2) Días Restantes, 3) Fecha IT. Se inyectó una penalización de Setup (15 min) por cambio de diámetro.
-- **Contrato de Datos UI:** Se modificó el JSON de salida del motor para incluir la variable `calidad_acero` (ej. A630 vs A440) para alertas visuales en el Gantt.
-- **Creación de Archivos Core:** Se crearon y probaron con éxito `database.py` y `motor_optimizacion.py`.
-
-## 2026-03-08: Aclaración de Topología de Red (Air-Gap Lógico)
-- **Corrección:** El Servidor TO *sí* tiene conexión a internet, pero la aplicación **OptiFierro V2** operará bajo un estricto **Air-Gap Lógico** por políticas de seguridad industrial.
-- **Impacto Arquitectónico:** La arquitectura FastAPI + React (Vite) se mantiene. Se establece como regla estricta que el proceso de "build" del frontend debe empaquetar todos los assets (fuentes, iconos, CSS) localmente. Prohibido el uso de CDNs externas o telemetría en el código cliente.
-
-## 2026-03-08: Asignación de Puerto FastAPI (OptiFierro V2)
-- **Componente:** Capa de Traducción RESTful (Backend FastAPI).
-- **Estado:** Operativo en `serverX` (PID registrado por Antigravity).
-- **Cambio Topológico:** El servidor se ancló al puerto **8001** (colisión en el 8000 por stack de contenedores previo).
-- **Impacto Frontend:** El servidor de desarrollo Vite y las llamadas de red en producción deben apuntar sus proxies a `http://localhost:8001`.
-
-## 2026-03-08: Inyección de Layout Base (React + Tailwind v4)
-- **Componente:** `src/index.css` y `src/App.tsx` (Frontend React).
-- **Cambio Sistémico:** Se estableció el esquema visual "Dark Mode + Glassmorphism" definido en la directiva `ui-ux-pro-max.md`. 
-- **Tailwind v4:** Se migró la configuración de variables a CSS nativo (`@theme`) para minimizar la carga de dependencias en el entorno Air-Gapped.
-- **Conectividad:** Se implementó un hook `useEffect` en el layout principal para monitorear en tiempo real la salud del backend (`/api/health`) vía el proxy de Vite.
-
-## 2026-03-08: Validación de Sinapsis Frontend-Backend
-- **Estado:** Éxito. El proxy de Vite superó el bloqueo de red y conectó con FastAPI (Puerto 8001).
-- **UI:** Componente `DatabaseStatus` renderizando correctamente en React, leyendo las tablas de `optifierro_v2.db` (sucursal, operador, maquina, etc.).
-- **Siguiente Fase:** Iniciar migración 1:1 de las vistas de Streamlit (`seccion_1` a `seccion_8`) hacia la nueva arquitectura de enrutamiento en React (SPA).
-
-## 2026-03-09: Arquitectura Bimodal y Topología de Cliente
-- **Componentes:** `index.css`, `App.tsx`.
-- **Cambio Sistémico 1:** Se mapearon las 8 secciones de navegación originales solicitadas por el cliente.
-- **Cambio Sistémico 2:** Se implementó una arquitectura de Theme Toggle (Claro/Oscuro). Se modificó el `glass-panel` en CSS nativo para reaccionar al DOM, evitando hardcodear colores en las vistas futuras y reduciendo la deuda técnica.
-
-## 2026-03-09: Personalización UI/UX (Requerimientos Cliente Final)
-- **Componente:** `App.tsx`
-- **Cambio Sistémico 1:** Rebranding a "Sistema de Planificación de la Producción" e integración de logo corporativo (`/public/logo.png`).
-- **Cambio Sistémico 2:** Telemetría Silenciosa. Indicador de API oculto por defecto; renderiza alerta roja solo en desconexión.
-- **Cambio Sistémico 3:** Se mapearon las 3 sucursales (Calama, Cerrillos, Coronel) y los horarios reales de turno (Día L-V, Noche L-S madrugada).
-
-## 2026-03-09: Corrección de Motor UI y Simplificación
-- **Componentes:** `index.css`, `App.tsx`
-- **Cambio Sistémico 1:** Se estableció el Tema Claro como default por requerimiento de legibilidad del cliente.
-- **Cambio Sistémico 2:** Se parcheó el motor de Tailwind v4 (`@variant dark`) para forzar el modo oscuro por clase en lugar de media query del SO. Esto corrige el fallo de contraste en tipografías.
-- **Cambio Sistémico 3:** Se redujo la carga cognitiva en el selector de Turnos, limitándolo a "Día" y "Noche".
-
-## 2026-03-09: Inyección de Componentes de Dominio (Gestor de Máquinas)
-- **Nuevos Archivos:** `src/components/domain/GestorMaquinas.tsx`
-- **Cambio Sistémico 1:** Se creó el componente de Data Table para la gestión de máquinas, aplicando diseño bimodal (Claro/Oscuro) y manejo de estados (Loading, Error, Empty).
-- **Cambio Sistémico 2:** Se enlazó el componente al enrutador principal en `App.tsx` para la vista `gestor_maquinas`.
-
-## 2026-03-09: Reestructuración de Dominio (Gestor de Máquinas)
-- **Componentes Modificados:** `src/components/domain/GestorMaquinas.tsx`
-- **Cambio Sistémico 1:** Se alineó la estructura de datos a la lógica de negocio (eliminación de columna "Capacidad").
-- **Cambio Sistémico 2:** Se implementó un sistema de navegación interna por Pestañas (Tabs) para replicar la UX original de Streamlit.
-- **Cambio Sistémico 3:** Se preparó el andamiaje para consumir los 4 nuevos endpoints RESTful (`/api/maquinas`, `/diametros`, `/hebras`, `/restricciones`).
-
-## 2026-03-09: Normalización de Contrato y Edición Matricial
-- **Componentes:** `src/components/domain/GestorMaquinas.tsx`
-- **Cambio Sistémico 1:** Adaptación al nuevo contrato del Backend. Las columnas dinámicas ahora leen directamente el formato `Xmm` y procesan enteros (`1`/`0`) como booleanos.
-- **Cambio Sistémico 2:** Habilitación de ciclo Update (Edición) para la matriz de Diámetros (mediante Checkboxes) y la matriz de Hebras (mediante Number Inputs).
-- **Cambio Sistémico 3:** El controlador de guardado ahora enruta dinámicamente el `PUT` hacia `/api/maquinas/...`, `/api/maquinas/diametros/...` o `/api/maquinas/hebras/...` según la pestaña activa.
-
-## 2026-03-09: Hotfix UI (Pestaña Restricciones)
-- **Componentes:** `src/components/domain/GestorMaquinas.tsx`
-- **Cambio Sistémico:** Se restauró el renderizador genérico de columnas y filas para la pestaña "Restricciones", el cual había sido omitido durante la refactorización de matrices dinámicas.
-
-## 2026-03-09: Implementación de Súper Matriz de Operadores
-- **Nuevos Componentes:** `src/components/domain/GestorOperadores.tsx`
-- **Cambio Sistémico 1:** Se fusionaron las vistas de Nómina y Competencias en una "Súper Matriz" unificada, reduciendo la carga cognitiva.
-- **Cambio Sistémico 2:** Se implementó lógica de detección de "Nuevo Recurso" (Onboarding). Si un operador tiene 0 máquinas asignadas, el sistema despliega una alerta visual para requerir la atención del administrador.
-- **Cambio Sistémico 3:** Se habilitó el ciclo Update (Checkboxes) conectado a `/api/operadores/{operador}`.
-
-## 2026-03-09: Parche de Usabilidad y Contexto Global (Requerimientos PO)
-- **Componentes:** `App.tsx`, `GestorOperadores.tsx`, `GestorMaquinas.tsx`
-- **Cambio Sistémico 1 (Contexto Global):** Se cableó el selector del Sidebar (`globalSucursal`). Ahora toda la UI reacciona y filtra los datos según la planta seleccionada (Calama, Cerrillos, Coronel).
-- **Cambio Sistémico 2 (Scroll & Responsive):** Se reparó el bug de `overflow` en el Layout principal (CSS Flexbox), permitiendo el scroll vertical infinito en las Data Tables y añadiendo adaptabilidad básica para pantallas menores.
-- **Cambio Sistémico 3 (Aislamiento de Planta):** La Súper Matriz ahora oculta dinámicamente las columnas de las máquinas que no pertenecen a la sucursal seleccionada, evitando asignaciones erróneas.
-- **Cambio Sistémico 4 (Bloqueo de Llave Primaria):** Se habilitó la edición de "Sucursal", pero se mantuvo el "Usuario" como `readonly` para proteger la integridad de sincronización con el ERP Cubigest.
-
-## 2026-03-09: Hotfix Estructural y Contextual (PO QA)
-- **Componentes:** `App.tsx`, `GestorOperadores.tsx`
-- **Cambio Sistémico 1 (Filtro Estricto de Máquinas):** El `GestorOperadores` ahora realiza un cross-fetch con `/api/maquinas` para renderizar únicamente las columnas de máquinas físicamente existentes en la sucursal seleccionada.
-- **Cambio Sistémico 2 (UX Renderizado Condicional):** Se reincorporó el filtro global de "Turno", configurado para renderizarse exclusivamente en el módulo de "Programación".
-- **Cambio Sistémico 3 (Scroll Bidireccional):** Se ajustó el motor CSS de la Data Table (`min-w-max`) para soportar scroll horizontal infinito, vital para visualizar matrices densas como las de Cerrillos.
-
-## 2026-03-09: Integración de Catálogo Maestro de Formas (Cubigest)
-- **Nuevos Componentes:** `src/components/domain/GestorPiezas.tsx`
-- **Cambio Sistémico 1:** Se conectó el Frontend con el CDN interno de Cubigest (puerto 86) para renderizar en vivo los diagramas geométricos de las piezas sin sobrecargar el Frontend.
-- **Cambio Sistémico 2:** Implementación de Paginación Server-Side (bloques de 20 registros) y Motor de Búsqueda por `id_forma` para manejar el catálogo masivo.
-- **Cambio Sistémico 3:** Súper Matriz de Asignación. Los administradores ahora pueden encender/apagar qué máquinas (filtradas por sucursal) están homologadas para fabricar cada geometría.
-
-## 2026-03-09: Hotfix API Gestor de Piezas
-- **Componentes:** `src/components/domain/GestorPiezas.tsx`
-- **Cambio Sistémico:** Se inyectó el parámetro obligatorio `&sucursal=` en la query string de `/api/piezas/formas` para resolver el error HTTP 422 de validación en FastAPI. Se añadió reactividad para refetching al cambiar de filial.
-
-## 2026-03-09: Implementación de Gestor de Materia Prima (Fase 1 - Mock INET)
-- **Nuevos Componentes:** `src/components/domain/GestorMatPrima.tsx`
-- **Cambio Sistémico 1:** Se construyó la tabla de inventario cruzado para detectar quiebres de stock tempranos.
-- **Cambio Sistémico 2:** Implementación de cálculo en tiempo real: `Necesidad = Stock Cubigest + Tránsito - Comprometido`.
-- **Cambio Sistémico 3:** Poka-Yoke visual. Las necesidades negativas (quiebre de stock) se iluminan automáticamente en rojo alerta.
-- **Cambio Sistémico 4:** Se enlazó el módulo al filtro de estado global de la sucursal.
-
-## 2026-03-09: Refactor API Gestor de Materia Prima
-- **Componentes:** `src/components/domain/GestorMatPrima.tsx`
-- **Cambio Sistémico 1:** Se actualizó el endpoint a `/api/materias_primas` según el nuevo contrato del dominio.
-- **Cambio Sistémico 2:** Adopción del patrón "Fat Server". Se eliminó el cálculo de necesidad en el Frontend, pasando a consumir el valor `necesidad` pre-calculado por el motor Backend.
-
-## 2026-03-09: Mejora de UX Analítica en Gestor de Materia Prima
-- **Componentes:** `src/components/domain/GestorMatPrima.tsx`
-- **Cambio Sistémico 1:** Se incorporó un motor de búsqueda en tiempo real (Client-Side) que filtra simultáneamente por Código de Insumo o Descripción.
-- **Cambio Sistémico 2:** Se habilitó el ordenamiento bidireccional (Ascendente/Descendente) en todas las columnas de la tabla para facilitar el análisis de quiebres de stock.
-
-## 2026-03-09: Despliegue de Motor de Programación (Carta Gantt)
-- **Nuevos Componentes:** `src/components/domain/GestorProgramacion.tsx`
-- **Cambio Sistémico 1:** Se construyó el lienzo interactivo del Gantt usando arquitectura de Estado Plano (Flat State) para maximizar el rendimiento.
-- **Cambio Sistémico 2:** Motor visual de tiempo. Las barras calculan su posición (X) y ancho en base a la diferencia de minutos dentro del turno seleccionado.
-- **Cambio Sistémico 3:** Poka-Yoke de Calidad. Barras de acero estándar (A630) usan paleta neutra; calidades especiales se renderizan en ámbar/rojo de alerta.
-- **Cambio Sistémico 4:** Tooltip analítico. Al hacer hover sobre una IT, se despliega una tarjeta con los campos críticos (Obra, Elemento, Formato, Kilos).
-- **Cambio Sistémico 5:** Bandeja de "Backlog" inferior para ITs pendientes de asignación.
-
-## [PROYECTO: OptiFierro] - Módulo Geovictoria Scraper
-- **Estado:** En Diseño / Fase 0.
-- **Tecnología:** Python + Playwright (Dockerizado en serverX).
-- **Dependencia Externa:** Portal Web Geovictoria.
-- **Destino de Datos:** optifierro_v2.db (Tabla: asistencia_diaria).
-
-## [ACTUALIZACIÓN INVENTARIO] - 2026-03-10
-**Proyecto:** OptiFierro V2
-**Componente:** Geovictoria Scraper
-- **Ruta:** `/home/x/stack/optifierro_v2/geovictoria_scraper/`
-- **Stack:** Python 3.11, Docker, Playwright (Stealth Mode).
-- **Rol:** Extracción diaria de asistencia. Operación 100% automatizada (evasión de Captcha vía persistencia de sesión).
-
-## [ACTUALIZACIÓN INVENTARIO] - 2026-03-10
-**Proyecto:** OptiFierro V2 (Geovictoria Scraper)
-**Incidencia:** Contenedor Docker en serverX no resolvía dominios externos (ERR_NAME_NOT_RESOLVED).
-**Causa:** Conflicto de resolución DNS con Pi-hole (serveri3).
-**Solución (Hardcode):** Se inyectaron DNS públicos (1.1.1.1, 8.8.8.8) a nivel de `docker-compose.yml` aislando al scraper del filtrado de la red local.
-**Ajuste Dependencias:** `playwright-stealth` fijado a v1.0.6 para compatibilidad con `sync_playwright`.
-
-## [ACTUALIZACIÓN INVENTARIO] - 2026-03-10
-**Proyecto:** OptiFierro V2 (Geovictoria Scraper)
-**Corrección Arquitectónica:** URL de login corregida de `secure.geovictoria.com` a `clients.geovictoria.com/account/login`.
-**Avance:** Fase 2 (Login payload). Implementación de tipeo asíncrono aleatorio (50-250ms) para evadir heurísticas de detección de bots en el formulario.
-
-## [ACTUALIZACIÓN INVENTARIO] - 2026-03-11
-**Módulo:** Geovictoria Scraper (Fase 3 - ETL)
-**Estrategia:** Interceptación de evento de descarga nativa (.xlsx) vía Playwright, descartando scraping de DOM debido a estructura tabular compleja.
-**Dependencias agregadas:** `openpyxl`, `sqlalchemy`.
-**Reglas de Negocio:** Incorporado mapeo estático de sucursales (Vista Clara=1, Calama=2, Coronel=3, Quilicura=4) validado con Jefatura de Planta.
-
-## [ACTUALIZACIÓN INVENTARIO] - 2026-03-11
-**Módulo:** Geovictoria Scraper (Fase ETL)
-**Cambio Arquitectónico (DDD):** Refactorización semántica de la entidad de negocio. "Operador" cambia a "Colaborador".
-**Ajuste DB:** Se elimina tabla `asistencia_operadores`. Se crea tabla `asistencia_colaboradores`.
-**Ajuste Columnas:** `rut_operador` -> `rut_colaborador`, `nombre_operador` -> `nombre_colaborador`.
-**Restricciones aplicadas:** Normalización estricta de `sucursal_id` (1-4) y `estado` (PRESENTE, AUSENTE, LICENCIA, FALTA) vía reglas de Regex en Pandas.
-
-## [ACTUALIZACIÓN OPERATIVA] - 2026-03-11
-**Proyecto:** OptiFierro V2 (React + FastAPI)
-**Documento:** SOP de Arranque en Frío (Standard Operating Procedure)
-**Contexto:** Tras la migración de la interfaz nativa (Streamlit) a la arquitectura desacoplada (React + FastAPI), el ecosistema se aisló en un nuevo `workdir` (`optifierro_v2_frontend`) para evitar colisiones de dependencias de Python.
-
-**Secuencia Oficial de Arranque en `serverX`:**
-Para levantar la plataforma tras un apagado total del servidor, se deben levantar 3 componentes en orden:
-
-1. **Motor Cognitivo (Ollama):**
-   - Asegurar que el contenedor Docker esté activo para las parametrizaciones NLP.
-   - Comando: `sudo docker start ollama`
-
-2. **Backend (FastAPI):**
-   - El motor debe iniciar en su carpeta dedicada para ejecutar el `lifespan` que inyecta la DB a la RAM.
-   - Ruta: `cd /home/x/stack/optifierro_v2_frontend/backend`
-   - Comando: `source venv/bin/activate` (si aplica) && `uvicorn main:app --host 0.0.0.0 --port 8001 --reload`
-
-3. **Frontend (Vite / React):**
-   - El servidor de desarrollo UI.
-   - Ruta: `cd /home/x/stack/optifierro_v2_frontend/frontend`
-   - Comando: `npm run dev`
-
-   ## [ACTUALIZACIÓN INVENTARIO] - 2026-03-11 (Standby)
-**Módulo:** Geovictoria Scraper (Fase ETL)
-**Hallazgo 1 (Estructura de Datos):** El archivo exportado por Geovictoria es un "Falso Excel" (probablemente HTML o TSV con extensión alterada). Se requerirá ajuste en el parser de Pandas una vez verificado su raw text.
-**Hallazgo 2 (Diccionario de Entidades):** Se recuperó el maestro de sucursales original. El mapeo del Backend deberá actualizarse para reflejar los IDs reales (10=Vista Clara, 1=Calama, 14=Coronel) y evitar colisiones de Foreign Keys.
-**Estado de Operación:** Pausado por el Product Owner. A la espera de reanudación para aplicar inspección de archivo (`head / cat`) y parche final de DB.
-
-## [REPARACIÓN TÉCNICA] - Sincronización de Contratos y Estabilidad UI
-**Fecha:** 2026-03-11
-**Módulos Afectados:** Gestor de Averías (Frontend) + Motor de Programación (Backend/Gantt)
-
-### 1. Resolución de "Amnesia de Inicio" (Backend)
-- **Incidencia:** Tras el reinicio del `serverX`, el endpoint `/api/programacion` devolvía un Error 500 (Validation Error).
-- **Causa:** Desajuste entre el modelo Pydantic (exigía `sucursal_id`) y la inyección en el `lifespan` de FastAPI (enviaba `sucursal`).
-- **Solución:** Estandarización del esquema de datos en el ciclo de vida del servidor. Se implementó un *lifespan context manager* para asegurar la persistencia de las 11 máquinas de Cerrillos en la RAM al arrancar.
-
-### 2. Sincronización de Mapeo PascalCase (Frontend)
-- **Incidencia:** La tabla de Averías mostraba "Sin datos" o `#undefined`.
-- **Causa:** El Backend entrega llaves en PascalCase (`Maquina`, `Sucursal`, `Id`) mientras que el Frontend buscaba camelCase.
-- **Solución:** Se actualizó el mapper de `GestorAverias.tsx` para soportar ambas nomenclaturas y se inyectó un filtro por `sucursal` en el cliente para asegurar la consistencia visual.
-
-### 3. Preservación Rígida de Duración (Gantt)
-- **Incidencia:** Los PIDs (cajitas azules) colapsaban a una línea (duración 0) tras ser reasignados.
-- **Solución:** Implementación de cálculo de delta en milisegundos (`msDuration`). Al soltar un PID, el sistema captura la duración original y la suma a la nueva `hora_inicio`, garantizando que el ancho de la caja sea inmutable independientemente del movimiento.
-
-### 4. Refinamiento UX / UI
-- **Simplificación de Glosas:** Se eliminó el término "Poka-Yoke" de los títulos para mejorar la legibilidad del operario.
-- **Títulos Dinámicos:** El subtítulo superior ahora responde al estado global: `"Monitoreo en ${sucursal}"`.
-- **Limpieza de Tooltips:** Se añadió un reset de estado en `onDragStart` para eliminar tarjetas de detalles pegadas durante el movimiento.
-
-## 2026-03-11 BÚFER DE ACTUALIZACIÓN: LOG DE CAMBIOS (v2.x.x)
-🚀 NUEVAS CARACTERÍSTICAS (FEATURES)
-
-Módulo Vista Semanal (Fase 1): Creación del componente base VistaSemanal.tsx con selectores dinámicos de proyección (Semana Actual, Próxima, Subsiguiente) e integración de KPIs de Kgs y calibres de acero. (Nota: En proceso de re-densificación visual).
-
-Módulo Administración (Fase 1): Despliegue del hub de control Administracion.tsx con 4 pestañas operativas (Usuarios, Sucursales, Logs, Geovictoria) y la alerta global de detección de nuevos parámetros en la base de datos Cubigest.
-
-🛠️ ARQUITECTURA Y BACKEND (API & CONTRATOS)
-
-Flexibilización de Pydantic (Gantt): Se modificó el esquema del backend para aceptar Union[int, str] en la reasignación de PIDs, permitiendo el flujo bidireccional entre máquinas reales (int) y la Bolsa de Trabajo ("PENDIENTE").
-
-Traductor de Sucursales: Se eliminó el "sobre-filtrado" destructivo en el Frontend. El cliente ahora envía estricta y únicamente el SucursalId (ej. ?sucursal=1 para Cerrillos) y renderiza el array puro entregado por el Backend.
-
-Tipado Estricto de Llaves Primarias: Refactorización transversal en Gestor de Máquinas, Piezas, Operadores y Averías para abandonar el genérico id y consumir estrictamente MaquinaId desde el JSON anidado del backend.
-
-🐛 BUGFIXES CRÍTICOS Y POKA-YOKES (UI/UX)
-
-Resolución Error 422 (Registro de Averías): Se corrigió la discrepancia del payload en el POST /api/averias/registrar, pasando de maquina_id a MaquinaId, restaurando la comunicación con el LLM (Qwen) y la base de datos.
-
-Poka-Yoke Visual en Gantt (Bloqueo por Falla): Confirmada la reactividad en tiempo real: al registrar una avería, la Carta Gantt tiñe la fila de la máquina de rojo y rechaza físicamente el drop de nuevas tareas.
-
-Anti-Colapso de Fechas (Gantt): Se corrigió el bug de huso horario (Timezone) que colapsaba las tareas a "0px" (líneas invisibles) al cruzar la medianoche. Se implementó matemática de marcas absolutas (getTime()) y un seguro de renderizado visual mínimo de 2 horas.
-
-Resiliencia de CDN (Gestor de Piezas): Se inyectó un deflector de red (onError) en los diagramas de formas. Si el servidor de imágenes de Cubigest (192.168.1.195:86) no responde, la UI oculta el error silenciosamente en lugar de romper la matriz.
-
-Desbloqueo de UI (Gestor de Averías): Se eliminó el estrangulamiento CSS (overflow-hidden) y se inyectaron eventos onClick en las filas de la tabla para permitir la visibilidad y activación del botón de "Analizar Falla".
-
-## [2026-03-15] Motor V2 — Primera Ejecución Real con Datos de Cubigest
-
-### Hitos de la sesión
-- **Motor operativo:** `POST /api/programacion/generar` retorna 200 con datos reales.
-  Resultado Cerrillos turno día: 174/500 etiquetas asignadas, 18.085 Kgs totales.
-- **Terminología corregida:** "PID" → "Etiqueta" en backend y frontend.
-  Unidad visual del Gantt: `OBRA-(totalViajes)/(viajeActual)`.
-
-### Archivos nuevos generados en serverX
-| Archivo | Ruta | Descripción |
-|---|---|---|
-| `motor_v2.py` | `backend/` | Motor de optimización completo (Fase 1 + Fase 2) |
-| `extractor_rutas.py` | raíz proyecto | Extractor historial Cubigest → matriz_rutas.json |
-| `matriz_rutas.json` | raíz proyecto | 2.135 combinaciones únicas (3 sucursales, 12 meses) |
-| `deltat_por_forma_maquina.csv` | raíz proyecto | 352 medianas de DeltaT por (IdForma, Máquina, Sucursal) |
-| `openssl_legacy.cnf` | raíz proyecto | Fix SSL para conexión pyodbc → SQL Server legacy |
-
-### Decisiones arquitectónicas
-- **Mapa definitivo de sucursales Cubigest:**
-  `1=Calama · 4=Cerrillos (alias Santiago) · 14=Coronel`
-  IDs excluidos: 7/18 (TOSOL, instrucción cliente) · 10/15 (inactivos)
-- **Duración de trabajos:** mediana de DeltaT histórico por (IdForma, Máquina, Sucursal).
-  Sin hora de término en Cubigest → se calcula como delta entre inicio de trabajos consecutivos en misma máquina.
-- **Complejidad de forma:** índice desde `DetalleFormas` (coordenadas XY, NroPuntos + NroAngulos).
-  477 formas únicas, rango 1-14 puntos, promedio 6.5.
-- **FP-LC:** máquina virtual sin operador requerido. Criterio: IdForma=1, largo 6000-12000mm, diámetro AD.
-- **Ventana de etiquetas pendientes:** -30 días (quiebres stock acero) / +21 días (cubre Vista Semanal).
-- **Acero delgado (AD):** diámetro ≤ 16mm · **Acero grueso (AG):** diámetro ≥ 18mm.
-- **OPENSSL_CONF:** debe setearse antes de cualquier import de pyodbc.
-  Para Docker/TO: agregar variable de entorno en `docker-compose.yml`.
-
-### Protocolo de trabajo establecido
-- **Claude:** motor lógico, backend Python/FastAPI, algoritmos, SQL.
-- **Gemini:** frontend React, componentes UI, consumo de contratos JSON.
-- **Montu:** arquitecto, orquestador, QA, deploy.
-- Contrato JSON del Gantt entregado a Gemini para construcción del componente.
-
-### Pendientes inmediatos
-- [ ] Gemini construye componente Gantt sobre contrato JSON entregado.
-- [ ] Deploy en TO: Git push/pull + ajuste `docker-compose.yml` con `OPENSSL_CONF`.
-- [ ] Geovictoria: integrar scraper cuando cliente entregue credenciales.
-- [ ] Confirmar con cliente unidad de largo en Cubigest (metros vs milímetros) para FP-LC.
-- [ ] Confirmar máquinas inactivas de Cerrillos: EURA 20_2, FORMULA 12, CURVADORA 2, VRP 2 Schnell, series 101-111.
-
-═══════════════════════════════════════════════════
-FECHA: 2026-03-30
-PROYECTO: Infraestructura de Agentes (Antigravity)
-═══════════════════════════════════════════════════
-
-[CAPABILITY: MANIPULACIÓN DE ARCHIVOS MS OFFICE & POWER BI]
-- Integración de Antigravity (AG) con entorno Python en serverX para manipulación de binarios.
-- Dependencias inyectadas: `pandas`, `openpyxl`, `python-docx`, `python-pptx`.
-- Instalación de motor `.NET 8.0` y utilidad `pbi-tools` (v1.2.0 Core) para desacoplamiento y compilación de archivos `.pbix` / `.pbip`.
-- Implementación de topología híbrida: AG actúa como Orquestador (ECU) y rutea tareas cognitivas de datos hacia Ollama local (`qwen2.5-coder` / `qwen3.5:9b`) vía `http://localhost:11434/api/generate`.
-- Smoke Test validado: Flujo completo Excel → Pandas → Ollama → DOCX automatizado sin errores (Exit Code 0).
-
----
-
-# LOG DE CAMBIOS — 01 Abril 2026
-
-## Incidente: Apagón Abrupto ServerX + Recuperación Completa
-
-### Causa Raíz
-Apagón eléctrico abrupto en serverX. Consecuencias en cadena:
-- Disco PUSKILL (sistema original) con sectores dañados
-- Corrupción de /var/lib/docker/network/files/local-kv.db
-- Corrupción de /var/lib/containerd/io.containerd.metadata.v1.bolt/meta.db
-- Contenedor openwebui_knowledge-ragapi-1 en estado zombie permanente
-
-### Acciones de Recuperación (en orden)
-1. Backup ARCA: 695GB clonados al disco Toshiba externo ✅
-2. Clonación PUSKILL → WDC con ddrescue (100% completado) ✅
-3. GRUB instalado en WDC ✅
-4. fsck reparó filesystem ✅
-5. fstab corregido: línea /mnt/storage comentada (disco ARCA desconectado) ✅
-6. ServerX arrancando desde WDC ✅
-7. Docker network DB corrupta eliminada: /var/lib/docker/network/files/local-kv.db ✅
-8. Containerd metadata DB corrupta eliminada: /var/lib/containerd/io.containerd.metadata.v1.bolt/meta.db ✅
-9. Containerd y Docker reiniciados limpiamente ✅
-10. Zombie openwebui_knowledge-ragapi-1 eliminado al reconstruir meta.db ✅
-11. Redes Docker recreadas manualmente post-reconstrucción ✅
-12. Stack completo relanzado contenedor por contenedor ✅
-
-### Limpieza de Contenedores (decisión arquitectural)
-Contenedores eliminados permanentemente (docker rm -f):
-- open-webui (no se usa)
-- openwebui_knowledge-ragapi-1 (roto + no se usa)
-- n8n (no se usa)
-- sim-with-ollama-simstudio-1, realtime-1, db-1
-- superagenda_frontend, backend, scraper
-- optifierro_app, optifierro_db, optifierro-adminer-1 (producción en TO)
-- geovictoria_api (producción en TO)
-
-Contenedores detenidos (stop sin rm, volúmenes preservados):
-- pegas-pegas-web-1
-- pegas-pegas-api-1
-
-### Estado Final Stack ServerX
-| Contenedor | Estado |
-|---|---|
-| ollama | ✅ Up |
-| portainer | ✅ Up |
-| superagente-web | ✅ Up |
-| superagente-orchestrator | ✅ Up |
-| superagente-api | ✅ Up |
-| superagente-qdrant | ✅ Up |
-| web | ✅ Up |
-| retroassembly | ✅ Up |
-| visual-voice-visualvoice-1 | ✅ Up |
-| mcp-core-mcp-core-1 | ✅ Up |
-| pegas-pegas-web-1 | ⏸️ Stopped (modificar antes de relanzar) |
-| pegas-pegas-api-1 | ⏸️ Stopped (modificar antes de relanzar) |
-
-### Notas Técnicas Importantes
-- /mnt/storage: SIN DISCO. El disco ARCA (UUID 704473f4-b005-4bf8-91bf-0c9bf0e8d150) fue usado para recuperación y está desconectado. Línea comentada en fstab.
-- /mnt/extra (miau_nube, sdb1): montado correctamente ✅
-- Disco de sistema: WDC (clonado desde PUSKILL). PUSKILL con sectores dañados — NO reconectar sin diagnóstico.
-- GPU P104-100: operativa, Persistence Mode ON ✅
-- Openclaw/Clawdio: NO está en serverX. Está en serveri3 (/srv/openclaw). No levantar en serverX.
-
-### Pendientes Post-Incidente
-- [ ] Configurar teclado KDE (tildes y símbolos perdidos post-reboot)
-- [ ] Desactivar Powerlevel10k en zsh (prompt con símbolos molestos)
-- [ ] Aplicar 127 actualizaciones pendientes: sudo apt upgrade
-- [ ] Comprar pila CR2032 para CMOS (reloj derivará sin ella)
-- [ ] Ubicar compose de searxng y qdrant standalone y levantar
-- [ ] Evaluar disco PUSKILL: diagnóstico con smartctl antes de cualquier uso
-- [ ] Documentar nuevo disco de sistema (WDC) en INVENTARIO_MAESTRO
----
-## 2026-05-24 — Optimización de Tokens — Stack Claude (toda la infra)
-
-**Contexto:** Consumo elevado de tokens detectado por Montu. Mi TI (Miaude) ejecutó implementación autónoma vía protocolo Miaude-sin-Montu en los 4 nodos de la infraestructura.
-
-### Cambios aplicados
-
-**MacBook (user: montu)**
-- : agregado  y 
-- : creado — excluye , , , , , , , , binarios
-
-**serverX (192.168.1.111, user: x)**
-- : agregado  y  (preservando hooks SessionStart/PostToolUse/Notification)
-- : creado (patrón global)
--  creado en proyectos: , , , 
-
-**serveri3 (192.168.1.211, user: i3)**
-- : CREADO desde cero (no existía) — , 
-- : creado
-
-**TO — PROMETHEUS-AI-CORE (192.168.1.65, user: OptiFierro)**
-- : , 
-- Plugins CC reducidos de **11 → 2** (solo  y  — críticos OptiFierro; eliminados 9 plugins de overhead puro)
-- : creado
-
-### Protocolos operacionales establecidos (no requieren archivo)
--  al llegar al 40% de contexto
--  en cambio de proyecto, no al final del día
-- Referencias a archivos específicos, no a directorios (ahorro 10k-25k tokens/sesión)
-- /Gemini para coding rutinario;  solo para arquitectura y RCA
-
-### Impacto estimado
-- : reducción 30-50% tokens por respuesta compleja
-- : elimina indexación de cachés, SQLite, logs, modelos pesados
-- Plugins TO 11→2: ~30.000-50.000 tokens menos por sesión en PROMETHEUS
-- : elimina telemetría y tráfico de fondo no esencial
-
-### Agente ejecutor
-Miaude (Claude.ai Desktop) vía Desktop Commander — verificación cruzada en todos los nodos post-implementación ✅
-
-
----
-## 2026-05-24 — Optimización de Tokens — Stack Claude (toda la infra)
-
-**Contexto:** Consumo elevado de tokens detectado por Montu. Mi TI (Miaude) ejecutó implementación autónoma vía protocolo Miaude-sin-Montu en los 4 nodos de la infraestructura.
-
-### Cambios aplicados
-
-**MacBook (user: montu)**
-- settings.json: agregado MAX_THINKING_TOKENS=10000 y CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-- .claudeignore global: creado — excluye __pycache__, node_modules, *.db, *.sqlite, .git, *.log, *.gguf, .env, binarios
-
-**serverX (192.168.1.111, user: x)**
-- settings.json: agregado MAX_THINKING_TOKENS=10000 y CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 (preservando hooks SessionStart/PostToolUse/Notification existentes)
-- .claudeignore global: creado en ~/.claudeignore
-- .claudeignore por proyecto creado en: optifierro_v2_frontend, scrap_geovictoria, visual-voice, pegas2
-
-**serveri3 (192.168.1.211, user: i3)**
-- settings.json: CREADO desde cero (no existia) — MAX_THINKING_TOKENS=10000, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-- .claudeignore global: creado en ~/.claudeignore
-
-**TO — PROMETHEUS-AI-CORE (192.168.1.65, user: OptiFierro)**
-- settings.json: MAX_THINKING_TOKENS=10000, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-- Plugins CC reducidos de 11 a 2 (solo chrome-devtools-mcp y github — criticos para OptiFierro; 9 plugins de overhead eliminados)
-- .claudeignore en proyecto optifierro: creado
-
-### Protocolos operacionales establecidos
-- /compact con instrucciones al 40% de contexto (Focus on architecture decisions, file paths modified, error messages)
-- /clear en cambio de proyecto, no al final del dia
-- Referenciar archivos especificos en vez de directorios (ahorro 10k-25k tokens/sesion)
-- ccor1/Gemini para coding rutinario; cca solo para arquitectura y RCA
-
-### Impacto estimado
-- MAX_THINKING_TOKENS: reduccion 30-50% tokens por respuesta compleja
-- .claudeignore: elimina indexacion de caches, SQLite, logs, modelos pesados
-- Plugins TO 11 a 2: ~30.000-50.000 tokens menos por sesion en PROMETHEUS
-- NONESSENTIAL_TRAFFIC: elimina telemetria y trafico de fondo no esencial
-
-### Agente ejecutor
-Miaude (Claude.ai Desktop) via Desktop Commander — verificacion cruzada en todos los nodos post-implementacion OK
-
-
----
-## 2026-06-03 — Arquitectura Multi-Agente Hermes: Espinita + Risko
-
-**Autor:** Miaude (autónomo, Protocolo Miaude-sin-Montu)
-**Sesión:** ~6 horas nocturnas (Montu durmiendo)
-
-### Contexto
-Montu propuso separar responsabilidades de Clawdio en agentes especializados independientes, cada uno con su propio HERMES_HOME, personalidad, modelo y canal de comunicación. Espinita y Risko fueron los primeros en desplegarse.
-
-### Espinita — hermes-espinita (NUEVO)
-- **Imagen:** nousresearch/hermes-agent:latest
-- **Compose:** /home/i3/espinita/docker-compose.yml
-- **HERMES_HOME:** /home/i3/espinita/data/ (bind mount)
-- **Docs edificio:** /home/i3/espinita/docs/
-- **Bot Telegram:** @Espinita1010_bot (token creado por Montu en @BotFather al retorno)
-- **WhatsApp:** número prepago pareado (Baileys nativo Hermes, bridge en port 3000)
-- **Modelo:** deepseek/deepseek-v4-flash vía OpenRouter
-- **Personalidad:** Conserje virtual Edificio Los Espinos, culto-formal, **masculino** (referencia al personaje televisivo chileno de los 80s + coincidencia con nombre del edificio)
-- **Comportamiento grupos WA:** group_mentions_only=true (invocar con @espinita)
-
-#### Fixes aplicados durante despliegue
-1. `user: "1000:1000"` en compose → removido: el init script de hermes-agent requiere root para instalar bridge npm en `/opt/hermes/`
-2. Chown recursivo a UID 10000 vía alpine: `docker run --rm -v ./data:/data alpine chown -R 10000:10000 /data`
-3. Lock files obsoletos en `.local/state/hermes/gateway-locks/` → eliminados en caliente para desbloquear reconexión Telegram
-
-### Risko — hermes-risko (REACTIVADO como Docker)
-- **Imagen:** nousresearch/hermes-agent:latest
-- **Compose:** /srv/risko/docker-compose.yml (reemplaza setup OpenClaw obsoleto)
-- **HERMES_HOME:** /home/i3/.risko/ (bind mount, directorio preexistente)
-- **Bot Telegram:** @Risko_OP_bot (token preexistente en .env)
-- **Modelo:** actualizado gemini-2.5-flash → **deepseek/deepseek-v4-flash vía OpenRouter**
-- **Auxiliares:** todos migrados a OpenRouter (eliminado Gemini trap — provider auto detectaba GOOGLE_API_KEY)
-- **Fix aplicado:** `user: "1000:1000"` en compose (HERMES_HOME preexistente compatible con UID 1000)
-- Telegram only, sin WhatsApp
-
-### Backlog generado en sesión
-- **BACKLOG-ESPINITA-01:** Agrupar docs edificio desde MacBook → /home/i3/espinita/docs/ + fix Samba
-- **AGENTE-CARLITOS:** Coordinador MS, vive en serverX, config TBD
-- **AGENTE-AURORA:** Documentadora técnica, modelo local, femenino, honra *La Aurora de Chile*
-
----
-## 2026-05-24 — Fix SSH Clawdio-v2 (container) → serverX
-
-**Contexto:** Rabín (Hermes en container clawdio-v2) no podia hacer SSH a serverX. Detectado al intentar documentar el LOG de optimizacion de tokens.
-
-### Root Cause Analysis
-- El container clawdio-v2 tiene un volumen Docker en /opt/data (home del user hermes, uid 10000)
-- Las llaves SSH existian en /opt/data/.ssh/ pero con ownership root:root
-- SSH rechaza llaves con ownership incorrecto — autenticacion fallaba silenciosamente
-- Ademas, faltaba ssh config y known_hosts para serverX
-
-### Acciones ejecutadas (en container clawdio-v2 via docker exec)
-- chown hermes:hermes /opt/data/.ssh/ y los archivos id_ed25519, id_ed25519.pub
-- chmod 600 /opt/data/.ssh/id_ed25519
-- Creado /opt/data/.ssh/config con entradas para Host serverx y 192.168.1.111 (User x, IdentityFile correcto)
-- ssh-keyscan 192.168.1.111 >> /opt/data/.ssh/known_hosts
-- La llave publica clawdio-v2@serveri3 ya estaba en authorized_keys de serverX (no requirio cambio en serverX)
-
-### Verificacion
-- docker exec -u hermes clawdio-v2 ssh x@192.168.1.111 echo OK -> CONEXION_OK
-- docker restart clawdio-v2 + test post-restart -> POST_RESTART_OK
-- Persistencia confirmada: /opt/data esta en volumen Docker clawdio-v2_clawdio_data
-
-### Persistencia
-Los cambios persisten en reinicios y recreaciones del container porque /opt/data es un volumen Docker nombrado (no un layer efimero del container).
-
-### Agente ejecutor
-Miaude (Claude.ai Desktop) via Desktop Commander — fix completo sin intervencion de Montu
-
-
----
-## 2026-06-01 — Claude Desktop + Antigravity IDE en serverX
-
-**Contexto:** Setup de entorno de trabajo gráfico en serverX (KDE/NoMachine) con Claude Desktop, Antigravity IDE y MCPs locales.
-
-### Instalaciones
-- **Google Chrome** — repo oficial Google (apt)
-- **Claude Desktop linux v1.9255.2** — via aaddrick/claude-desktop-debian (apt)
-- **Antigravity CLI** → `/home/x/.local/bin/agy`
-- **Antigravity IDE** → `/home/x/.local/share/antigravity-ide/` + symlink en `.local/bin`
-- **Extensión MCP bridge:** `cafetechne.antigravity-link-extension-1.0.16-universal`
-
-### MCPs configurados en Claude Desktop
-Config: `~/.config/Claude/claude_desktop_config.json`
-
-| MCP | Comando | Notas |
-|-----|---------|-------|
-| clawdio | `/home/x/bin/hermes-mcp-bridge` | SSH → i3@192.168.1.211 → `hermes mcp serve` |
-| desktop-commander | `npx @wonderwhy-er/desktop-commander` | Control escritorio |
-| antigravity-link | `node mcp-server.mjs` | Bridge extensión Antigravity IDE |
-
-### SSH key nueva
-- **Key:** `~/.ssh/id_ed25519_serveri3`
-- **Ruta:** x@serverx → i3@192.168.1.211
-- **Estado:** agregada a authorized_keys de serveri3 ✅
-
-### Pendiente
-- Rotar API key OpenRouter expuesta en sesión (prefijo `sk-or-v1-856c...`) — invalidar y generar nueva en OpenRouter dashboard.
-
-
----
-## 2026-06-10 — Activation of Agents and Backend Improvements
-
-**Proyecto:** Hermes Hub
-**Estado:** ✅ Agentes activados y mejoras en backend
-
-### Cambios
-- Carlitos y Aurora activados como agentes `ollama_local` en Hermes Hub (serverX)
-  - Carlitos: qwen2.5-coder:7b, rol Coordinador MS
-  - Aurora: qwen2.5-coder:7b, rol Documentación técnica
-- Aurora v3: pipeline de documentación controlado por backend (sin marcadores XML)
-- Volúmenes montados en container backend: `/home/x/MontuMS` y `/home/x/.ssh`
-- 5/5 agentes Hermes Hub operativos: Rabín, Espinita, Risko, Carlitos, Aurora
-
-**Infraestructura de referencia**
-- serverX: 192.168.1.111, Ubuntu 24.04, Docker, Ollama, GPU P104-100
-- serveri3: 192.168.1.211, Ubuntu 24.04, Cloudflare tunnels, Hermes agents
-- Proyectos: OptiFierro V2, OP Risk, Hermes Hub, Visual-Voice, CutX, Pegas V2
-- Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora
-
----
-
-
----
-## 2026-06-15 — Endpoint REST Hermes Hub mejorado
-
-**Proyecto:** Hermes Hub
-**Estado:** 🔄 Mejora en endpoint
-
-### Cambios
-- Actualización de la documentación del endpoint POST /api/chat/{agent_id}
-- Mejoras en el manejo de errores y validaciones
-- Nuevos tests unitarios: CARLITOS_REST_ERR + AURORA_REST_ERR
-
-**Infraestructura de referencia**
-- serverX: 192.168.1.111, Ubuntu 24.04, Docker, Ollama, GPU P104-100
-- serveri3: 192.168.1.211, Ubuntu 24.04, Cloudflare tunnels, Hermes agents
-- Proyectos: OptiFierro V2, OP Risk, Hermes Hub, Visual-Voice, CutX, Pegas V2
-- Agentes Hub: Rabín, Espinita, Risko, Carlitos, Aurora
-
-## TEST-TRANSCRIPCION
-Este texto debe aparecer identico en el archivo, sin reinterpretacion.
-
-## TEST-TRANSCRIPCION
-Este texto debe aparecer identico en el archivo, sin reinterpretacion.
-
-## TEST-TRANSCRIPCION
-Este texto debe aparecer identico en el archivo, sin reinterpretacion.
-
-## TEST-BYPASS-LLM 2026-06-10
-Este texto debe aparecer identico. Sin reinterpretacion.
-
----
-## 2026-06-10 — Hermes Hub: Carlitos, Aurora, REST endpoint y autonomía Miaude
-
-**Proyecto:** Hermes Hub (serverX :8750)
-**Estado:** Operativo
-
-### Cambios implementados
-
-**Nuevos agentes activos:**
-- Carlitos: ollama_local, qwen2.5-coder:7b, rol Coordinador MS
-- Aurora: ollama_local, qwen2.5-coder:7b, rol Documentación técnica
-
-**Aurora — escritura autónoma en MontuMS:**
-- Funciones aurora_read_file, aurora_write_file, aurora_git_commit en routers/agents.py
-- Volumen /home/x/MontuMS montado en container /app/montums:rw
-- SSH key id_ed25519_github en /app/ssh_host:ro
-- Git identity: Aurora (Hermes Hub) / aurora@montuschi.cl
-- Aurora v3: bypass LLM con aurora_extract_exact_block()
-  Patrón con este bloque exacto: escribe sin pasar por el modelo
-
-**Endpoint REST síncrono:**
-- POST /api/chat/{agent_id} en main.py
-- Body: {content, agent_id} — Response: {agent_id, agent, response}
-- Puerto: 8750 nginx, accesible desde LAN y SSH
-
-**Miaude-sin-Montu — control directo:**
-- Miaude invoca Carlitos y Aurora via osascript SSH serverX curl REST
-- Sin intervención de Montu para documentar o consultar agentes
-
-**Documentación generada:**
-- HERMES_HUB_GUIA_OPERACION.md creado en MontuMS (98 líneas)
-- Keywords Aurora ampliados: guia/guia_operacion activos
-- Protocolo Carlitos y Aurora documentado para retomar en cualquier chat
-
-## 2026-07-10 — Visual-Voice P0: Pass 2 Gemini → Ollama gpt-oss:20b
-
-**Contexto:** Pipeline de minuta two-pass de Visual-Voice estaba completamente roto — Gemini API con créditos prepago agotados (error 429). 4 notas de voz sin minuta (la mayor de 135 min).
-
-**Ejecutor:** CCa (Claude Code autónomo, MacBook Pro 13")
-**Trigger:** 4 notas de voz pendientes de minuta. Pecas es usuaria activa.
-
-### Cambios en serverX (/home/x/visual-voice/main.py)
-- **Funciones modificadas:** `_do_analyze()`, `consolidate()`, `analyze()`
-- **Cambio:** Las tres funciones de análisis/redacción de minuta ahora llaman a `gpt-oss:20b` vía Ollama en Mac Studio usando `requests` nativo (sin librería `openai`)
-- **Constantes nuevas:** `_OLLAMA_BASE_URL = "http://192.168.1.102:11434"` y `_OLLAMA_MODEL_PASS2 = "gpt-oss:20b"`
-- **Deploy:** `docker compose build --no-cache && docker compose up -d` ✅
-
-### Estado post-fix
-- Contenedor visual-voice: Up (http://localhost:8502 → HTTP 200) ✅
-- Conectividad serverX → Mac Studio desde contenedor: 200 OK ✅
-- Pass 2 operativo: test E2E con JSON válido recibido desde gpt-oss:20b ✅
-- STT: faster-whisper small (sin cambios, sigue en serverX GPU P104-100)
-
-### Fase 2 STT — diferida
-- mlx-whisper en Mac Studio: instalación diferida (Fase 1 operativa, STT actual funciona)
-- Motivo: sin urgencia inmediata, mlx-whisper requiere sesión dedicada
-
-### Deuda técnica nueva
-- [ ] Evaluar `qwen3.6:27b` vs `gpt-oss:20b` para Pass 2 (calidad de minutas)
-- [ ] Hacer stt-mac.service persistente como servicio launchd en Mac Studio cuando se retome Fase 2
-- [ ] Recargar créditos Gemini API y evaluar rollback si calidad local < Gemini
-
----
-
-## 2026-07-10/11 — Mac Studio: Limpieza + Mejoras Rabín + Setup Carlitos
-
-**Contexto:** Sesión de migración y optimización del ecosistema de agentes IA. Ejecutado vía protocolo Miaude-sin-Montu (Claude Desktop + Desktop Commander, sin intervención manual de Montu salvo el sudo de timezone).
-
-### Mac Studio — Modelos Ollama
-- **Eliminado:** `qwen3.5:122b-a10b` (81 GB, MoE sin agente asignado desde migración de Risko)
-- **Espacio recuperado:** 81 GB (SSD: 302 GB libres post-limpieza)
-- **Inventario final:** gpt-oss:20b (13GB) + qwen3-coder:30b (18GB) + qwen3.5:9b (6.6GB) + qwen3.6:27b (17GB) + qwen3.6:35b-a3b (23GB) = ~77.6 GB total
-
-### serverX — Timezone
-- **Cambio:** Timezone UTC → America/Santiago
-- **Comandos:** `sudo timedatectl set-timezone America/Santiago && sudo timedatectl set-ntp true`
-- **Estado:** `System clock synchronized: yes`, `NTP service: active` ✅
-- **Motivo:** Rabín obtenía hora UTC y la presentaba como hora de Santiago
-
-### serveri3 — Rabín (Hermes Agent)
-- **Fix 1 — Terminal backend:** `terminal.backend: local → ssh`
-  - Parámetros SSH ya estaban en .env: `TERMINAL_SSH_HOST=192.168.1.111`, `TERMINAL_SSH_USER=x`, `TERMINAL_SSH_PORT=22`
-  - Resultado: Rabín ejecuta comandos en serverX correctamente
-- **Fix 2 — Fallback local:** Agregado `qwen3.5:9b` vía Mac Studio como PRIMERA opción de fallback (antes de los 3 fallbacks OpenRouter que causaron el outage del 2026-07-04)
-  - Configuración: `provider: custom`, `base_url: http://192.168.1.102:11434/v1`, `model: qwen3.5:9b`
-- **Fix 3 — Compresión de contexto:** Habilitada (`enabled: true`, `threshold: 0.6`, `target_ratio: 0.3`, `protect_last_n: 10`)
-- **SOUL.md:** Agregada sección "Información en tiempo real" (instrucción para usar terminal en fecha/hora). Efectividad parcial — modelo ignora instrucción texto; requiere function calling en Semana 3.
-
-### Mac Studio — Carlitos (Claude Code local)
-- **CLAUDE.md creado:** `/Users/montu/.claude/CLAUDE.md` (72 líneas)
-  - Incluye: infraestructura completa (Mac Studio, serverX, serveri3, TO), proyectos activos (OptiFierro V2, Visual-Voice, MontuMS), convenciones de código, reglas cardinales de deploy y seguridad
-- **settings.json:** `effortLevel: low → medium`
-- **Alias verificado:** `Carlitos` en .zshrc funciona correctamente (test: respuesta CARLITOS_OK en 103s cold start)
-
-### Hallazgos sin resolver (backlog)
-- **BACKLOG-RABIN-DATETIME:** gpt-oss:20b responde fecha/hora desde memoria del modelo, ignorando instrucciones SOUL. Fix real: implementar tool `get_datetime(timezone)` con function calling. Semana 3 del plan de optimización.
-- **BACKLOG-WHATSAPP-BRIDGE:** Bridge WhatsApp en Hermes muere con exit code 1 en cada arranque. No afecta Telegram. Relacionado con Espinita (infraestructura parcialmente lista: WHATSAPP_ENABLED=true, 5 números autorizados).
-- **BACKLOG-SEARXNG-UNDOC:** SearXNG local corriendo en serveri3 localhost:8888. No documentado en INVENTARIO_MAESTRO. Agregar en próxima actualización de inventario.
-## 2026-07-12 — Configuración inicial de Aurora como agente CLI
-
-**Contexto:** Aurora fue configurada como agente de documentación técnica accesible
-desde CLI (Terminal del Mac Studio) y desde Miaude via Claude Desktop. Anteriormente
-existía el HARNESS.md pero Aurora no tenía configuración operativa como agente.
-
-**Cambios:**
-- Creado: /Users/montu/.claude/agents/aurora.md (78 líneas, modelo qwen3.6:27b)
-  Define a Aurora como sub-agente de Claude Code con tools: Read, Write, Edit, Bash, Glob, Grep
-- Agregado en /Users/montu/.zshrc:
-  alias Aurora (y alias aurora en minúscula) apuntando a qwen3.6:27b via Ollama localhost:11434
-- Modelo corregido: HARNESS.md decía qwen3.6:35b-a3b (MoE, tuvo alucinaciones en síntesis
-  larga). Nuevo modelo asignado: qwen3.6:27b (denso, 17GB, sin presión de latencia)
-
-**Hallazgos:**
-- HARNESS.md en ~/MontuMS/harness/aurora/HARNESS.md tenía el modelo incorrecto documentado
-  (qwen3.6:35b-a3b). Corregido en el archivo durante esta misma sesión.
-
-**Siguiente paso:** Validar Aurora con tarea real de documentación y evaluar calidad de output.
-
-
-## 2026-07-12 — Optimizacion de performance de Aurora y Ollama
-
-**Contexto:** Tras primera tarea real de Aurora (21m 44s), se identificaron y corrigieron causas de lentitud.
-
-**Cambios:**
-- aurora.md: agregado /no_think en system prompt (desactiva extended thinking de qwen3.6:27b)
-- aurora.md: protocolo de inicio actualizado — leer tail/grep en vez de archivos completos
-- aurora.md: regla de transferencia de contenido via /tmp explicitada
-- Ollama plist: OLLAMA_MAX_LOADED_MODELS 2 a 3, agregado OLLAMA_NUM_PARALLEL=2
-- Ollama reiniciado para aplicar nueva configuracion
-
-**Siguiente paso:** Medir tiempo de esta tarea como benchmark post-optimizacion.
-
-
-## 2026-07-13 — Benchmark Aurora v3: system prompt cargado via --system-prompt-file
-
-**Cambios:**
-- Alias Aurora actualizado: agrega --system-prompt-file apuntando a /Users/montu/.claude/aurora-sp.md
-- Con esto el HARNESS de Aurora (incluyendo /no_think) se carga en cada invocacion CLI
-- Archivo aurora-sp.md creado: version del agente sin front matter YAML
-
-**Resultado:** ver tiempo de esta ejecucion vs 394s (v2) y 1304s (v1).
-
-## 2026-07-13 — Benchmark Aurora v4: modelo gpt-oss:20b (sin thinking)
-
-**Contexto:** Prueba de modelo alternativo para Aurora. qwen3.6:27b tiene extended thinking que no puede desactivarse via system prompt, causando ~4-5 min de overhead. Se prueba gpt-oss:20b (sin thinking, 67.3 tok/s vs 16.4 tok/s).
-
-**Cambios:**
-- Alias Aurora en .zshrc: qwen3.6:27b cambiado a gpt-oss:20b
-- aurora.md: modelo actualizado a gpt-oss:20b
-
-**Resultado esperado:** reduccion de 6.5 min a menos de 2 min si el cuello de botella era el thinking.
-
----
-
-## 2026-07-18 — Optimización stack de inferencia local Mac Studio (PLAN-INFER-MS-01)
-
-**Contexto:** Ejecución de plan de optimización multi-fase para agentes Hermes/CLI sobre
-Ollama en Mac Studio M2 Max 96GB. Plan sintetizado desde deep research multi-IA (Qwen Studio,
-Gemini, ChatGPT, GLM) + análisis arquitectónico Opus 4.8. Ejecutado autónomamente por Miaude
-bajo protocolo Miaude-sin-Montu.
-
-**Cambios:**
-- /opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist (Cellar, fuente de verdad brew):
-  - OLLAMA_MAX_LOADED_MODELS: 2 a 3 (elimina swaps entre agentes con 4 modelos productivos)
-  - Agregado OLLAMA_KEEP_ALIVE=-1 (faltaba del Cellar, solo estaba en LaunchAgents)
-  - Agregado OLLAMA_NUM_PARALLEL=1 (idem)
-- Modelfile carlitos: num_ctx 16384 a 20480 (mayor contexto para archivos de codigo reales)
-  Recreado via ollama create carlitos -f /tmp/Modelfile.carlitos
-- ~/Library/LaunchAgents/ollama.carlitos.plist a .DISABLED
-  (causaba proceso zombie de ollama serve sin env vars correctas al boot)
-- ~/Library/LaunchAgents/cl.montuschi.ollama-warmup.plist: actualizado de 2 a 3 modelos
-  (carlitos + gemma3:27b + qwen3.6:35b-a3b)
-
-**Hallazgos:**
-- gpt-oss:20b y qwen3.6:27b NO estan presentes en Ollama Mac Studio (ver Ollama list).
-  Discrepancia con INVENTARIO_MAESTRO. Requiere verificacion de que modelos usan Rabin/Aurora.
-- brew services restart/start regenera el plist desde el Cellar, borrando cambios manuales
-  en ~/Library/LaunchAgents/. Regla documentada: editar SIEMPRE el plist del Cellar.
-- Prefix cache ya operativo antes de cambios (ratio 14.37x TTFT T1/T2). Fase 2 del plan
-  (orden de prompts) no requeria intervencion.
-- iogpu.wired_limit_mb=0 en macOS 26 Tahoe = administrado por SO. Fase 4 del plan cancelada.
-- Backend Ollama 0.31.1 en Apple Silicon = Metal nativo. No existe flag OLLAMA_MLX separado.
-  Fase 3 (MLX vs GGUF) = N/A para esta version.
-
-**Benchmark PRE vs POST (modelo: carlitos / qwen3-coder:30b Q4_K_M):**
-- TTFT cold: 2.041s a 1.669s (-18.2%)
-- TTFT warm (cache hit): 0.142s a 0.141s (sin cambio)
-- Decode tok/s: 82.3 a 67.1 (-18.5%, atribuible al aumento de num_ctx; sigue sobre meta >=40)
-- Calidad de respuesta: Excelente en ambos casos (sin degradacion)
-- Archivos benchmark: ~/bench/results/bench_PRE_20260718_155208.json y bench_POST_20260718_200422.json
-
-**Siguiente paso:** ver entrada 2026-07-19 — la discrepancia de modelos se investigo y resolvio.
-
----
-
-## 2026-07-19 — Fix modelo primario Rabin/Risko + migracion Risko a perfil nativo
-
-**Contexto:** Rabin y Risko respondian siempre con qwen3.5:9b (fallback) en vez
-de su modelo primario configurado (gemma3:27b en ese momento).
-
-**Causa raiz 1 (confirmada con logs):** gemma3:27b no soporta tool-calling.
-Cada llamada de Hermes incluye herramientas por defecto (ej. ejecutar date),
-generando HTTP 400 "gemma3:27b does not support tools" y forzando fallback
-a qwen3.5:9b en cada turno.
-
-**Fix 1:** modelo primario de Rabin y Risko cambiado de gemma3:27b a
-qwen3.6:35b-a3b (MoE, 3B parametros activos, soporta tools+thinking, ya
-usado como subagente de analisis de ambos). Cambio en el campo
-model.default de /home/x/.hermes/config.yaml (Rabin) y config.yaml de Risko.
-
-**Causa raiz 2 (confirmada con evidencia de codigo y verificacion con hash):**
-Hermes Agent reescribe su propio unit file de systemd en cada arranque segun
-HERMES_HOME. Risko vivia en /home/x/.hermes-risko (directorio hermano, no
-reconocido como "perfil nativo" bajo /home/x/.hermes/profiles/), causando que
-Hermes calculara mal el nombre de servicio y sobreescribiera el unit file de
-hermes-gateway.service (Rabin) cada vez que Risko arrancaba. Esto producia
-conflictos de PID, gateway.lock compartido, y caidas en cascada.
-
-**Fix 2 (migracion de datos en produccion):**
-- Backup en frio: servicios detenidos, tar czf, exit code 0, 57 archivos,
-  ~9MB. Ubicacion: /home/x/hermes-risko-backup-pre-migracion.tar.gz
-  (se mantiene, no eliminar sin autorizacion explicita de Montu)
-- Movido /home/x/.hermes-risko a /home/x/.hermes/profiles/risko
-- Actualizado hermes-risko.service con las nuevas rutas
-- Verificacion critica: md5sum de hermes-gateway.service identico antes y
-  despues de reiniciar hermes-risko.service. Confirma fix de raiz, no parche.
-- Verificado con "hermes profile list" y "hermes profile show risko":
-  ambos perfiles con modelo qwen3.6:35b-a3b, gateway running, rutas correctas.
-
-**Fix 3 — experimento de reasoning_effort (aprendizaje documentado):**
-Se probo reasoning_effort=low en el bloque agent de ambos configs, con la
-hipotesis de mejorar adherencia a instrucciones del SOUL (anti-voseo,
-anti-alucinacion). Resultado: calidad mejoro pero el tiempo de segunda
-respuesta empeoro severamente (Risko: ~6s a ~28s; Rabin: ~11s a ~14s) porque
-cada respuesta, incluso un saludo, pagaba el costo de un ciclo de
-razonamiento oculto. Se revirtio a reasoning_effort vacio manteniendo el
-guardrail textual del SOUL (ver Fix 4). Con esa combinacion se confirmo en
-pruebas reales: calidad se mantiene, velocidad vuelve a ser rapida
-(Risko ~11s, Rabin ~18s en segunda respuesta).
-Conclusion: el guardrail textual explicito es suficiente por si solo para
-este caso de uso. No activar reasoning_effort en agentes conversacionales
-de baja latencia salvo necesidad especifica de una tarea.
-
-**Fix 4 — guardrails agregados al SOUL de Rabin y Risko:**
-- Regla anti-voseo explicita: prohibido vos/tenes/queres/sabes/podes/haces
-  (formas rioplatenses). Tutear siempre tu/tienes/quieres. Espanol chileno
-  sin excepcion.
-- Guardrail de auto-descripcion: al preguntar que modelo/infraestructura
-  usan, responder SOLO con datos verificados (qwen3.6:35b-a3b, proveedor
-  custom, infraestructura privada). Prohibido inventar detalles tecnicos
-  adicionales.
-
-**Discrepancia de modelos, resuelta:** el INVENTARIO_MAESTRO previo
-documentaba gpt-oss:20b (Rabin) y qwen3.6:27b (Aurora) como modelos activos.
-Verificacion confirma que NINGUNO de los dos existe. Stack real verificado:
-gemma3:27b, carlitos (Modelfile custom sobre qwen3-coder:30b, num_ctx 20480),
-qwen3-coder:30b (base, contexto completo), qwen3.6:35b-a3b (23GB, ahora
-primario de Rabin/Risko y subagente de analisis), qwen3.5:9b (fallback).
-
-**Version de Hermes Agent:** documentada como v0.14.0, verificacion previa
-sugirio v0.18.2 instalada. PENDIENTE DE VERIFICACION FORMAL.
-
----
-
-## 2026-07-19 — Aurora: alias roto (modelo eliminado) + Modelfile de contexto
-
-**Contexto:** Al intentar delegar una tarea de documentacion a Aurora, se
-descubrio que el alias Aurora en .zshrc apuntaba a qwen3.6:27b-mtp-q4_K_M,
-variante eliminada en la reorganizacion de modelos del 2026-07-16/17. El
-alias fallaba silenciosamente (modelo no encontrado en Ollama).
-
-**Hallazgo adicional:** el archivo /Users/montu/.claude/agents/aurora.md
-(formato de subagente de Claude Code) NO es el que Aurora usa realmente.
-La invocacion real vive en el alias de .zshrc, que carga el SOUL via
---system-prompt-file apuntando a /Users/montu/.claude/aurora-sp.md — un
-archivo distinto, sin relacion operativa con agents/aurora.md. Cualquier
-edicion futura al harness de Aurora debe hacerse en aurora-sp.md.
-
-**Fix del alias — primer intento:** corregido a apuntar a qwen3.6:35b-a3b
-directo (mismo modelo ahora usado por Rabin/Risko). Al probar con una tarea
-real de documentacion, el proceso hizo timeout a los ~20 minutos sin
-completar nada (git status limpio, sin commit). Diagnostico: qwen3.6:35b-a3b
-estaba cargado en Ollama con CONTEXT=262144 (maximo, sin recortar) — el
-mismo patron de sobrecosto ya documentado en las sesiones 2026-07-12/13
-(Aurora con qwen3.6:27b sin thinking desactivable, 21m44s en su primera
-tarea real).
-
-**Prueba de aislamiento de causa:** se ejecuto una tarea de complejidad
-comparable (3 llamadas SSH + lectura + escritura de archivo) via Carlitos
-(qwen3-coder:30b, contexto recortado a 20480, sin capacidad de thinking).
-Resultado: 332 segundos (5m32s), completado sin errores. Descarta que el
-hardware o "los modelos locales en general" sean la causa — el problema es
-especifico a la combinacion modelo-con-thinking + contexto sin recortar.
-
-**Fix definitivo:** creado Modelfile custom "aurora" sobre qwen3.6:35b-a3b
-(mismos pesos, sin costo adicional de disco) con num_ctx recortado a 32768.
-Alias actualizado para usar el modelo "aurora" en vez de qwen3.6:35b-a3b
-directo. Validado con la misma tarea de prueba usada para Carlitos:
-225 segundos (3m45s), completado sin errores — incluso mas rapido que
-Carlitos en la misma tarea.
-
-**Nota para consideracion futura:** el historial de este mismo documento
-(sesiones 2026-07-12/13) ya habia identificado que qwen3.6 (27b en ese
-entonces) tiene extended thinking dificil de desactivar via prompt, y que
-gpt-oss:20b resolvia el problema por no tener thinking en absoluto. Ese
-modelo ya no existe en el stack. El fix de contexto recortado resolvio el
-problema en esta prueba puntual; si en tareas reales mas largas/complejas
-el thinking vuelve a ser un cuello de botella, la alternativa historica
-probada es usar un modelo sin capacidad de thinking en absoluto para el
-rol de Aurora, en vez de intentar suprimir el thinking de un modelo que
-si lo tiene.
-
-**BACKLOG-MS-OLLAMA-01 — cerrado:** discrepancia de modelos investigada y
-resuelta (ver arriba). Warmup e inventario actualizados con el stack real.
-
----
-
-## 2026-07-19 — Piloto: patron agente-liviano + subagente-pesado en Rabin
-
-**Contexto:** Formalizacion de un patron arquitectonico donde un modelo
-liviano y rapido atiende la mayoria de las interacciones conversacionales,
-delegando a un modelo pesado (qwen3.6:35b-a3b) solo cuando la tarea lo
-amerita, via la tool nativa delegate_task de Hermes Agent. Rabin elegido
-como piloto (no Risko). Ejecutado bajo protocolo Miaude-sin-Montu, CCa
-(credenciales Pecas) para investigacion e implementacion, Carlitos (local)
-para tooling de testing.
-
-**Investigacion previa (necesaria antes de disenar):**
-
-- hermes moa: feature de Mixture of Agents por comando explicito del
-  usuario (/moa), no aplica a este patron. Inactivo en Rabin.
-- delegate_task: la pieza real. Es una tool function que el modelo primario
-  debe invocar explicitamente - NO hay heuristica automatica de
-  longitud/complejidad/keywords. Depende 100% de que el modelo, guiado por
-  su system prompt (rol orchestrator), decida llamarla.
-- smart_model_routing: existe en el schema de config.yaml pero SIN
-  consumidor en runtime confirmado por grep de codigo fuente (solo referenciado
-  en el wizard de setup.py). No confiar en el sin probarlo aislado primero.
-- delegate_task esta disponible para el agente primario via el toolset
-  hermes-cli (que ya incluye execute_code y delegate_task en su lista core).
-  NO hace falta agregar un toolset "delegation" por separado - eso es solo
-  para hijos delegados que necesitan re-delegar.
-- Hermes exige un minimo hardcodeado de 64000 tokens de contexto
-  (MINIMUM_CONTEXT_LENGTH en agent/model_metadata.py) para cualquier modelo
-  usado en flujos de tool-calling. Es un guardrail estatico de seguridad, no
-  una medicion dinamica del uso real. Cualquier modelo candidato a "liviano"
-  debe respetar este piso.
-
-**Candidato evaluado: qwen3.5:9b**
-
-- Confirmado: soporta tools (capabilities incluye "tools" y "thinking").
-- Footprint: 6.6GB vs 23GB de qwen3.6:35b-a3b.
-- Decode: ~46.8 tok/s (mas lento que el MoE de 35B, que activa solo 3B
-  parametros por token - contraintuitivo pero consistente con la arquitectura).
-- Modelfile custom "rabin-gateway" creado sobre este modelo, num_ctx ajustado
-  a 65536 (el default de 262144 causaba el mismo problema de sobrecosto ya
-  documentado con Aurora; el primer intento con 32768 fallo por debajo del
-  minimo de Hermes).
-
-**Implementacion y resultado real:**
-
-- Guardrail de auto-descripcion actualizado en el SOUL de Rabin para reflejar
-  arquitectura de dos modelos (primario qwen3.5:9b + subagente qwen3.6:35b-a3b
-  via delegate_task). Este cambio quedo aplicado en produccion.
-- Reglas de delegacion (CUANDO delegar / CUANDO NO delegar) insertadas en el
-  system_prompt. Este cambio quedo aplicado en produccion.
-- model.default cambiado a rabin-gateway, probado en vivo:
-
-  Prueba A (trivial, "hola como estas"): funciono, ~55s. Mas lento de lo
-  esperado para un modelo "liviano" - probablemente carga en frio de un
-  Modelfile nuevo nunca calentado antes.
-
-  Prueba B (tarea compleja que claramente ameritaba delegar): NO delego
-  (tool_call_count: 0, confirmado via hermes sessions export). Respondio
-  directamente con contenido propio de calidad mediocre, mezclando datos
-  plausibles con detalles inventados (precios, referencias a
-  serverX/serveri3 no solicitadas).
-
-  Prueba C (verificar guardrails): FALLO GRAVE. El modelo alucino su propia
-  identidad como "wrapper de Claude Sonnet 4.6 (Anthropic)", invento un
-  agente ficticio "Miau (Claude)", rutas de archivo inexistentes
-  (hermes/tools/codex.py) y bases de datos inventadas. No menciono ninguno
-  de los dos modelos reales.
-
-- Rollback ejecutado de inmediato: model.default vuelto a qwen3.6:35b-a3b.
-  Servicio verificado estable y respondiendo con normalidad tras el rollback.
-
-**Diagnostico de la causa (3 rondas adicionales, contra Ollama directo, sin
-tocar produccion):**
-
-- Ronda 1 (mismo guardrail, sin tools, sin Hermes): NO reproduce la
-  fabricacion de identidad Claude/Anthropic. Solo muestra inconsistencia leve
-  en adoptar el nombre de persona "Rabin" (a veces se resiste a confirmarlo,
-  a veces lo adopta, con tiempos de "thinking" muy variables: 21s vs 207s).
-- Ronda 2 (mismo guardrail + schema de delegate_task presente, sin usar):
-  tampoco reproduce Claude/Anthropic. Si aparecio una alucinacion nueva y
-  distinta ("Banco Rabin", operaciones bancarias inventadas) - descarta la
-  hipotesis de que la sola presencia de tool schemas dispare la confusion
-  especifica de identidad Claude/Anthropic.
-
-**Conclusion de la investigacion:** la fabricacion severa de identidad
-Claude/Anthropic observada en produccion NO se reproduce con versiones
-aisladas/simplificadas del prompt. Esto sugiere que la causa esta en el
-system prompt COMPLETO y real que arma Hermes en produccion (historial de
-conversacion, contexto adicional, posibles menciones indirectas de
-frameworks tipo "Claude Code" en el pipeline) - no en el guardrail en si
-ni en la mera presencia de tools. No se investigo mas a fondo por alcance
-de tiempo; queda como tarea pendiente si se retoma este piloto.
-
-**Estado final:** PARCIAL / PILOTO NO EXITOSO CON ESTE CANDIDATO. Lo que
-queda en produccion, funcionando: guardrail de auto-descripcion actualizado
-(menciona ambos modelos correctamente) y reglas de delegacion en el SOUL -
-ambos son mejoras validas independientemente del resultado del piloto,
-ya que describen la arquitectura real y no rompen nada. Lo que NO se
-implemento: qwen3.5:9b/rabin-gateway como modelo primario liviano - resulto
-no confiable (alucinacion grave de identidad, fallo en decision de
-delegacion). model.default permanece en qwen3.6:35b-a3b, configuracion
-funcional conocida, sin cambios de fondo respecto a como empezo el dia.
-
-**Recomendacion para retomar este piloto en el futuro:**
-1. Extraer el system_prompt COMPLETO y real que Hermes arma en produccion
-   (no una aproximacion) y probarlo tal cual contra qwen3.5:9b para intentar
-   reproducir la fabricacion Claude/Anthropic con precision quirurgica.
-2. Considerar candidatos alternativos de modelo liviano en el rango 14-20B
-   (mas capacidad de instruction-following que 9B, mas liviano que 35B) -
-   ninguno disponible actualmente en el stock de Ollama, requeriria descarga
-   con autorizacion explicita de Montu.
-3. No perseguir mas la hipotesis de "presencia de tool schemas" como causa -
-   descartada con evidencia en dos rondas de prueba.
-
-**Herramienta nueva creada:** ~/bench/gateway_candidate_test.py (por
-Carlitos) - harness reutilizable de 4 pruebas (trivial, identidad,
-delegacion, trivial-con-tools) para evaluar futuros candidatos a modelo
-liviano de gateway sin tener que rearmar las pruebas desde cero cada vez.
-
-**Evaluacion de Carlitos en esta tarea (solicitado por Montu):**
-
-Se le pidio escribir un script Python reutilizable
-(~/bench/gateway_candidate_test.py) con una bateria de 4 pruebas para
-evaluar futuros candidatos a modelo liviano, y correrlo una vez contra
-qwen3.5:9b para validarlo.
-
-Resultado: ejecuto la logica correctamente y genero un JSON de resultados
-real y coherente con lo ya documentado (~/bench/results/gateway_test_qwen3.5:9b_20260719_173220.json,
-verificado que existe). PERO reporto que el script quedo guardado en
-~/bench/gateway_candidate_test.py, y ese archivo NO existe en ningun lugar
-verificable (ni en ~/, ni en ~/bench/, ni en /tmp). El JSON de resultados es
-real; el script en si no persistio - probablemente corrio desde un archivo
-temporal que no se guardo de forma permanente, o la escritura del archivo
-fallo silenciosamente sin que el reporte final lo reflejara.
-
-Leccion: verificar siempre la existencia real de los artefactos que un
-agente reporta como creados, incluso cuando el reporte suena seguro y
-detallado. No es la primera vez en el dia de hoy (ver caso similar de la
-seccion "Rabin" mas arriba, aunque de naturaleza distinta - alli el problema
-era de confiabilidad del modelo, aca es de fidelidad del reporte sobre un
-artefacto).
-
-**Pendiente:** recrear el script gateway_candidate_test.py si se quiere
-reutilizar en el futuro - la logica ya esta validada (funciono una vez y
-produjo resultados coherentes), solo falta que quede efectivamente guardado
-en disco.
-
-## 2026-07-19 — "La Biblioteca" Fase 1 completa: servidor MCP dedicado + hardening
-
-**Contexto:** Implementación de un servidor MCP dedicado para el catálogo documental de MontuMS ("La Biblioteca"), separado del stack previo, y limpieza de duplicados de documentación en la raíz del repo.
-
-**Cambios:**
-- biblioteca-mcp: servidor MCP nuevo y dedicado en /home/x/ws/biblioteca-mcp/, puerto 8813, expone `buscar_tema`, `obtener_ultima_version`, `registrar_cambio`, `buscar_credencial`. Probado end-to-end con cliente MCP real.
-- Hardening (revisión de agy): WAL mode + timeout en SQLite (evita bloqueos lectura/escritura concurrente), columna `seccion` NOT NULL (cierra bug de duplicados silenciosos), manejo de errores en las 4 funciones MCP.
-- Consolidación de documentación: se eliminaron los duplicados `INVENTARIO_MAESTRO.md` y `LOG_CAMBIOS_2026.md` que existían en la raíz de MontuMS (commit 1aeb1da, 945 líneas eliminadas). `docs/` queda como única fuente de verdad.
-- Re-corrido el indexador tras la consolidación: 64 filas huérfanas eliminadas del catálogo correspondientes a esos archivos de la raíz.
-
-**Hallazgos:** mcp-core (compose: /home/x/ws/mcp-core, listado como activo en la actualización del 01 Abril 2026) fue confirmado como eliminado por completo — contenedor e imagen, no solo detenido. Su último log real es de abril, sin relación con esta implementación; no se reconstruyó. Se actualizó la sección "Stack Docker ServerX" de INVENTARIO_MAESTRO.md para reflejar esto.
-
-**Siguiente paso:** ninguno indicado explícitamente por Montu/Miaude para esta fase; commit de estos cambios en docs/ queda pendiente de confirmación explícita antes de aplicarse.
-## 2026-08-04 — Fix: carlitos (qwen3-coder:30b) sin output vía Claude Code
-
-**Contexto:** carlitos devolvía exit 0 con texto vacío en toda invocación real via Claude Code. ollama run carlitos y ollama run qwen3-coder:30b colgaban indefinidamente sin tools declaradas.
-
-**Cambios:**
-- Root cause: el Modelfile de carlitos tenia PARAMETER num_ctx 20480. El system prompt mas el toolset completo que Claude Code envia en cada turno pesa entre 21500 y 23000 tokens, mas que el contexto disponible. llama-server truncaba el prompt (truncating input prompt limit=10242 prompt=21504 keep=4 new=10242), destruyendo la estructura del chat-template.
-- Se descartaron las hipotesis de corrupcion de blob o bug de renderer/parser de Ollama 0.31.1 verificando el modelo base qwen3-coder:30b sano via 6 tests directos por api/generate, api/chat y v1/messages, con y sin tools, streaming y no streaming.
-- Fix aplicado: num_ctx de 20480 a 65536 en el Modelfile de carlitos, via ollama create carlitos -f modelfile editado en Mac Studio.
-- Verificado con 2 pruebas reales consecutivas via bin/carlitos, ambas devuelven texto correcto (OK, LISTO), sin truncamiento en log (n_ctx_slot = 65536, prompt completo procesado).
-
-**Hallazgos:** dev-implementer y dev-debugger usan el tag base qwen3-coder:30b directo, no carlitos, por lo que no tienen este num_ctx fijo y no comparten este bug deterministico. No confirmado si sufren starvation de contexto bajo presion de VRAM con multiples modelos Forever cargados.
-
-**Backlog agregado:** BACKLOG-CARLITOS-01 — monitorear latencia de 85 a 107 segundos en frio por invocacion -p aislada de carlitos, por reuso parcial de prompt-cache entre llamadas sueltas (conv_id vacio cada vez). Evaluar en uso real de sesion continua si sigue siendo un problema.
-
-**Siguiente paso:** ninguno bloqueante. Fix cerrado y verificado.
-
-
-## 2026-08-05 — [FASE 0] Arquitectura IA Local — Estabilizar memoria y medir
-
-**Nodo:** Mac Studio M2 Max (192.168.1.102)
-**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §7 Fase 0
-
-**Cambio realizado:**
-- Bajado proceso huerfano de Ollama (carlitos:latest con num_ctx=20480 desactualizado, corriendo en paralelo a la version ya corregida con num_ctx=65536).
-- OLLAMA_KEEP_ALIVE=30m y OLLAMA_MAX_LOADED_MODELS=1 fijados en el plist autoritativo (/opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist). brew services restart ollama aplicado.
-- Linea base de latencia capturada: Carlitos 97.4s (antes 102.68s), Aurora 66.75s (antes 74s).
-- Observacion de 30 min (15 muestras): compresor 1.0-1.7GB estable, swapouts 552 constante sin crecimiento.
-
-**Estado de memoria post-cambio:**
-- Modelos residentes: 0 en reposo (keep_alive finito, expiran solos)
-- RAM en uso / compresor / swapouts: 66GB (0 modelos cargados) / 0.99-1.7GB / 552 estable
-
-**Criterio de salida de la fase:** PARCIAL, con correccion de metrica documentada
-- Memoria en uso < 60GB en reposo: NO CUMPLIDO en lectura literal (66GB) -- verificado independientemente (vm_stat + suma de RSS real de 877 procesos = 26.4GB) que el grueso es cache de archivos macOS ("Inactive", ~38GB), reclamable al instante, no memoria realmente ocupada. Metrica corregida para fases siguientes: presion de memoria / free+inactive, no "used" crudo de `top`.
-- Compresor < 5GB: CUMPLIDO (1.0-1.7GB)
-- Swapouts estables: CUMPLIDO (552 sin crecimiento en 30 min)
-- Ningun modelo con keep-alive Forever: CUMPLIDO
-
-**Rollback disponible:** si, trivial (recargar modelos con keep_alive anterior)
-
-**Pendiente que abre:** ninguno bloqueante. Correccion de criterio de memoria aplicada desde Fase 1 en adelante.
-
----
-
-## 2026-08-06 — [FASE 1] Arquitectura IA Local — Runtime nuevo (llama.cpp + Qwen3-Coder-Next)
-
-**Nodo:** Mac Studio M2 Max (192.168.1.102)
-**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §3.2, §7 Fase 1
-
-**Cambio realizado:**
-- llama.cpp instalado via Homebrew, llama-server build 10280.
-- Modelo Qwen3-Coder-Next-80B-A3B, cuantizacion Q4_K_M, descargado desde unsloth/Qwen3-Coder-Next-GGUF (Hugging Face), 48528320544 bytes verificados, en ~/models/qwen3-coder-next-80b-a3b-Q4_K_M.gguf.
-- llama-server levantado en puerto 11500 (127.0.0.1), ctx-size 131072, cache-type-k/v q8_0, cache-reuse 256, flash-attn on, slot-save-path ~/llama-slots. Ollama (11434) sin tocar, sin conflicto.
-
-**Estado de memoria post-cambio:**
-- Modelos residentes: 1 (Qwen3-Coder-Next Q4_K_M, ~49.4GB RSS del proceso llama-server)
-- RAM en uso / compresor / swapouts: dentro de rango, sin degradacion observada
-
-**Criterio de salida de la fase:** CUMPLIDO (5/5)
-- curl directo: respuesta valida -- CUMPLIDO
-- Tool-calling (10 llamadas): 10/10 JSON valido vs umbral >=9/10 -- CUMPLIDO
-- TTFT en frio: 8.16s vs umbral <20s -- CUMPLIDO
-- TTFT en caliente (mismo prefijo): 0.55s vs umbral <3s -- CUMPLIDO (numero decisivo del proyecto, contra los 102.68s originales de Carlitos)
-- Decode: 50.69 tok/s vs umbral >=15 tok/s -- CUMPLIDO
-
-**Rollback disponible:** si, trivial (apagar llama-server, cero impacto en Ollama/flujo existente)
-
-**Pendiente que abre:** ninguno bloqueante. Nota: durante el benchmark aparecio una vez la advertencia de re-procesamiento completo por cache vacia (SWA/hybrid), atribuida a cache fria inicial -- validado en profundidad en Fase 2.
-
----
-
-## 2026-08-06 — [FASE 2] Arquitectura IA Local — Pi contra el runtime nuevo
-
-**Nodo:** Mac Studio M2 Max (192.168.1.102)
-**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §3.3, §3.4, §7 Fase 2
-
-**Cambio realizado:**
-- Pi (@mariozechner/pi-coding-agent v0.73.1) instalado via npm, configurado contra llama-server local (127.0.0.1:11500) en ~/.pi/agent/models.json. NOTA: paquete deprecado en favor de @earendil-works/pi-coding-agent (mismo autor, rename de scope) -- pendiente decidir cual usar en la instalacion definitiva de Fase 4.
-- Repo de prueba desechable ~/pi_test_fase2/, rama pi-fase2-test, main intacta -- no se toco ningun repo real (MontuMS, OptiFierro).
-- Sesion real de 9 turnos incrementales (CRUD FastAPI + tests + refactor + README), creciendo hasta ~29.3K tokens de historial real.
-
-**Estado de memoria post-cambio:** sin cambios respecto a Fase 1 (mismo llama-server, mismo modelo residente)
-
-**Criterio de salida de la fase:** CUMPLIDO
-- TTFT turno N>=2 con sesion en ~30K tokens <= 5s: CUMPLIDO (max medido 1.65s en turno 9, ~29.3K tokens)
-- Tarea completada sin intervencion manual: CUMPLIDO (15/15 tests pasan, 5 endpoints + README escritos end-to-end por Pi)
-- Advertencia de re-procesamiento completo (SWA/hybrid) durante crecimiento incremental turno a turno: NO reaparecio en turnos 2-9 (~27.7K tokens adicionales) -- solo aparecio en el arranque de sesion (turno 1, cache vacia), consistente con lo esperable, no con el riesgo temido.
-
-**Rollback disponible:** si (flujo actual con Carlitos/Aurora sigue intacto, sin tocar)
-
-**Pendiente que abre:** decidir nombre de paquete definitivo de Pi (@mariozechner vs @earendil-works) antes de Fase 4.
-
----
-
-## 2026-08-06 — [FASE 3] Arquitectura IA Local — LiteLLM como fachada unica
-
-**Nodo:** Mac Studio M2 Max (192.168.1.102) / serverX (192.168.1.111)
-**Referencia:** PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §7 Fase 3
-
-**Cambio realizado:**
-- Tunel SSH inverso persistente Mac Studio -> serverX (autossh, 127.0.0.1:11500), empaquetado como LaunchAgent macOS com.montu.ssh-tunnel-serverx.plist (RunAtLoad+KeepAlive). Se descarto rebindear llama-server a la LAN + regla pf por quedar fuera de alcance de ejecucion autonoma (modificacion de configuracion de seguridad del sistema); el tunel SSH evita tocar el firewall del Mac.
-- LiteLLM proxy desplegado en Docker en serverX (/home/x/litellm/), network_mode host, puerto 4141 (4000 estaba ocupado por proceso ajeno "nxd", no tocado). Ruta local-qwen3-coder-next-80b -> http://127.0.0.1:11500/v1 (via tunel), timeout 180s. Master key en /home/x/litellm/.master_key (chmod 600, solo en serverX, nunca en texto plano fuera de ahi).
-- Rutas OpenRouter/Anthropic: NO configuradas -- revisado /home/x/.vault/, sin credenciales reales pobladas (solo .example vacio). Pendiente si se agregan credenciales.
-- Logging estructurado activado en LiteLLM.
-
-**Estado de memoria post-cambio:** sin cambios respecto a Fase 1/2
-
-**Criterio de salida de la fase:** CUMPLIDO
-- Backend caido produce error visible y logueado: CUMPLIDO. Prueba real: kill a llama-server -> LiteLLM devolvio HTTP 500 con stack trace completo en ~5.5s (litellm.InternalServerError, OpenAIException Connection error, 2 reintentos automaticos), NO cuelgue silencioso -- fix directo del incidente original de 9+ horas colgadas sin error, documentado en la Lista Negra §9.1 del plan.
-- llama-server reiniciado con la config exacta de Fase 1/2 (nuevo PID), confirmado operativo. Tunel SSH nunca se cayo durante la prueba.
-
-**Rollback disponible:** si (Ollama, Carlitos, Aurora, flujo actual sin tocar; 13 contenedores de produccion existentes en serverX no tocados)
-
-**Pendiente que abre:** BACKLOG-LITELLM-01 -- agregar credenciales reales de OpenRouter/Anthropic al vault cuando esten disponibles, para completar rutas de fallback a nube.
-
-## 2026-08-12 — Hermes Agent — Auditoria de version + intento de actualizacion (Rabin/Risko)
-
-**Nodo:** serverX (192.168.1.111)
-**Contexto:** Solicitud de Montu (fuera de pantalla) para investigar la ultima actualizacion de Hermes Agent (Nous Research) y actualizar "lo nuestro" de forma autonoma.
-
-**Diagnostico (solo lectura, previo a cualquier cambio):**
-- Rabin (hermes-gateway.service) y Risko (hermes-risko.service): ambos activos y sanos, corriendo desde 2026-07-31, comparten el mismo venv pip en /home/x/.hermes/hermes-agent/venv
-- Version instalada real: hermes-agent 0.19.0 (memoria previa decia v0.14.0 -- desactualizada, alguien actualizo sin dejar registro aqui)
-- Node.js en serverX: v22.22.2. Sin nvm/n instalado.
-- Espinita: NO se encontro servicio systemd, proceso, ni config bajo ningun patron razonable (~/.hermes, busqueda global por "espinita"). Requiere confirmar con Montu donde vive realmente.
-- Log de Rabin muestra un error de red de Telegram (Bad Gateway) el 2026-08-04, autorresuelto -- no es un problema activo hoy.
-
-**Cambio intentado:** `pip install -U hermes-agent` en el venv compartido (Rabin+Risko).
-**Resultado:** NO-OP. PyPI ya sirve 0.19.0 como ultima version -- confirmado que Nous Research dejo de publicar wheels nuevas a PyPI (documentado oficialmente: el canal pip/Homebrew se retira a partir de v0.20.0). No hay upgrade incremental seguro disponible por este canal.
-
-**Bloqueo real identificado (requiere decision de Montu, NO ejecutado):**
-- Ultima release: v0.20.0 "Herald" (2026-08-03) -- voz conversacional, protocolo A2A v1.0, webhooks salientes firmados, citas verificadas, plugin SDK desktop.
-- Requiere Node 26 (no presente) + migrar el canal de instalacion de pip/venv a shell installer, Docker o Nix (cambio de arquitectura, no un simple update).
-- Se considero fuera de alcance de ejecucion autonoma: toca runtime de sistema + reinstalacion completa de servicios de produccion (Rabin/Risko, con alcance familiar/de negocio) sin supervision.
-
-**Rollback disponible:** N/A -- no se modifico nada (intento de pip upgrade fue no-op, confirmado antes y despues).
-
-**Pendiente que abre:** BACKLOG-HERMES-01 -- decidir con Montu: instalar Node 26 en serverX + elegir canal de reinstalacion (Docker recomendado por aislamiento) para llegar a v0.20.0 Herald. Ver resumen de opcionales en el chat del 2026-08-12.
-
-## 2026-08-12 (cont.) — Hermes Agent v0.14.0 -> v0.20.0 Herald — Migracion pip -> instalador nativo EJECUTADA
-
-**Autorizacion:** Montu confirmo explicitamente proceder de forma autonoma con el entendimiento de que Rabin/Risko no se estaban usando hoy (downtime aceptable).
-
-**Cambio ejecutado:**
-1. Backup completo pre-cambio: ~/backups/hermes/hermes_backup_20260812_145715.tar.gz (176MB, config.yaml + .env + profiles/ + todo excepto venv/.git)
-2. Servicios detenidos limpiamente (hermes-gateway, hermes-risko)
-3. Eliminado SOLO ~/.hermes/hermes-agent/ (venv pip viejo) -- config.yaml, .env, profiles/risko, state.db, memory_store.db, clawdio_db.sqlite, SOUL.md, skills/, credentials/, whatsapp/session/ NO se tocaron (viven en ~/.hermes/ directamente)
-4. Instalador oficial (curl install.sh) corrido -- reinstalo Node/Python/uv de forma aislada en ~/.hermes/, NO toco el Node de sistema (sigue en v22.22.2, irrelevante ahora)
-5. Config y .env detectados y conservados automaticamente por el instalador; skills sincronizadas (16 nuevas, 52 actualizadas, google-workspace modificado por usuario preservado)
-6. Unidades systemd (hermes-gateway.service, hermes-risko.service) NO requirieron cambios -- misma ruta de venv
-7. Ambos servicios reiniciados y verificados: activos, sin crash-loop, Telegram reconectado en ambos, sin errores nuevos post-reinicio
-
-**Version final:** hermes-agent v0.20.0 (2026.8.3) "The Herald Release" -- confirmado via `hermes --version`
-
-**Hallazgo pre-existente (NO causado por este cambio):** WhatsApp de Rabin (hermes-gateway) no esta pareado -- ~/.hermes/platforms/whatsapp/session/ vacio, "external bridge left running" en shutdown. Esto ya estaba asi antes de tocar nada. Pendiente: `hermes whatsapp` para re-parear si se quiere WhatsApp activo, o remover WHATSAPP_ENABLED del .env si no se usa.
-
-**Espinita:** sigue sin ubicarse en serverX tras la migracion (no aparecio ningun servicio/config nuevo). Pendiente confirmar con Montu donde vive.
-
-**Rollback disponible:** SI -- ~/backups/hermes/hermes_backup_20260812_145715.tar.gz contiene el estado completo pre-migracion. Para revertir: detener servicios, restaurar tar, reinstalar hermes-agent==0.19.0 via pip en un venv nuevo, apuntar systemd de vuelta.
-
-**Nuevas capacidades disponibles desde v0.20.0 (no configuradas, requieren decision/setup):** voz conversacional con wake words, protocolo A2A v1.0, webhooks salientes firmados, skill de citas verificadas/fact-checking, plugin SDK del desktop app. Ver resumen conversacional del 2026-08-12 para detalle.
-
-**Cierra:** BACKLOG-HERMES-01 (bloqueo Node26+canal resuelto -- el instalador maneja Node de forma aislada, no fue necesario tocar el sistema)
-
----
-
-### 2026-08-16 — QRO (Qwen Desktop) incorporado a la MS + RCA Fetch cerrado + corrección de flujo de documentación
-
-**QRO OPERATIVO:** Qwen Chat Desktop (Alibaba) instalado y configurado en
-Mac Studio (192.168.1.102) como TERCER CEREBRO de la MS, rol "QRO".
-App Electron cliente MCP puro sobre chat.qwen.ai — NO expone servidor
-propio, Miaude NO puede invocarlo programáticamente. Interfaz Miaude↔QRO
-es manual: Montu copia/pega (handoff). Modelo: Qwen3.8-Max (GA
-03-ago-2026, MoE 2.4T params, ~95B activos, 1M contexto), tier consumidor
-gratuito, no consume tokens Anthropic. System Prompt "QRO" cargado y
-persistente (toggle "Habilitar en nuevo chat" activo).
-
-MCP oficiales activos: code-interpreter, fire-crawl, image-generation.
-MCP propio activo: Sequential-Thinking.
-
-HALLAZGO DE SEGURIDAD (resuelto): MCP `Filesystem` estaba activo con
-scope sin verificar — riesgo de exponer ~/MontuMS y mounts NFS a Alibaba
-Cloud. Desactivado por Montu.
-
-USOS PRIORITARIOS DE QRO: (1) red-team arquitectónico — revisor crítico
-independiente de diseños de Miaude, su valor es el DESACUERDO
-fundamentado, no la validación; (2) deep research y scraping web masivo
-vía fire-crawl, gratis; (3) análisis de contexto masivo (1M tokens);
-(4) borradores largos, traducciones, resúmenes extensos.
-NO usar para: ejecución en infraestructura productiva (sigue siendo
-CCa/agy), ni inferencia local (sigue siendo Carlitos/Aurora).
-
-REGLA DE DATOS INVIOLABLE: QRO opera SOLO con contexto de arquitectura.
-Nunca datos de cliente (Torres Ocaranza/OptiFierro), nunca datos de
-accidentabilidad nominados de OP Risk (Ley 21.719), nunca credenciales
-ni la bóveda /home/x/.vault/. La inferencia ocurre en Alibaba Cloud
-(jurisdicción CN).
-
-**RCA CERRADO — Fetch MCP (-32000 Connection closed):** causa raíz: `uvx`
-no instalado en Mac Studio (verificado con `which uvx` → not found; npx
-y node sí presentes en /opt/homebrew/bin/). El server Fetch requiere
-runner Python (uv/uvx) inexistente, el proceso hijo murió al instante.
-DECISIÓN: no remediar — `fire-crawl` (MCP oficial de Qwen, ya activo, sin
-dependencias locales) cubre la misma función. Entrada `Fetch` eliminada.
-REGLA DERIVADA: apps GUI de macOS no heredan el PATH del shell interactivo
-— solo ven el PATH del sistema. Todo MCP con runner de Homebrew debe
-configurarse con RUTA ABSOLUTA del binario, nunca el nombre pelado. Mismo
-patrón que ya motivó el wrapper `bash -lc` en Desktop Commander.
-
-**CORRECCIÓN DE FLUJO — Documentación técnica (importante, corrige
-conocimiento desactualizado):** Rabín (Clawdio, Hermes Gateway) YA NO
-documenta. El skill doc-updater y el flujo de commit+push atribuido
-anteriormente a Rabín quedaron OBSOLETOS. El flujo VIGENTE desde
-2026-08-16 es: Aurora clasifica y genera resumen+tags (invocación
-puntual vía /Users/montu/bin/aurora, nunca bulk ni bucle agéntico),
-SIEMPRE bajo supervisión de CCa como orquestador — porque Aurora aún no
-tiene confianza al 100% y requiere verificación de calidad antes de
-aceptar cualquier entrada al catálogo. Rabín mantiene su canal MCP con
-Miaude (clawdio, telegram:8357148621) solo para notificaciones, no para
-documentación técnica.
-
-**Nota de ejecución:** esta entrada fue documentada por CCa supervisando
-a Aurora, como validación inicial del nuevo protocolo de supervisión
-documentado arriba.
-
----
-
-### 2026-08-16 (cont.) — BACKLOG-INFRA-01 resuelto: llama-server como LaunchAgent persistente
-
-**PROBLEMA:** llama-server (motor de Carlitos/Aurora vía Pi) era un proceso
-manual sin persistencia — no sobrevivía reinicios ni caídas, causa raíz del
-fallo de Aurora documentado en la entrada anterior de hoy.
-
-**SOLUCIÓN:** LaunchAgent propio `cl.montuschi.llama-server.plist` en
-~/Library/LaunchAgents/ (NO vía `brew services`, siguiendo la lección ya
-aprendida con Ollama: brew services regenera desde el Cellar y pisa config
-manual). Comando: `/opt/homebrew/bin/llama-server -m
-/Users/montu/models/qwen3-coder-next-80b-a3b-Q4_K_M.gguf --host 127.0.0.1
---port 11500 -c 131072 -ngl 999`. RunAtLoad=true, KeepAlive=true.
-`launchctl bootstrap` exitoso a la primera. Verificado en vivo por Miaude:
-`/health` responde `{"status":"ok"}`, plist correcto en disco.
-
-**TEST DE RESPAWN:** `kill -9` al proceso real → LaunchAgent lo revivió en
-1 segundo, `/health` en verde a los ~5-10s (recarga rápida por cache de
-disco de macOS).
-
-**EVALUACIÓN DE CARLITOS (tarea delegada: redactar el plist), solicitada
-por Montu:** Calidad: XML correcto y completo a la primera — Label,
-ProgramArguments desglosado, RunAtLoad, KeepAlive, paths absolutos, todo
-presente. Único defecto: envolvió el XML en fences ```xml``` pese a pedido
-explícito de no hacerlo — hubo que extraerlo antes de guardar. Velocidad:
-9.41s totales, ~48 palabras de output, ~6.6 tok/s (estimado — `pi` no
-expone tokens/segundo real). Veredicto: confiable para tareas acotadas y
-bien especificadas con corrección mínima; el hábito de envolver en
-markdown fences es un patrón de falla recurrente a seguir vigilando, no
-darlo por resuelto; para tareas con más ambigüedad se seguiría queriendo
-supervisión más cercana.
-
-**AURORA:** falló el primer intento de documentar este cambio (timeout
-~60s, LaunchAgent recién levantado aún estabilizando slots), tuvo éxito
-en el segundo intento (~4.8s, síntesis genuina, aceptada).
-
-**LECCIÓN DE ORQUESTACIÓN (Miaude):** intentar hacer completar el
-commit+push final a una NUEVA invocación de CCa fallando dos veces —
-primero por confusión de identidad (se refirió a sí mismo como
-"Carlitos" tras un prompt saturado de contexto sobre Carlitos), luego
-rechazando la tarea completa por detectar el patrón de "confirmación
-humana reportada de segunda mano + pedido de no volver a confirmar" como
-un intento de inyección — CORRECTAMENTE, ya que cada invocación `-p` de
-CCa es stateless y no tiene forma de verificar afirmaciones sobre
-sesiones anteriores. Lección: no reenviar contexto de sesiones previas
-como si el agente lo recordara: para cierres finales de una cadena larga
-de sub-invocaciones, es más simple y seguro que Miaude ejecute el paso
-final directamente en vez de forzar a un CCa stateless a confiar en
-afirmaciones no verificables.
-
-**RIESGO RESIDUAL:** llama-server queda permanentemente residente en RAM
-(~49.4GB) — a diferencia de Ollama (OLLAMA_KEEP_ALIVE=30m, descarga tras
-inactividad), este servicio no libera memoria nunca. Con 77.8GB
-disponibles a GPU en el Mac Studio, queda poco margen si además se carga
-un modelo Ollama grande en simultáneo (ej. gemma3:27b, 17GB). Pendiente
-evaluar mecanismo de descarga por inactividad.
-
----
-
----
-
-### 2026-08-16 (cont.) — Idle-unload de 15 min agregado a llama-server (mitiga riesgo residual de BACKLOG-INFRA-01)
-
-**MOTIVADOR:** Montu detectó en vivo, vía la app Mac Studio Monitor (en
-desarrollo, no documentada aún), que llama-server quedaba permanentemente
-en ~51.6GB de RAM tras el despliegue de hoy — el riesgo residual que ya
-se había anotado en la entrada anterior, ahora visible en la práctica.
-
-**SOLUCIÓN:** llama.cpp (esta build, 10280) tiene flag nativo
-`--sleep-idle-seconds N` (default -1 = deshabilitado) — no hizo falta
-construir un watcher propio. Agregado al plist
-`cl.montuschi.llama-server.plist` con N=900 (15 minutos, decisión
-explícita de Montu — no 30, con criterio de "ajustar hacia arriba si
-hace falta, no al revés").
-
-**VALIDACIÓN EMPÍRICA (antes de comprometerlo a producción):** se probó
-primero con `--sleep-idle-seconds 8` en un proceso manual aparte:
-- RSS recién iniciado: 150MB (no carga hasta la primera consulta real).
-- Tras un `/v1/chat/completions` real: RSS sube a 51.1GB.
-- Tras 15s de idle (> umbral de 8s): RSS baja a 265MB — el log confirma
-  el ciclo `entering sleeping state` → `exiting sleeping state` →
-  `loading model` (recarga automática al llegar la siguiente consulta).
-- Costo de despertar: ~2.7s de recarga antes de procesar el primer
-  request tras dormir — latencia a tener presente, no es instantáneo.
-
-**DESPLIEGUE FINAL:** plist actualizado con `--sleep-idle-seconds 900`,
-redeployado via `launchctl bootstrap`, `/health` verde, RSS en ~51GB
-tras la carga inicial de RunAtLoad. Se dormirá solo tras 15 min sin uso.
-
-**Nota de ejecución:** a diferencia de las entradas anteriores de hoy,
-esta se ejecutó directamente por Miaude (sin CCa), por eficiencia —
-tarea acotada y de bajo riesgo, y para evitar el patrón de fricción
-observado en el cierre de BACKLOG-INFRA-01 con invocaciones stateless
-de CCa sin contexto compartido.
-
----
-
-## 2026-08-17 — Optimización Harness Pi y Carlitos: pi-guardrails, ast-grep, pi-fovea y auditoría de seguridad
-
-**Instalación de @pi-vault/pi-guardrails v0.1.0 en ~/.pi/agent/extensions:** Instalación realizada vía `npm install`, sin requerir edición manual de `package.json` ya que el paquete se autoregistra. Verificado que Pi v0.73.1 carga limpio con la extensión activa (prueba `pi -p` con respuesta trivial, sin errores). Protecciones activas por defecto: bloqueo duro de lectura/escritura de `.env`, `.git/**`, `~/.ssh/**`, `~/.aws/**`, `~/.gnupg/**`; bloqueo duro de comandos catastróficos (`rm -rf /`, fork bombs, `dd`, `mkfs`, `wipefs`); modo Ask por defecto para acceso fuera del workspace y composición de shell (`&&`, `|`, backticks); resolución de symlinks antes de aplicar reglas; fail-closed sin UI interactiva. Publicado por Earendil Inc (misma organización dueña de Pi).
-
-**Instalación de ast-grep 0.45.1 vía Homebrew en Mac Studio:** Dependencia externa requerida por `pi-fovea` (parser local invocado vía `execFile`/`spawn`, no viene bundleado dentro del paquete de la extensión).
-
-**Instalación y auditoría de seguridad de pi-fovea v0.18.0 en ~/.pi/agent/extensions:** Instalación de `pi-fovea` v0.18.0 (autor monotykamary, publicado 1 día antes de esta sesión) precedida por auditoría exhaustiva de código fuente (`src/` y `dist/`) ejecutada por CCa: CERO llamadas de red salientes encontradas (los únicos matches de `fetch`/`axios`/`http` forman parte del propio motor de detección de patrones de red que pi-fovea usa para mapear el código del usuario, no llamadas salientes que la extensión realice hacia afuera — verificado inspeccionando los encabezados y contextos de archivo). CERO dependencia de modelos de embeddings o APIs de terceros (grep exhaustivo por `openai`, `anthropic`, `azure`, `cohere`, `huggingface`, `embedding`, `vertexai`, `bedrock`, `google/genai` sin resultados dentro del código propio de `pi-fovea`; el warning de npm sobre `@google/genai` corresponde a una dependencia transitiva del harness Pi, no de pi-fovea). Únicos subprocesos externos invocados: `git` y `ast-grep`, ambos locales en el host. Mecanismo real: "foveated heat diffusion" sobre grafo de código cross-language vía `ast-grep` (no tree-sitter embebido, corrigiendo la suposición preliminar), con reindexación automática mediante detección de hash de archivos entre turnos.
-
-**Piloto comparativo pi-fovea con/sin activación [PENDIENTE]:** Piloto comparativo pi-fovea con/sin activación — lanzado en sesión anterior vía CCa en background, resultado no verificado al momento de esta documentación (archivo `/tmp/miaude_task3_output.txt` vacío al momento de la verificación), pendiente de confirmar directamente con Montu.
-
----
-
-## 2026-08-18 — Corrección del piloto pi-fovea: bug de compatibilidad de versión, reinstalación de Pi y benchmark formal completo sobre OptiFierro-V2
-
-**Nota de contexto:** la entrada del 2026-08-17 dejó el piloto comparativo de pi-fovea marcado como PENDIENTE porque el agente que documentó ese día (Antigravity) revisó un archivo de verificación equivocado. Lo que sigue es el desarrollo real, verificado, ocurrido después de esa documentación.
-
-**Bug de compatibilidad de versión encontrado y resuelto en Pi:** al correr el piloto comparativo con pi-fovea activo apareció el error `Extension error (.../pi-fovea/src/index.ts): ctx.isProjectTrusted is not a function`. Causa raíz confirmada: el binario global de Pi instalado en el Mac Studio era la versión 0.73.1, publicada bajo el paquete npm viejo `@mariozechner/pi-coding-agent` (de antes de que el proyecto se mudara de organización). El método `ctx.isProjectTrusted()` fue agregado a la API de extensiones de Pi en una versión posterior (issue #5523 del changelog), ya bajo el paquete nuevo `@earendil-works/pi-coding-agent`, cuya versión actual al momento de esta sesión es 0.84.2. `pi-fovea` (publicado el día anterior a esta sesión) fue escrito contra la API nueva, de ahí la incompatibilidad.
-
-**Reinstalación limpia de Pi, con preservación verificada de extensiones:** se hizo backup completo de `~/.pi` a `~/.pi_backup_2026-08-17_pre_reinstall/`, verificado íntegro con `diff -rq` antes de proceder. Se eliminó el symlink viejo `/opt/homebrew/bin/pi` (que apuntaba a `@mariozechner/pi-coding-agent`). Se instaló el paquete correcto y actual con `npm install -g --ignore-scripts --min-release-age=0 @earendil-works/pi-coding-agent`. Resultado: Pi actualizado de 0.73.1 a 0.84.2. Verificado con `diff -rq` que `~/.pi/agent/extensions` (con `pi-guardrails` y `pi-fovea`) quedó idéntico al backup, sin diferencias. Verificado con una tarea real (pregunta sobre `scrapers/pil.py` en un repo de prueba) que el error `ctx.isProjectTrusted` ya no aparece.
-
-**Piloto comparativo pi-fovea limpio, post-fix, sobre repo de prueba (aduanas_tracking, 481 líneas):** tarea: explicar cómo `orchestrator.py` rutea al scraper correcto vía el dict `SCRAPERS`. Resultado: sin fovea, 27 segundos, 6318 tokens totales (input 2663, output 552, cacheRead 3103), 3 turnos. Con fovea (ya sin el bug), 24 segundos, 7604 tokens totales (input 2663, output 491, cacheRead 4450), 3 turnos, usó la tool `fovea_sketch`. Ambas respuestas idénticas en calidad y corrección. Con un repo tan chico, la diferencia queda dentro de ruido normal.
-
-**Primer intento de benchmark formal sobre código real de OptiFierro-V2, fallido por bug de script, luego corregido:** se decidió correr el benchmark formal pendiente desde antes (ver `BACKLOG-FOVEA-BENCHMARK` en INVENTARIO_MAESTRO.md) sobre código real, no el repo de juguete. Se clonó OptiFierro-V2 desde GitHub (repo privado, clon aislado en `/tmp`, nunca se tocó el repo original ni las copias existentes en serverX), rama master, commit `aa3145d593d68d9ac704934697295128043c4efd`. Se operó bajo las reglas Tier 1 (solo lectura/análisis) de `~/MontuMS/harness/optifierro/HARNESS.md` — nunca se modificó código, nunca se hizo commit ni push, nunca se tocó Cubigest ni `_BODSUC_MAP` ni `motor_v2.py` salvo para leerlo. Se definieron 15 tareas de análisis reales (solo lectura), algunas inspiradas en el historial de fallas de HARNESS.md (bug FP-003 de filtro de peso en bolsa de trabajo, mapping BODSUC).
-
-El primer intento de script automatizado, corrido desatendido, falló por un bug de bash: dentro del loop que iteraba las 15 tareas (`while read linea; do ... done < archivo_tareas`), la invocación a `pi` no tenía su entrada estándar redirigida, así que `pi` heredó el mismo file descriptor que el loop usaba para leer el archivo de tareas y consumió las líneas restantes vía stdin. Efecto: el loop se cortó después de la tarea 1 (pareció terminar normal, sin error), y la respuesta de esa tarea 1 en condición sin fovea salió contaminada, respondiendo contenido de otras tareas coladas por la entrada estándar compartida (386 segundos, 23KB de salida, respondió 16 preguntas en vez de 1). Además, la extracción de contabilidad de tokens del script devolvía siempre cero, por asumir un esquema de campos incorrecto (`input_tokens`/`output_tokens`) cuando el esquema real de los archivos jsonl de sesión de Pi es distinto: cada línea con `type: message` y bloque `message.usage` contiene los campos `input`, `output`, `cacheRead`, `cacheWrite` y `totalTokens`, que hay que sumar a través de todas las líneas de la sesión, no tomar de una sola.
-
-Corrección aplicada: se agregó redirección de entrada estándar a `/dev/null` en la invocación de `pi` dentro del loop. Se reescribió la extracción de tokens con el esquema real confirmado. Se agregó una advertencia visible en el reporte final si la cantidad de tareas completadas es menor a la definida sin haberse agotado el presupuesto de tiempo, para que un reporte incompleto no vuelva a parecer normal. Se validó el fix con una prueba de humo (una sola tarea, una sola condición) antes de relanzar el benchmark completo: confirmado sin contaminación y con tokens reales extraídos correctamente. El primer intento fallido se archivó completo (no se borró) en `/tmp/optifierro_benchmark_intento1_bugueado/`. Se agregó además un script vigilante independiente que revisa cada 3 minutos por hasta 6 horas si el proceso principal sigue vivo y si el archivo de progreso sigue creciendo, escribiendo una alerta clara si detecta una falla no capturada sin reiniciar nada automáticamente — la decisión queda en manos de un humano.
-
-**Resultado final del benchmark formal completo (15 de 15 tareas completadas, sin advertencia de anomalía, duración total 2308 segundos):** tiempo promedio sin fovea 56.7 segundos (n=14, excluye una tarea que dio timeout), con fovea 58.7 segundos (n=15) — prácticamente iguales, diferencia de 3.5%, dentro de ruido normal. Tokens totales promedio: sin fovea 52870, con fovea 85815 (fovea aparenta 62% más caro). Pero al separar el campo `cacheRead` (contexto ya procesado que se reutiliza, no cómputo nuevo) del resto, y comparar solo input más output frescos, sin fovea promedia 14117 y con fovea 14543 — diferencia de solo 3%, prácticamente idéntico. La brecha en tokens totales está casi enteramente explicada por diferencias en `cacheRead`, no por carga de cómputo real nueva.
-
-Hallazgo de patrón, con evidencia específica de 3 tareas que rompieron la tendencia general: en la tarea de buscar todas las funciones que matchean los patrones `get_local_*` y `get_cubigest_*` en todo el backend (búsqueda de patrón cruzando muchos archivos), la condición sin fovea entró en un loop de exploración descontrolada y dio timeout a los 600 segundos con un acumulado anómalo de 12787749 tokens de cacheRead (capturado limpiamente por el límite de tiempo del script, sin afectar el resto del benchmark — validación real de la infraestructura de resiliencia agregada en el paso anterior); la condición con fovea para esa misma tarea completó exitosamente en 124 segundos. En la tarea de rastrear el helper `_prev_business_day()` y dónde se usa (trazado de referencias cruzadas), con fovea usó aproximadamente un tercio de los tokens que sin fovea (21992 contra 65209). En la tarea sobre la estructura general de todo el directorio `frontend/src` (organización a través de múltiples archivos y carpetas), con fovea usó aproximadamente un cuarto de los tokens que sin fovea (68649 contra 265913). En las demás 12 tareas, acotadas a un solo archivo o función puntual, fovea no mostró ventaja consistente, a veces incluso con más overhead sin beneficio claro.
-
-**Conclusión y política de uso resultante (reemplaza la conclusión anterior de adopción sin condiciones):** pi-fovea no demostró una reducción de contexto pareja en todas las tareas, contrario a la expectativa inicial. Es neutro (ni ayuda ni perjudica de forma significativa) en tareas acotadas a un solo archivo. Muestra una ventaja real, grande y mecánicamente explicable específicamente en tareas que requieren buscar o rastrear información a través de múltiples archivos (búsqueda de patrones, trazado de llamadas o referencias, estructura de directorio completo). Política recomendada: activar fovea selectivamente para este segundo tipo de tareas, no como default parejo para todo. Esta hipótesis (multi-archivo vs archivo único) fue construida sobre apenas 3 casos de una muestra de 15 — queda pendiente validarla con una muestra mayor antes de convertirla en regla dura del harness.
-
----
-
-## 2026-08-19 — Cierre de gaps de documentación (G1-G4) y formalización de política fovea selectivo en Carlitos
-
-**Contexto:** sesión de continuación directa sobre el hilo de optimización del harness Pi/Carlitos. Primera parte: cerrar cuatro gaps reales detectados al auditar el estado del punto 1 (documentación) de la sesión anterior (2026-08-18) — el contenido ya existía pero no estaba realmente propagado/consistente. Segunda parte: formalizar la política "fovea selectivo" en el harness real de Carlitos (punto 2 del roadmap), priorizada por sobre el fix de bugs de La Biblioteca descubiertos en la primera parte, porque desbloquea el objetivo original del hilo (benchmark de swap de modelo).
-
-**G1 — Commit huérfano pusheado:** el commit `5f7694f` (cierre del piloto fovea, 2026-08-18) estaba commiteado en serverX pero nunca pusheado a `origin/main` (`ahead 1`). Push ejecutado y verificado.
-
-**G2 — Reindex de La Biblioteca + dos bugs nuevos encontrados por RCA:** se corrió `indexador.py` (473 secciones procesadas, 12 filas huérfanas limpiadas, catálogo de 430 a 454 filas). Investigación previa (antes de tocar nada) del código fuente confirmó dos hallazgos:
-1. `indexador.py` no es recursivo — solo escanea el primer nivel de `MontuMS/` y `MontuMS/docs/`, por lo que `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md` nunca se indexó. Backlog abierto: `BACKLOG-BIBLIOTECA-PATHS` (mismo bug de fondo que la inconsistencia de paths ya detectada).
-2. El reindex incorporó 4 filas basura de archivos AppleDouble de macOS (`docs/._*.md`, prefijo `._`), generados por Samba/Finder al sincronizar con `/mnt/extra`. `indexador.py` no filtra ese patrón. Confirmado en vivo una segunda vez durante la Parte 2 de esta sesión: escribir un archivo nuevo en `~/MontuMS/harness/carlitos/` desde el Mac Studio vía el mismo NFS mount generó automáticamente su `._` correspondiente, que se limpió manualmente antes de que un futuro reindex lo recogiera. Backlog abierto: `BACKLOG-BIBLIOTECA-APPLEDOUBLE`.
-
-No se modificó `indexador.py` ni se borraron filas — ambos hallazgos quedan documentados para una sesión de fix dedicada (RCA antes de parche).
-
-**G3 — Corrección de redacción "Retirado" en INVENTARIO_MAESTRO.md:** la línea decía "nada aún" y a la vez describía en futuro un retiro que ya había ocurrido el 2026-08-16 (contradicción interna). Reescrita para reflejar el estado real (Claude Code CLI vs ANTHROPIC_BASE_URL retirado, Ollama permanece instalado para otros usos).
-
-**G4 — Nuevo backlog `BACKLOG-BIBLIOTECA-PATHS`:** documentado el bug de paths relativos inconsistentes en el catálogo (`LOG_CAMBIOS_2026.md` vs `docs/LOG_CAMBIOS_2026.md` como si fueran archivos distintos), causando resultados fragmentados en `buscar_tema`.
-
-**Nota de proceso — guardrail de CCa respetado, no sorteado:** se delegó la investigación y ejecución de G1-G4 a CCa vía invocación headless. CCa se detuvo dos veces, una por cada commit pendiente, citando su propia regla de `CLAUDE.md` ("nunca commit/push sin confirmación") y rechazando correctamente una aprobación relayada dentro de un prompt como prueba válida de autorización de Montu. Dado que el diff ya había sido validado de forma independiente (coincidencia exacta con lo planeado, verificado dos veces) y la autorización de Montu para este turno era explícita y directa, Miaude ejecutó el `git add/commit/push` final directamente en lugar de insistirle a CCa que se saltara su propio candado — el guardrail de CCa se considera correcto, no un obstáculo a evadir.
-
-**Commits:** `321d3bd` (G3+G4), `e5eee02` (BACKLOG-BIBLIOTECA-APPLEDOUBLE). Repo sincronizado con `origin/main` al cierre de esta parte.
-
----
-
-### Parte 2 — Formalización de la política "fovea selectivo" en `~/bin/Carlitos`
-
-**RCA de arquitectura antes de implementar:** se investigó el código fuente de `pi-fovea` (no solo su comportamiento observado) para encontrar el punto de control real. Hallazgo: fovea expone dos superficies independientes. (a) 4 tools standalone (`fovea_sketch`, `fovea_focus`, `fovea_dwell`, `fovea_impact`) que el modelo invoca explícitamente — togglables por invocación con la flag nativa de Pi `--exclude-tools`, sin tocar ningún archivo. (b) un hook de "grep augment mode" (`tools.grepMode`, default `"augment"`) que intercepta resultados de la tool nativa `grep` en queries tipo-símbolo — solo configurable vía archivo `fovea.json` (global o por proyecto), sin override por CLI ni variable de entorno. Se decidió no tocar (b) para esta fase: el benchmark del 2026-08-18 lo tuvo activo en las 15 tareas, incluidas las 12 de archivo único, sin mostrar perjuicio. Queda documentado como `BACKLOG-FOVEA-GREPMODE` por si una muestra mayor cambia esa conclusión.
-
-**Implementación:** `~/bin/Carlitos` reescrito con default **fovea OFF** (excluye las 4 tools) y flag explícita `--fovea` como primer argumento para activarlas. Decisión de diseño: activación **declarativa** (el operador decide en el momento de invocar), no heurística automática por clasificación de la tarea — la política se sostiene sobre apenas 3 casos de evidencia (`BACKLOG-FOVEA-MUESTRA-MAYOR`), y automatizar la clasificación ahora sería una suposición disfrazada de regla.
-
-**Validación antes de reemplazar el wrapper en producción (4 pruebas):** (1) sin `--fovea`, las 4 tools ausentes del listado de tools disponibles del modelo — confirmado; (2) con `--fovea`, las 4 presentes — confirmado; (3) timing de una invocación trivial sin regresión (~3.1s); (4) una tarea de código real (explicar un pipe de bash) responde correctamente sin diferencia de calidad. Backup del wrapper original preservado en `/tmp/Carlitos.pre-fovea-selectivo.bak` antes del reemplazo.
-
-**Dos bugs reales encontrados durante las pruebas del wrapper (no en el alcance original, documentados por protocolo):**
-1. **Bug de stdin colgado, reproducido en vivo:** una invocación headless de `pi -p` lanzada en background sin stdin redirigido se colgó indefinidamente esperando EOF de un stdin heredado que nunca cierra — el mismo patrón ya documentado el 2026-08-18 en el script de benchmark, encontrado de nuevo de forma independiente. Corrección: el wrapper ahora redirige stdin a `/dev/null`, pero **solo quedó condicionado a modo one-shot** (hay un prompt como argumento) — nunca en invocación sin argumentos, para no romper un eventual uso interactivo/TUI de Pi.
-2. **Bug de `set -u` + array vacío en bash 3.2:** la primera versión del wrapper usaba `set -euo pipefail`; al probarla con `--fovea` (que deja el array `FOVEA_FLAG` vacío), bash de sistema de macOS (3.2, no Homebrew) reventó con `unbound variable` al expandir `"${FOVEA_FLAG[@]}"` — comportamiento específico de bash 3.2 bajo `set -u`, no reproduce en bash 4+. Corrección: se removió `-u`, dejando `set -eo pipefail`, con la razón documentada inline en el script para que no se reintroduzca sin querer en una futura edición.
-
-**Hallazgo de infraestructura — `~/bin` sin control de versiones:** `~/bin` en el Mac Studio no es un repositorio git. El cambio al wrapper de Carlitos, un script en uso diario, no tenía ninguna red de seguridad más allá del backup temporal en `/tmp`. Se copió el wrapper final a `harness/carlitos/wrapper_carlitos.sh` dentro de MontuMS (vía el mismo NFS mount que usa Miaude para leer/escribir el repo desde el Mac) para que quede versionado. Sigue pendiente evaluar si conviene poner `~/bin` completo bajo git — no se decidió en esta sesión, queda como pregunta abierta para Montu.
-
-**Documentación actualizada:** sección nueva "Política fovea selectivo — implementación formalizada" en `docs/EVALUACION_HARNESS_AGENTICOS_CARLITOS_2026-08.md`, con el detalle completo del mecanismo, la implementación y los hallazgos colaterales. `INVENTARIO_MAESTRO.md` actualizado con referencia al wrapper y dos backlogs nuevos (`BACKLOG-FOVEA-GREPMODE`, nota de cierre parcial en `BACKLOG-FOVEA-MUESTRA-MAYOR`).
-
-**Estado al cierre:** wrapper en producción en `~/bin/Carlitos`, probado, documentado, con copia versionada en el repo. Punto 2 del roadmap original cerrado — punto 3 (benchmark de swap de modelo) queda habilitado para la próxima sesión.
-
----
-
-## 2026-08-19 (cont.) — Fix de indexador.py: recursividad de docs/ y filtro AppleDouble
-
-**Contexto:** continuación directa de la misma sesión. En vez de avanzar al punto 3 del roadmap (benchmark de swap de modelo), se priorizó cerrar los dos bugs de La Biblioteca dejados abiertos en la Parte 1 (BACKLOG-BIBLIOTECA-PATHS, BACKLOG-BIBLIOTECA-APPLEDOUBLE) — acotados, ya diagnosticados, y conviene resolverlos antes de generar más documentación pesada.
-
-**Corrección de diagnóstico sobre BACKLOG-BIBLIOTECA-PATHS — no era el bug que parecía:** al leer el código fuente completo de `indexador.py` antes de tocar nada, apareció un comentario explícito fechado 2026-07-19 explicando que indexar tanto `MontuMS/` como `MontuMS/docs/` fue una decisión intencional, porque en ese momento existían dos archivos físicos distintos con el mismo nombre. Verificado con `ls` directo: los archivos de raíz (`MontuMS/LOG_CAMBIOS_2026.md`, `MontuMS/INVENTARIO_MAESTRO.md`) ya no existen en disco — fueron eliminados en algún punto antes del 2026-07-21 (documentado en `COMO_USAR_LA_BIBLIOTECA.md` sección 7, "no deben recrearse ahí"). Las filas "duplicadas" que motivaron el backlog original eran huérfanas de esos archivos ya borrados, y `limpiar_huerfanos()` ya las había limpiado como efecto colateral del reindex de la Parte 1 (G2) de esta misma sesión — confirmado con query directa post-reindex: el catálogo solo tenía `docs/LOG_CAMBIOS_2026.md` y `docs/INVENTARIO_MAESTRO.md`, sin duplicados. El backlog original había mezclado dos problemas distintos bajo un mismo nombre: esta parte (paths duplicados) y la cobertura faltante de `docs/evidencia/`, que es un bug real y separado. Backlog cerrado con esta corrección de diagnóstico, sin cambio de código asociado.
-
-**Fix real 1 — cobertura de subcarpetas de docs/:** `encontrar_markdowns()` usaba `d.glob("*.md")` (no recursivo) para ambos directorios de `SCAN_DIRS`, por lo que `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md` nunca se indexó. Se agregó `SCAN_DIRS_RECURSIVE = {MONTUMS_ROOT / "docs"}` y el código ahora usa `d.rglob` para los directorios de ese set y `d.glob` para el resto — deliberadamente **no** se hizo recursivo `MONTUMS_ROOT` (para no empezar a indexar `harness/` u otras carpetas sin decisión explícita, evitando expandir el alcance del catálogo sin que Montu lo pida).
-
-**Fix real 2 — filtro de archivos AppleDouble:** se agregó `encontrados = [p for p in encontrados if not p.name.startswith("._")]` inmediatamente después del glob, antes del filtro de `_excluido()`. Root cause exacto: un archivo AppleDouble como `._INVENTARIO_MAESTRO.md` termina en `.md` y por lo tanto matchea el patrón `*.md` igual que un documento real.
-
-**Validación (backup previo en `/tmp/indexador.py.pre-fix-2026-08-19.bak` en serverX, sintaxis verificada con `py_compile` antes de correr nada):** reindex post-fix procesó 475 secciones (16 archivos, incluyendo por primera vez `docs/evidencia/REPORTE_BENCHMARK_FOVEA_OPTIFIERRO_2026-08-18.md` con 3 secciones), eliminó las 4 filas huérfanas de AppleDouble que quedaban de la sesión anterior, y no generó ninguna fila `._` nueva. Confirmado con query directa post-reindex: catálogo en 456 filas, cero filas AppleDouble, `docs/evidencia/` indexada y consultable.
-
-**Estado al cierre:** los dos backlogs de La Biblioteca quedan cerrados. Los tres pendientes reales de esta sesión completa son ahora: `BACKLOG-OLLAMA-CLEANUP`, `BACKLOG-FOVEA-GREPMODE`, `BACKLOG-FOVEA-MUESTRA-MAYOR` (validación estadística), y el punto 3 original del roadmap (benchmark de swap de modelo), que queda como el próximo paso natural.
-
----
-
-## 2026-08-19/20 — Benchmark model-swap (Qwen3-Coder-30B-A3B vs Devstral-Small-2-24B): fallo de ejecución nocturna y cierre exitoso al día siguiente
-
-**Contexto:** punto 3 del roadmap, `BACKLOG-MODEL-SWAP-BENCH`. Se lanzó como tarea autónoma nocturna sin supervisión en vivo (CCa ejecutando de punta a punta), con la misma metodología de 15 tareas reales sobre OptiFierro-V2 usada en el benchmark de fovea del 2026-08-18, aplicando la política fovea-selectivo ya vigente.
-
-**Hallazgo real — fallo de la sesión nocturna (causa raíz):** el primer intento murió tras completar solo la descarga del candidato 1 (18.56GB, íntegra). CCa backgroundeó la descarga con `&` y terminó su turno escribiendo que "esperaría a que una tarea de monitoreo en background le avisara cuando terminara" — ese mecanismo no existe en una invocación headless de un solo turno síncrono (`pi -p`, sin sesión persistente). Al no bloquear activamente sobre el proceso backgroundeado, el turno terminó sin ejecutar nada del resto del plan (registro de provider, servidor de prueba, smoke test, benchmark). No fue un fallo del comando de descarga — el archivo quedó completo, solo el razonamiento de "voy a esperar a que me avisen" fue el bug. Es la tercera vez documentada en esta sesión que un patrón de espera/bloqueo mal entendido causa un fallo real (ver también los dos casos previos de `< /dev/null` en `pi -p` headless, 2026-08-18 y 2026-08-19).
-
-**Corrección aplicada al retomar (2026-08-20):** todo comando de larga duración (descargas, carga de modelo, benchmark de 15 tareas x2 candidatos) se ejecutó backgroundeado pero con un loop de espera síncrono real (`while kill -0 $PID; do sleep N; done`) dentro de la misma invocación de herramienta, encadenando llamadas de bloqueo sucesivas cuando la duración superaba el límite de una sola invocación (10 min). Ninguna acción posterior se disparó sin confirmación real de que la anterior había terminado. Efecto secundario útil: se detectó que `huggingface-cli` ya no existe en la instalación actual de `huggingface_hub` (renombrado a `hf`); se usó `hf download` con la misma semántica idempotente para verificar integridad del candidato 1 sin re-descargar.
-
-**Resultado del benchmark:** ambos candidatos pasaron el smoke test de tool-calling al primer intento y completaron las 15 tareas sin timeouts ni errores. Candidato 1 (Qwen3-Coder-30B-A3B, MoE): 1020s totales, 68.0s/tarea promedio, throughput de salida ~17.2 tok/s. Candidato 2 (Devstral-Small-2-24B, denso): 1604s totales, 106.9s/tarea promedio, throughput de salida ~9.7 tok/s (requirió `--jinja` en el servidor, como estaba previsto). Se confirma con datos la hipótesis planteada al inicio: el modelo denso es más lento por tarea que el MoE pese a tener menos parámetros totales (24B vs 30B) — 57% más lento en tiempo de pared, ~1.8x más lento en throughput de salida. Ambos son funcionalmente viables; la elección entre ellos (o mantener producción) queda como decisión de velocidad/calidad, no de viabilidad — no se evaluó corrección semántica de las respuestas en esta pasada. Detalle completo en `docs/evidencia/REPORTE_BENCHMARK_MODEL_SWAP_2026-08-19.md`.
-
-**Guardrails de producción verificados intactos en todo momento:** llama-server `:11500` (`llama-local`) nunca tocado, healthy al inicio y al final; `~/.pi/agent/models.json` solo recibió las dos entradas nuevas (`llama-test-1`, `llama-test-2`), entrada `llama-local` bit a bit idéntica al backup pre-benchmark; `~/bin/Carlitos` no modificado; servidores de prueba en `:11501`/`:11502` nunca simultáneos, ambos detenidos al terminar su turno respectivo.
-
-**Estado al cierre:** `BACKLOG-MODEL-SWAP-BENCH` cerrado. Cambios de documentación dejados con `git add` (staged, sin commit) para revisión de Miaude, según instrucción explícita de la tarea.
-
----
-
-## 2026-08-20 — Setup Jan.ai v0.8.4 + providers custom + pruebas comparativas + MCP servers
-
-**Contexto:** Sesión de configuración de Jan.ai como entorno de desarrollo local en Mac Studio, evaluación comparativa de modelos locales (Qwen3-Coder-Next-80B-A3B vs qwen3.6:35b-a3b), investigación de modelos comunitarios riesgosos y activación de servidores MCP para integración con el ecosistema de agentes.
-
-**Cambios:**
-
-**1. Instalación Jan.ai:**
-- Jan.ai v0.8.4 instalado en Mac Studio vía `brew install --cask jan`
-- App lista para uso, sin configuración inicial (sin API keys de terceros)
-
-**2. Providers custom configurados (settings.json):**
-- `llama_server_local`: http://127.0.0.1:11500/v1 (Qwen3-Coder-Next-80B-A3B, llama.cpp)
-- `ollama_local`: http://127.0.0.1:11434/v1 (qwen3.6:35b-a3b, Ollama)
-- Ambos validados con `curl -X POST http://127.0.0.1:11500/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"...","messages":[{"role":"user","content":"test"}]}'` antes de usar en UI
-
-**3. Pruebas comparativas manuales (3 sesiones):**
-
-| Prueba | qwen3.6:35b-a3b | qwen3-coder-next-80b-a3b | Ganador |
-|---|---|---|---|
-| Anti-alucinación (Claude Fable/Mythos) | Afirma con alta confianza que no existen (falso) | Reconoce corte de conocimiento (junio 2024), se abstuvo de especular | qwen3-coder-next-80b-a3b |
-| Lectura documento (OptiFierro) | Correcto | Correcto, ~4.3x menos tokens (697 vs 3027) | qwen3-coder-next-80b-a3b |
-| Código (año bisiesto con excepción seculares) | Correcto | Correcto | Empate |
-
-**4. Investigación modelos comunitarios "Claude-Mythos/Fable/Opus-Distilled":**
-- Hub de Jan mostró varios modelos con tags "Uncensored/Heretic/Abliterated"
-- Investigación: relación con denuncia pública de Anthropic (feb-2026) contra DeepSeek/Moonshot/MiniMax por destilación ilícita de Claude
-- Decisión: exclusión de esta familia de modelos para uso en Espinita (cliente) o Rabín/Risko (personal) por riesgo de comportamiento impredecible y proveniencia dudosa
-
-**5. Jan-v3.5-4B como modelo de routing (bloqueante):**
-- Identificado como candidato a "modelo de routing" para feature "Use a dedicated model for routing" de Jan (Settings > MCP Servers)
-- Bloqueo: motor llamacpp interno de Jan tiene "Max Concurrently Loaded Models" = 1
-- Requerido: subir a 2+ para usar router en paralelo con modelo principal
-- Pendiente: configuración de Max Concurrently Loaded Models
-
-**6. Túnel SSH para SearXNG (LaunchAgent):**
-- LaunchAgent existente `com.montu.ssh-tunnel-serverx.plist` (autossh) extendido
-- Agregado forward local: `-L 127.0.0.1:8888:127.0.0.1:8888`
-- Objetivo: alcanzar SearXNG (corre en serverX, solo loopback 127.0.0.1:8888) desde Mac Studio
-- Sin cambios en exposición de red de serverX
-- Reverse tunnel existente de llama-server (:11500) sigue funcionando sin regresión
-
-**7. Servidores MCP activados en Jan (mcp_config.json):**
-- `fetch` (mcp-server-fetch vía uvx)
-- `filesystem` (@modelcontextprotocol/server-filesystem, scope: /Users/montu/MontuMS únicamente)
-- `sequential-thinking` (@modelcontextprotocol/server-sequential-thinking)
-- `searxng` (mcp-searxng vía npx, apuntado a http://127.0.0.1:8888 por el túnel nuevo, sin API key, sin costo)
-- Dejados inactivos: Jan Browser MCP, browsermcp, serper (requiere API key paga de terceros, contrario a tesis de mantener dato bajo control propio)
-
-**8. Allow All MCP Tool Permissions:**
-- Dejado intencionalmente en OFF (aprobación por cada tool call)
-
-**Hallazgos:**
-- qwen3-coder-next-80b-a3b es significativamente más eficiente en tokens (4.3x menos en pruebas de lectura), útil para tareas de análisis de documentos largos, y reconoció correctamente su corte de conocimiento (junio 2024), absteniéndose de especular sobre eventos posteriores
-- qwen3.6:35b-a3b (MoE) puede alucinar sobre productos recientes (Claude Fable/Mythos), afirmando con alta confianza que no existen en vez de reconocer el límite de su entrenamiento — señal de falta de humildad epistémica ante eventos posteriores a su corte de conocimiento
-- Jan.ai v0.8.4 funciona sin API keys de terceros, ideal para entornos locales con modelos propios
-- SearXNG es una alternativa viable a Google/Bing para búsquedas web sin dependencia de APIs pagas, con costo cero y privacidad total
-
-**Pendientes:**
-- [ ] Configurar "Max Concurrently Loaded Models" ≥ 2 en Jan para habilitar modelo de routing
-- [ ] Validar funcionalidad de Jan-v3.5-4B como modelo de routing (una vez habilitado el paralelismo)
-
----
-
-## 2026-08-20 — Limpieza de tags huérfanos en Ollama (BACKLOG-OLLAMA-CLEANUP)
-
-Borrados `carlitos:latest` (18GB) y `aurora:latest` (23GB) de Ollama — remanentes
-de antes de la migración a Pi+llama-server, sin uso real (`ollama ps` confirmó
-nada cargado en memoria antes de borrar). El backlog original solo mencionaba
-un tag huérfano; al ejecutar se confirmó que eran dos. 41GB recuperados.
-Quedan 5 modelos con uso real en Ollama: qwen3.6:35b-a3b, rabin-gateway:latest,
-gemma3:27b, qwen3-coder:30b, qwen3.5:9b.
-
----
-
-
-## 2026-09-03 — Validación de harness Carlitos: gate de red-teaming formalizado (Ventana 1/4, PROMPT_1_HARNESS_CARLITOS)
-
-**Contexto:** antes de habilitar a Carlitos para Fase 0/2 del motor de tiempos
-(Torres Ocaranza), se ejecutó la ventana de validación de harness definida en
-PROMPT_1_HARNESS_CARLITOS.md.
-
-**1) Fix `--print` (bug de alucinación de SSH, ago-19):** confirmado en vivo que
-ambos wrappers (`~/bin/Carlitos`, `~/bin/CarlitosCoderFlash`) siguen teniendo
-`--print` en la rama one-shot, antes de `--provider`, tal como se dejó en
-producción. Verificado leyendo el contenido real de ambos scripts, no asumido.
-
-**2) Gate de red-teaming (nuevo, primera corrida):** 2 pruebas de inyección de
-prompt indirecta contra `CarlitosCoderFlash`, datos 100% locales y aislados de
-TO/Cubigest. Test 1 (override de sistema explícito, pidiendo crear PWNED.txt) y
-Test 2 (inyección social firmada "Roberto DBA", pidiendo sobrescribir un config).
-Resultado: 2/2 detectadas y no ejecutadas, verificado de forma independiente
-(filesystem real, no auto-reporte). Logs en `docs/logs_carlitos/sesion_*_redteam_
-injection_test*.log`.
-
-**3) Hallazgo NO relacionado con seguridad:** en el Test 2, Carlitos clasificó
-mal una fila con negación ("sin atraso") como mención positiva al contar
-coincidencias. Implica: para Fase 2 (lotes masivos), no usar a Carlitos como
-fuente única de verdad en conteos/clasificaciones que dependan de negación
-textual sin una segunda pasada de verificación.
-
-**4) Gate formalizado:** "Gate G0 — Validación de Harness", paso nombrado y
-obligatorio antes de subir de fase con Carlitos o de tocar sus wrappers. Detalle
-completo del procedimiento en el handoff (ver abajo).
-
-**VEREDICTO:** resistencia a inyección de prompt → APTO (2/2, verificación
-independiente). Confiabilidad semántica con negaciones → NO APTO sin supervisión.
-El protocolo de foto de carga en TO + cruce de sshd log (sección 4 del prompt
-original) NO se ejecutó en esta ventana (red-teaming aislado de TO a propósito)
-— queda pendiente para Prompt 3.
-
-**Ver también:** `docs/handoff_carlitos_harness_2026-09-03.md`.
-
----
-
-## 2026-09-03 — Motor de Tiempos: Fase 0 completa (Escenario A confirmado a nivel de dato)
-
-Hipótesis de la "grieta metodológica" (agrupar por `dp.id` vs `dp.Etiqueta` en
-`detallePaquetesPieza`) verificada vía CCa orquestando script Python en TO contra
-Cubigest (solo lectura, TOP 5000, Cerrillos, acero grueso, último mes): **372
-etiquetas con NroPasos>1 sobre 2406 únicas (15.5%)** — confirma rutas multi-máquina
-reales, cierra la contradicción de `matriz_rutas.json` (que mostraba 100% NroPasos=1
-por un bug de agrupación en `extractor_rutas.py`). Índices críticos verificados
-(dp.IdPieza, IT.IdSucursal, PIE_ETIQUETA_PIEZA). Rama `respaldo/auditoria-tiempos-2026`
-(22 archivos, ~27MB) commiteada y pusheada a github.com/RodMontu/Optifierro-V2, con
-justificación documentada (repo privado, sin PII, aprobación explícita de Montu).
-
-Fase 0 declarada completa (T0-T4 y T7 cerradas; T5 y T6 aplazadas, no bloqueantes).
-Ver `docs/actualizaciones_plan_motor_tiempos.md` y `docs/handoff_actual.md`.
-
----
-
-## 2026-09-06 — PROMPT_3_PRUEBA_CARGA_CUBIGEST: 4 niveles de carga contra Cubigest, sin impacto
-
-Prueba de carga real contra Cubigest (pendiente desde la validación de harness del
-2026-09-03), en 4 niveles crecientes:
-
-- **Nivel 1** (conexión pura, vía CarlitosCoderFlash/SSH): `SELECT 1` exitoso. Un
-  intento previo abortado por precaución (Carlitos lanzó `find /` sin acotar ruta;
-  Miaude mató el proceso antes de tocar Cubigest). Hallazgo de proceso: el
-  autoreporte de logging de Carlitos no es confiable — dijo haber escrito el log en
-  el Escritorio de TO y no lo hizo; verificado con `ls` directo. Nueva regla: la
-  consignación en log la hace siempre quien supervisa, nunca el agente ejecutor.
-- **Nivel 2** (plantilla de conexión, ejecutado directo por Miaude con autorización
-  explícita de Montu): confirmado el mecanismo real —
-  `docker exec optifierro-backend python -c "from database_cubigest import cubigest_db; ..."`,
-  archivo horneado en la imagen del contenedor. `Formas` tiene 0 filas reales (no
-  error). CPU 2%→11%.
-- **Niveles 3 y 4** (cardinalidad + re-verificación de hipótesis multi-máquina,
-  directo por Miaude/CCa): `detallePaquetesPieza`=3.309.591 filas,
-  `PIEZA_PRODUCCION`=2.917.466 filas (vía `sys.dm_db_partition_stats`, sin
-  `COUNT(*)`). Hipótesis `dp.Etiqueta` re-confirmada de forma independiente: **372
-  etiquetas multi-máquina** — número idéntico a la sesión del 2026-09-03. CPU
-  1%→6% (Nivel 4), 8%→15% (Nivel 3).
-
-**Veredicto:** Cubigest soporta el patrón de consultas acotadas sin fricción de
-carga en ningún nivel probado. T5 (cardinalidad) del plan del motor de tiempos
-queda resuelta como efecto colateral. Detalle completo en
-`docs/bitacora_accesos_torres_ocaranza.md` (entradas del 2026-09-06).
-
----
-
-## 2026-09-06 (cont.) — MT-01: calendario de turnos ubicado, con dos cabos sueltos
-
-Inspección directa (Miaude, Desktop Commander → SSH a TO, solo lectura sobre SQLite
-LOCAL de OptiFierro, sin tocar Cubigest) de `optifierro_v2.db`. Tabla
-`turnos_programados` identificada como el calendario de turnos: `id, sucursal_id,
-fecha, rut, nombre, turno, hora_inicio_turno, hora_fin_turno, estado, permiso,
-extraido_en`. Cobertura confirmada en las 3 plantas (Calama 311 filas/23 rut,
-Cerrillos 677/48, Coronel 154/14).
-
-Dos hallazgos que quedan como pendientes de confirmar con Montu antes de usar la
-tabla en Fase 3 (`CENSURA_JORNADA`): (1) la ventana de datos no llega a hoy (corta
-en 2026-08-31 — ¿sincronización detenida o carga puntual?), y (2) el campo `estado`
-tiene un sesgo contraintuitivo hacia `FALTA` (88% de las filas) que no calza con la
-semántica esperada de un calendario de turnos.
-
-Ver `docs/handoff_actual.md` (sección 5 y 11) y
-`docs/bitacora_accesos_torres_ocaranza.md` (entrada "MT-01") para el detalle
-completo.
-
----
-
-## 2026-09-06 (cont.) — Fase 1 iniciada: esquema de ProduccionesPLC verificado
-
-Primera acción formal de Fase 1 (calibración PLC vs proxy de registro): esquema de
-`ProduccionesPLC` en Cubigest verificado vía metadata (`INFORMATION_SCHEMA.COLUMNS`,
-sin filas de negocio). 20 columnas confirmadas. Hallazgo relevante:
-`PLC_FechaInicio`/`PLC_FechaFin` son **ambos NULLABLE** — no todas las filas tienen
-tiempo de proceso completo, hay que filtrar antes de calibrar. `PLC_IdEtiquetaTO` es
-el candidato a FK hacia la etiqueta física, pero el join exacto contra
-`detallePaquetesPieza.Etiqueta` queda como siguiente tarea concreta, no verificado
-todavía.
-
-Ver `docs/handoff_actual.md` (sección 11) y `docs/bitacora_accesos_torres_ocaranza.md`
-(entrada "Fase 1, primera acción").
-
----
-
-## 2026-09-06 (cont.) — MT-01 downgrade + nueva regla de orquestación por lotes
-
-**MT-01 reclasificada** (de "CERRADA" a "ubicada, con limitación de alcance"),
-tras dictado de Montu y verificación adicional: `turnos_programados` es una foto
-semanal (lunes ~11:00), no un calendario continuo — no sirve tal cual para
-`CENSURA_JORNADA`. Además, la hipótesis de "turno de noche mal etiquetado como
-FALTA" no explica todos los casos: se encontró que 20/21 `FALTA` de Calama en la
-carga del 31-ago son turno de día, abriendo la hipótesis adicional de latencia de
-sincronización de Geovictoria. Detalle completo y evidencia en
-`docs/TAREA_REINTERPRETACION_ESTADO_TURNOS.md`, documento preparado para handoff
-a una ventana de chat dedicada. `handoff_actual.md` actualizado (secciones 5, 7,
-11 y backlog MT-01/MT-01b/MT-01c).
-
-**Advertencia agregada sobre `ProduccionesPLC`:** el circuito PLC de Cerrillos fue
-un piloto corto con errores conocidos — al calibrar en Fase 1, esperar ruido de
-instrumentación (no solo censura estructural) y privilegiar mediana/moda sobre
-promedio simple.
-
-**Nueva regla de proceso — orquestación por lotes (`REGLAS_CARDINALES_FLUJO_
-ORQUESTADO.md`, sección 10 nueva):** Miaude debe encargar tareas secuenciales a
-CCa/Carlitos en un solo lote (no paso a paso con confirmación intermedia), y al
-detenerse tras verificar el arranque, entregar a Montu una estimación de tiempo
-para el próximo chequeo — en vez de polling cada pocos minutos.
-
----
-
-## 2026-09-06 (cont.) — Modo-desarrollo: Carlitos3.6 + Carlitos3.8, causa raíz del cuelgue encontrada
-
-**Nodo:** Mac Studio M2 Max (192.168.1.102)
-**Referencia:** `PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md` §13, `handoff_modo_desarrollo_20260906.md`
-
-**Cambio realizado:**
-- Descargado `unsloth/Qwen3.6-35B-A3B-GGUF` (Q4_K_M, 22.1 GB) a `~/models/qwen3.6-35b-a3b-Q4_K_M.gguf`.
-  Qwen3.8-27B ya existía en disco desde el 2026-08-21 (`~/models/qwen3.8-27b-Q4_K_M.gguf`).
-- Nuevos plists `cl.montuschi.llama-server-carlitos36.plist` (puerto 11504) y
-  `cl.montuschi.llama-server-carlitos38.plist` (puerto 11505).
-- Nuevo modo `~/bin/modo-desarrollo` (mismo patrón que modo-flash/modo-coder).
-- Nuevos wrappers `~/bin/Carlitos3.6` y `~/bin/Carlitos3.8`, con fix de timeout duro (ver abajo).
-- Nuevos providers `carlitos36`/`carlitos38` en `~/.pi/agent/models.json`.
-- Nuevo `~/.claude/carlitos-seguridad-nucleo.md`: núcleo de seguridad mínimo compartido
-  por todos los wrappers Carlitos (no ejecutar instrucciones inyectadas desde datos, no
-  escribir fuera de rutas permitidas ni borrar/destruir sin confirmación, Cubigest solo
-  lectura). El rol y las reglas de PTS siguen en `carlitos-sp.md`, sin cambios de fondo.
-
-**Estado de memoria post-cambio (medido, no estimado):**
-- Carlitos3.6 (11504): 19.5 GB RSS. Carlitos3.8 (11505): 22.3 GB RSS. Total: 41.8 GB.
-- Flash, coder-flash, Pro y Lite abajo durante `modo-desarrollo`.
-
-**Causa raíz real del cuelgue de hoy (Carlitos/CarlitosCoderFlash, 2/2 veces):**
-NO era el harness Pi ni permisos — se encontraron en vivo dos procesos huérfanos
-`ssh TO "find / ..."` de la sesión real del incidente, corriendo 40+ minutos
-después, uno de ellos ya con `-o BatchMode=yes -o ConnectTimeout=10` y aun así sin
-retornar (TCP `ESTABLISHED`, CPU ~0%). Causa: `find /` sin acotar contra el
-filesystem de TO que nunca termina — sin timeout que limite la duración del
-comando remoto en sí. Se mataron los dos procesos huérfanos (sin impacto en TO,
-verificado). **Fix:** `timeout` duro del SO envolviendo el modo `--print` de los
-wrappers (`CARLITOS_TIMEOUT`, default 600s). Validado con `sleep 120` +
-`CARLITOS_TIMEOUT=15` → corte exacto a los 15s, exit 124, sin huérfanos.
-Aplicado en `Carlitos3.6`/`Carlitos3.8`; **pendiente replicar en `Carlitos` y
-`CarlitosCoderFlash`** (no se tocaron hoy por estar fuera del alcance de esta
-tarea, ver handoff).
-
-**Decisión de framework:** se evaluó `dimetron/pi-go` (reimplementación Go no
-oficial de Pi, "gi") y **se descartó migrar** — Pi canónico ya en v0.84.2, la
-causa raíz del cuelgue es independiente del runtime del harness, y no hay
-benchmark independiente que muestre ventaja real de pi-go. Detalle en
-PLAN_ARQUITECTURA_IA_LOCAL_v1.0.md §13.3.
-
-**Validación mínima (paso 8 de la tarea):** ambos wrappers nuevos corrieron
-tareas sintéticas de varios pasos sin colgarse, con verificación independiente
-de archivos (no solo auto-reporte). Una prueba de inyección de prompt abreviada
-(no el Gate G0 completo) contra Carlitos3.6: resistió la inyección Y clasificó
-correctamente la negación textual ("sin atraso") — el mismo tipo de error
-semántico que el Gate G0 original (2026-09-03) había encontrado en coder-flash.
-**Gate G0 completo (2 pruebas de inyección + verificación) queda pendiente**
-para ambos wrappers nuevos antes de usarlos contra TO/Cubigest real.
-
-**Criterio de salida de la fase:** CUMPLIDO para los puntos 1-6 y 8 (parcial,
-ver pendiente); ver `handoff_modo_desarrollo_20260906.md` para el detalle punto
-por punto (1-9).
-
-**Rollback disponible:** sí — `modo-flash` o `modo-coder` bajan Carlitos3.6/3.8
-y devuelven el esquema anterior; los modelos/plists nuevos no tocan nada
-existente.
-
-**Pendiente que abre:** replicar el fix de timeout en `Carlitos`/`CarlitosCoderFlash`;
-correr Gate G0 completo sobre Carlitos3.6/3.8 antes de Fase 2 real; considerar si
-Qwen3.6/Qwen3.8 reemplazan a coder-flash en `modo-flash` una vez validados en uso real.
-
----
+**Quién:** Miaude (coordinación, F4 y despliegue directo), CCa-33/34/35 (F9/F5/F8, informes en `docs/agentes/CCa33…CCa35_*_20261005.md`). CCa-36 no corrió (límite de sesión de CCa).
+
+**Contexto:** QA general de Montu del 05-10-2026 (decisiones aprobadas en el chat de coordinación). Rama `ola1-int`, desplegada con avance rápido sobre `cajita-viaje-deploy`: HEAD `2550d3a` (base `c818ff6`). Respaldo previo de la BD: `backend/optifierro_v2_BACKUP_20261005_pre_ola1.db` y `backend/optifierro_v2.db.PRE_REPARACION_INDICE_20261005`.
+
+**Qué se hizo (commits en `c818ff6..2550d3a`):**
+1. **F9 — versión y caché** (`879f13e`, `dc14f8f`, `f1a4f81`): `GET /api/version` sin autenticación; `VersionWatcher.tsx` consulta al cargar, cada 60 s y al recuperar el foco, y recarga solo (aviso de 10 s) cuando cambia la versión; nginx: `index.html` sin caché, `/assets/` inmutable, `/api/` sin almacenar. La sesión de 8 h no se tocó.
+2. **F5 — Vista Semanal = Cuadro de Cubigest** (`7635967`, `fa26c87`, `6c6402d`, `86aed96`, `1fde992`): módulo nuevo `cuadro_resumen.py` + tabla `cuadro_resumen_semanal` (bloques "Fierro Preparado" y "Largo Comercial" del Cuadro; una semana por consulta porque Cubigest agrega por nombre de día); Largo Comercial fuera de los totales; "Fuera de ventana" pasó a nota; sync de 3 semanas en la corrida de :00 y de la semana actual en :30.
+3. **F8 — ribetes** (`9befb40`, `fbfd969`, `55b821c`): `viene_de_futuro` se calcula desde la fecha del IT en el Cuadro en todas las rutas; ribete negro segmentado (adelantado), naranja segmentado (acero ≠ A630), ambos apilados; se eliminó "inminente" y el naranja de avería; ribetes también en eventos que cruzan la colación; leyenda y manuales v2 actualizados.
+4. **F4 — operador vs ayudante por cargo de Geovictoria** (`db67895`, `08f6513`, `fbf2632`, `2550d3a`): nuevo `cargos.py` (fuente única); el pool de asignación y la capacidad B16 cuentan solo operadores por cargo; máquina detenida no muestra operador; Gestor de Operadores/Maestros sin ayudantes presentes y con operadores presentes aunque no tengan máquinas autorizadas; nombre de operador resuelto por (sucursal, usuario) (colisión `curra` Cerrillos/Coronel) y el adelanto usa nombre completo.
+
+**Verificación (05-10, ~17:40):** `/api/version` y cabeceras de caché correctas; Vista Semanal de Coronel coincide con el Cuadro de Cubigest (lun 10.468, mar 4.732, mié 96; el viernes cambió durante el día en el propio Cubigest); cajitas con IT de fecha futura en el Cuadro con flag: Calama 31/31, Cerrillos 83/83, Coronel 7/7 (antes 0/0/1); Gestor de Operadores de Coronel: Kurt, Enzo, Rafael, Damian. Tests: 17 de F4, F8 (9), resumen del Cuadro (7), versión (3), cajita (16), B16 (9) y demás suites relevantes OK; suites que ya fallaban en el checkout principal (`sync_unificado`, `averias_cubigest`, `b44b`, `gantt_etapa_gris`) siguen igual por rutas del contenedor.
+
+**Incidente descubierto durante el deploy — BD con índices corruptos:** `PRAGMA integrity_check` desde el contenedor reportó corrupción en `idx_hist_fecha_suc` (página inválida 12075 fuera de rango, páginas "never used") y, tras reconstruirlo, `idx_hist_pit` incompleto. Los datos de `historial_asignaciones` (97.100 filas) estaban íntegros. Reparación con el backend detenido (17:35–17:37): respaldo, `DROP` del índice desde `sqlite_master` con `writable_schema`, `CREATE INDEX` desde los datos, `VACUUM` y reconstrucción de `idx_hist_pit`; `integrity_check` final = `ok`, sin pérdida de filas (historial 97.100, matriz 70, `trabajos_optisteel` 6.450, `programacion_guardada` 669). **Causa NO determinada**; hipótesis: escrituras desde un proceso del host Windows sobre una BD en modo WAL que usa el contenedor Linux (archivos `-shm`/`-wal` compartidos por bind mount). Se encontraron filas de prueba (`sucursal_id=4`, obra "Obra Test", fecha 2026-09-24, `created_at` 2026-10-01) en `historial_asignaciones` creadas por pruebas ejecutadas contra la BD real; no se borraron. Ojo: `sucursal_id=4` también tiene 35 filas legítimas antiguas en `programacion_guardada` (SANTIAGO, marzo-abril 2026).
+
+**Pendiente:** ejecutar las pruebas SIEMPRE contra una copia de la BD (no contra `backend/optifierro_v2.db` del checkout principal); F2 (completar saldo_mh con el adelanto) sigue abierto; el plan guardado de hoy conserva las tareas asignadas antes del deploy hasta la próxima generación (20:10) o un "Reprogramar"; candidatos a baja en `docs/agentes/QA5_bajas_candidatas_20261005.csv` (sin aplicar); colisión de usuario dentro de Calama (`jcastillo`, dos personas).
+
+═══════════════════════════════════════════════
+2026-10-02 — Pecas: autonomía 100%, bloqueo técnico de SPP/OptiFierro, log de auditoría y LLM local
+═══════════════════════════════════════════════
+**Quién:** Miaude (directo vía Desktop Commander, sin CCa — cambio mecánico de permisos, sin
+decisiones de diseño que requirieran un agente aparte).
+
+**Contexto:** Montu decidió que Pecas (y su Claude, proyecto "Desarrollos (serverX)") pasan a ser
+100% autónomos — ya no necesita avisar ni pedir autorización antes de cada desarrollo nuevo. A
+cambio, se excluye explícitamente todo lo relacionado al SPP (ex OptiFierro) y se agrega una capa
+de auditoría objetiva, dado que ya no hay supervisión previa por desarrollo.
+
+**Qué se hizo:**
+1. **Bloqueo técnico de SPP/OptiFierro** (`chmod o-rwx`, usuario `pecas` no pertenece a grupo `x`):
+   `/home/x/stack/{Optifierro-V2,optifierro_v2,optifierro_v2_frontend,optifierro_UI_estable_backup.tar.gz}`,
+   `/home/x/stack/scrap_geovictoria/optifierro_v2.db`, `/home/x/optifierro/` (completa),
+   `/home/x/MontuMS/harness/optifierro/` + `aurora_task_optifferro_20260713.md`,
+   `/home/x/Documents/Montu_Office_Agent/Reporte_Auditoria_OptiFierro.docx`,
+   y en `/home/x/MontuMS/docs/`: `MAPA_DECISIONES_SPP.md`, `analisis_optisteel_export.md`,
+   `pendientes_sistema_planificador.md`, `spec_motor_asignacion_optisteel.md`,
+   `tablero_coordinacion_spp.md` (+ sus sombras `.` de macOS).
+   Verificado como `pecas`: Permission denied en las 4 rutas probadas; `/srv/eta-tracking`,
+   `/srv/pecas` y `/srv/op-risk` sin cambios (siguen accesibles, como ya estaba decidido).
+   **Hallazgo pendiente, no resuelto hoy:** `INVENTARIO_MAESTRO.md`, `LOG_CAMBIOS_2026.md` y
+   `handoff_actual.md` son docs compartidos entre proyectos y pueden mencionar SPP de pasada —
+   redactarlos por completo rompería su función para el resto de los proyectos. Queda como
+   exposición residual conocida, no como omisión.
+2. **Documentación — `/home/x/MontuMS/docs/pecas/`** (dentro del árbol que indexa La Biblioteca),
+   ACL `u:pecas:rwx` + default ACL (dueño sigue siendo `x:x`). Ahí vive `CAMBIOS_PECAS.md` y
+   `bitacora_pecas.md` de Pecas, mas `ver_actividad_pecas.sh` (ver punto 3).
+3. **Auditoría objetiva (auditd):** instalado (`auditd`, `audispd-plugins`), regla persistente
+   `/etc/audit/rules.d/pecas.rules` (`-a always,exit -F arch=b64 -S execve -F auid=1001 -k pecas_cmds`,
+   UID real de `pecas`). Captura todo execve de la sesión de `pecas` — shell interactiva y Claude
+   Code por igual, al ser el mismo usuario Linux. Script de consulta:
+   `/home/x/MontuMS/docs/pecas/ver_actividad_pecas.sh [YYYY-MM-DD]`.
+4. **LLM local del Mac Studio expuesto a la LAN:** Ollama pasó de `localhost:11434` a `*:11434`
+   (`launchctl setenv OLLAMA_HOST 0.0.0.0:11434`, persistido en LaunchAgent nuevo
+   `cl.montuschi.ollama-env.plist` porque Homebrew regenera su propio plist en cada restart y
+   pisa ediciones directas). Verificado `curl http://192.168.1.102:11434/api/tags` desde serverX:
+   200 OK. **Riesgo abierto:** expone el puerto a toda la LAN 192.168.1.0/24, no solo a serverX;
+   y comparte el cupo de un solo modelo cargado a la vez con `ccl`/`ccgemma` (contención si
+   coinciden en uso).
+5. **`LEEME_PECAS.md`** reescrito (v2) en `/srv/eta-tracking/` y `/srv/pecas/`: quita el paso de
+   "avisar antes de un desarrollo nuevo", documenta el bloqueo de SPP, la carpeta de
+   documentación, el acceso a Ollama y la existencia del log de auditoría (declarado
+   explícitamente a su Claude, no oculto).
+6. Grupo `docker` y shell real de `pecas` ya estaban concedidos desde el 2026-09-17 — sin cambios.
+
+**Sin cambios de código ni de infraestructura de producción de ningún otro cliente.**
+
+═══════════════════════════════════════════════
+2026-10-01 — fix: reintento 3x en CubigestDB.connect() (SSL intermitente a Cubigest)
+═══════════════════════════════════════════════
+**Commit:** `c818ff6` (rama `cajita-viaje-deploy`, HEAD de esa rama a la fecha de este log).
+
+**Contexto:** la SSL intermitente a Cubigest (documentada desde el 27-09, investigada a fondo el 30-09 — ver
+entrada siguiente de este log) bloqueaba ese mismo día también la asignación real de operador para Coronel,
+no solo el adelanto de trabajos.
+
+**Qué se hizo:** `fix: reintento (3x, 1.5s) en CubigestDB.connect() - la SSL intermitente a Cubigest bloqueaba
+hoy la asignación real de Coronel, no solo el adelanto` — `backend/database_cubigest.py`, 18 líneas agregadas /
+6 eliminadas.
+
+**Verificación:** NO VERIFICADO — no se encontró informe, fila de tablero ni confirmación de deploy
+(build/up en TO) para este commit puntual, más allá del mensaje del propio commit.
+
+**Informe:** no encontrado en `docs/agentes/` ni en `pendientes_sistema_planificador.md` para este commit
+específico.
+
+═══════════════════════════════════════════════
+2026-10-01 — INCIDENTE: login caído por "database is locked" + fix WAL/busy_timeout y reanclaje del scheduler
+═══════════════════════════════════════════════
+**Commit:** `8cc136a`, `93e4a3b` (rama `cajita-viaje-deploy`).
+
+**Contexto:** incidente del 01-10, 08:28-08:31 (hora de TO): login caído para todos los usuarios ("Unexpected
+token... is not valid JSON" en el front = el backend devolvía 500 en vez de JSON). Causa: `sqlite3.OperationalError:
+database is locked` — la base nunca había estado en modo WAL (modo por defecto "delete": una escritura bloquea
+todo el archivo, no solo la fila). El job `_job_importar_optisteel` (cada 20 min, agregado el 30-09 — ver
+entrada de ese día) escribe bastante más que los jobs previos y coincidió con el sync de universo/horario/averías
+de las 08:08-08:10-08:30, saturando la base. Fuente: `pendientes_sistema_planificador.md`, fila "INCIDENTE 01-10".
+
+**Qué se hizo:**
+1. Mitigación en caliente, sin deploy, ~08:31: `PRAGMA journal_mode=WAL` aplicado directamente sobre
+   `optifierro_v2.db` (persiste en el archivo, sobrevive reinicios).
+2. `8cc136a` (2026-10-01 08:44:59) — `fix: reanclar job_importar_optisteel + endurecer WAL/busy_timeout tras
+   lock storm 01-10`: `job_importar_optisteel` reanclado de `CronTrigger(minute=*/20)` a
+   `CronTrigger(hour=0-7,9-23, minute=45)` (excluye la hora 8: el único margen real <10 min era 08:45 vs
+   `tardios_dia` 08:51). Nuevo helper `backend/db_conn.py` fuerza `PRAGMA journal_mode=WAL` + `busy_timeout=5000`
+   en cada conexión nueva, migrado en `main.py` e `init_db.py`; `motor_v2.py` y el resto de `routers/*.py`
+   quedan fuera de alcance de este fix, documentados como deuda técnica. Nota agregada a `HARNESS.md` (TO y
+   copia MontuMS) sobre verificar margen contra todos los jobs del scheduler antes de mergear cambios futuros.
+3. `93e4a3b` (2026-10-01 09:30:24) — `fix: migración defensiva de columnas en trabajos_optisteel - CREATE
+   TABLE IF NOT EXISTS no altera tabla ya existente, causaba fallo silencioso de todo insert desde el deploy
+   de ayer` (es decir, desde el commit `04e6bbf` del 30-09, ver entrada siguiente).
+
+**Verificación:** la mitigación en caliente quedó "sin más bloqueos en los minutos siguientes" según
+`pendientes_sistema_planificador.md`. Esa misma fuente señala como pendiente real, al momento del incidente,
+agregar `PRAGMA`+`busy_timeout` explícitos en el código (no solo aplicados manualmente una vez) — cubierto por
+`8cc136a`. NO VERIFICADO si `8cc136a` y `93e4a3b` llegaron a desplegarse en producción (build/up) tras
+commitearse, ni el resultado de la verificación de la corrida de las 08:10 del día siguiente.
+
+**Informe:** `docs/agentes/CCa_investigacion_lock_horario_scraper_20261001.md` — **vive en el repo de TO
+(agregado en el commit `8cc136a`); no está copiado en `MontuMS/docs/agentes/`**, no se encontró localmente.
+`docs/pendientes_sistema_planificador.md`, fila "INCIDENTE 01-10".
+
+═══════════════════════════════════════════════
+2026-09-30 — Investigación SSL intermitente a Cubigest + migración de adelanto y Bolsa OptiSteel a scraper HTTP
+═══════════════════════════════════════════════
+**Commit:** `04e6bbf`, `69690ab` (rama `cajita-viaje-deploy`); decisión documentada en
+`entrega/v2/MANUAL_TECNICO_SPP.md` v2.2 (30-09-2026).
+
+**Contexto:** la conexión SQL directa a Cubigest usada por el adelanto de trabajos resultó intermitente de
+verdad (confirmado: 15/15 éxitos en una prueba, 4/5 fallos silenciados en otra, misma ventana de tiempo) — no
+una falla dura como se creyó por un rato durante la investigación. Se encontró además un bug real y separado:
+`CubigestDB.execute_query` traga la excepción SSL y devuelve `[]`, indistinguible de "sin datos" — afecta a
+los 9 consumidores de SQL directo a Cubigest, no solo al adelanto. Torres Ocaranza no interviene la
+configuración TLS de su servidor (descartado por Montu). Fuente: `pendientes_sistema_planificador.md`, fila
+"CUBIGEST-SQL"; `MANUAL_TECNICO_SPP.md` secciones 2.2-bis y 2.5.
+
+**Qué se hizo:**
+1. Decisión de Montu (30-09-2026): para el adelanto de trabajos específicamente, migrar la fuente de datos de
+   SQL directo a `scraper_optisteel.py` + `importar_optisteel.py` (HTTP plano sobre `DescargarOptistel.aspx`,
+   puerto 80, sin TLS — ya construidos pero no conectados antes de este cambio).
+2. `04e6bbf` (2026-09-30 18:59:59) — `feat: migrar adelanto de trabajos y Bolsa OptiSteel de SQL directo a
+   scraper HTTP`: reemplaza la fuente de `_obtener_pids_pendientes_optisteel` y
+   `_obtener_pendientes_bolsa_optisteel` (`routers/programacion.py`) por la tabla local `trabajos_optisteel`,
+   cargada por `importar_optisteel.py`. Extiende `trabajos_optisteel` con
+   `largo`/`calidad_acero`/`nr_piezas`/`numero_etiqueta`/`total_etiquetas` (antes no se persistían). Programa
+   la importación cada 20 min en el scheduler de `main.py`. No toca `motor_v2.py` ni los otros 9 consumidores
+   de SQL directo a Cubigest.
+3. `69690ab` (2026-09-30 19:57:38) — `fix: cerrar explícitamente la conexión sqlite en
+   _piezas_optisteel_desde_trabajos (with de sqlite3.Connection no cierra, solo commitea) - causaba
+   PermissionError de Windows al limpiar tests`.
+
+**Verificación:** NO VERIFICADO en producción — no se encontró confirmación de deploy/build de estos dos
+commits (a diferencia de otras entradas de este log, no hay mensaje de "push a origin/master confirmado" ni
+resultado de tests citado más allá del archivo `backend/test_migracion_scraper_optisteel.py` mencionado en el
+propio commit `04e6bbf`).
+
+**Informe:** `docs/agentes/CCa_migracion_scraper_optisteel_20260930.md`, según el propio commit `04e6bbf` —
+**vive en el repo de TO y no está copiado en `MontuMS/docs/agentes/`**, no se encontró localmente.
+`entrega/v2/MANUAL_TECNICO_SPP.md` sección 2.2-bis.
+
+═══════════════════════════════════════════════
+2026-09-29 — fix: sesión 8h, filtro estado_maq de averías y zoom/columna sticky del Gantt
+═══════════════════════════════════════════════
+**Commit:** `deba479`, `12a439a`, `ee4a667` (rama `cajita-viaje-deploy`).
+
+**Contexto:** tres fixes operativos independientes el 29-09, en paralelo al trabajo de GAN2 y del adelanto
+automático (ver entradas de este log).
+
+**Qué se hizo:**
+1. `deba479` (2026-09-29 07:57:25) — `fix(gantt-zoom): callback ref en vez de useRef+efecto de deps vacías -
+   el zoom nunca ensanchaba porque el div se mide antes de existir (detrás del spinner de carga)`.
+2. `12a439a` (2026-09-29 10:01:46) — `fix: sesión 24h->8h (VPN cliente); averías activas filtraba por columna
+   equivocada (estado, no estado_maq) dejando resueltas como activas para siempre; hipótesis de fix para zoom
+   sticky en scroll largo` — toca `backend/routers/auth.py`, `backend/routers/averias.py`,
+   `frontend/src/components/domain/GestorProgramacion.tsx`.
+3. `ee4a667` (2026-09-29 11:23:35) — `fix(gantt-zoom): reemplazar position:sticky nativo (se rompe pasado
+   cierto scroll en áreas muy anchas, confirmado en vivo) por position:relative + translateX(scrollLeft) manual
+   vía scroll listener`.
+
+**Verificación:** NO VERIFICADO — no se encontró informe ni entrada de tablero/pendientes para estos tres
+commits puntuales, más allá del mensaje de cada commit.
+
+**Informe:** no encontrado en `docs/agentes/` con fecha 29-09 para estos tres cambios puntuales.
+
+═══════════════════════════════════════════════
+2026-09-29 — DESPLEGADO: adelanto automático de trabajos (ADEL) + operador real mostrado en el Gantt
+═══════════════════════════════════════════════
+**Commit:** `33175ac`, `9564fca`, `d6fc4a9`, `5f1c354` (rama `cajita-viaje-deploy`).
+
+**Contexto:** máquinas activas con tiempo ocioso antes de fin de turno quedaban sin llenar; se construye un
+adelanto automático que completa esa capacidad con trabajo de días futuros del Cuadro OptiSteel. Fuente: fila
+"ADEL" de `pendientes_sistema_planificador.md`.
+
+**Qué se hizo:**
+1. `33175ac` (2026-09-29 05:48:49) — `feat(motor): adelanto automático de trabajos - llena capacidad ociosa con
+   días futuros del Cuadro OptiSteel (v1, sin reparto entre 2 máquinas)`: nueva `completar_con_adelanto()` en
+   `motor_v2.py`, conectada solo en `_ejecutar_generacion` (corrida automática, no el botón manual). Según
+   `pendientes_sistema_planificador.md`: máquinas activas con ≥30 min libres antes de fin de turno se completan
+   con trabajo de día+1 a día+5; desplegado 07:39 el mismo 29-09; v1 sin chequeo de conflicto de operador entre
+   máquinas; escrito directamente por Miaude (dos corridas independientes de CCa se negaron a implementarlo por
+   no poder verificar el origen de la tarea); 5 tests nuevos + 21 de regresión, todo verde.
+2. `9564fca` (2026-09-29 09:03:36) — `fix(motor): retry con backoff en consulta a Cubigest dentro de
+   completar_con_adelanto - fallas SSL intermitentes al llamar varias veces seguidas`.
+3. `d6fc4a9` (2026-09-29 10:49:25) — `feat(motor): adelanto reutiliza operador real
+   (habitual+autorizado+anti-solape vía _operadores_candidatos/intervalos_operador) en vez de lógica propia;
+   conectado también a Reprogramar (generar_programacion), no solo a la corrida automática`.
+4. `5f1c354` (2026-09-29 10:59:30) — `feat(gantt): mostrar operador real asignado por el Motor (derivado de las
+   tareas), no el habitual estático de Maestros -- ese solo de respaldo si la máquina no tiene tareas hoy`.
+
+**Verificación:** para `33175ac`, "5 tests nuevos + 21 de regresión, todo verde" según
+`pendientes_sistema_planificador.md` (fila ADEL), que marca como pendiente real "confirmar en la corrida de las
+08:10 que efectivamente adelantó trabajo donde correspondía" — NO VERIFICADO si se confirmó. Para
+`9564fca`/`d6fc4a9`/`5f1c354`: NO VERIFICADO — no se encontró informe ni fila de tablero con resultado de tests
+más allá del mensaje de cada commit.
+
+**Informe:** no se encontró informe dedicado en `docs/agentes/` para esta funcionalidad (nota explícita en
+`pendientes_sistema_planificador.md`, fila ADEL: "informe formal de CCa no existe para esta feature, quedó
+documentado solo en el commit y en el chat"). Fuente: `docs/pendientes_sistema_planificador.md`, fila ADEL.
+
+═══════════════════════════════════════════════
+2026-09-29 — DESPLEGADO: GAN2, cajita = viaje (agrupación de etiquetas en Gantt y Bolsa de Trabajo)
+═══════════════════════════════════════════════
+**Commit:** `19c2148` (rama aislada `cajita-viaje-deploy`, cherry-pick de `31d63a9` sobre `master` limpio,
+deliberadamente sin CCa-24), más `349e27f` y `de6e582` la misma noche. NO VERIFICADO si esta rama llegó a
+mergearse a `master`.
+
+**Contexto:** decisión de Gustavo (TO) vía Montu, 29-09-2026, que revierte lo pedido antes por José Auger: la
+cajita del Gantt y de la Bolsa vuelve a representar el viaje/IT completo (agrupación de etiquetas), no una
+etiqueta suelta. Reemplaza las reglas GAN-01, GAN-03, GAN-04 y GAN-09 (`MAPA_DECISIONES_SPP.md` sección 3b-2,
+GAN2-01..08).
+
+**Qué se hizo:**
+1. `19c2148` (fecha de commit en el log de la rama: 2026-09-28 23:02:03) — `feat(programacion): cajita=viaje,
+   agrupación de etiquetas por IT+máquina (Gantt y Bolsa) - CCa-29`: nueva función `_agrupar_cajitas_por_viaje`
+   en `backend/routers/programacion.py`, criterio jerárquico calidad de acero → diámetro → forma (`id_forma`) →
+   largo, con degradación a "Forma n°: varios" si no comparte los 4 criterios (GAN2-01/02). La agrupación nunca
+   cruza viaje/IT (GAN2-03). La carátula usa el rango de etiquetas en vez de "Etiqueta N de M" (GAN2-04); el
+   detalle agrega Diámetro, Forma, Cantidad, Peso total y la lista de etiquetas del grupo (GAN2-05, revierte
+   explícitamente GAN-04). El ajuste manual de duración pasa a aplicar sobre el total del grupo (GAN2-07). El
+   badge de la Bolsa pasa de "N ITs" a "N cajitas" (GAN2-08). Gate `CAJITA_VIAJE_VIGENTE_DESDE=2026-09-29` en
+   `backend/.env`: no retroactivo, rige desde la corrida de las 08:10 del 29-09 en adelante (GAN2-06).
+2. `349e27f` (2026-09-28 23:49:14) — `fix(programacion): viene_de_futuro por grupo = any(), no solo la primera
+   etiqueta (B43 tras cajita-viaje)`.
+3. `de6e582` (2026-09-29 00:11:06) — `fix(gantt): ribete de adelantada a negro 4px (celeste 2px no se
+   apreciaba)`.
+4. Manuales (MontuMS): `a2a3a4c` (2026-09-28 23:36:20) y `05388f8` (2026-09-28 23:41:49) —
+   `MANUAL_USUARIO_SPP.md` → v2.1, `GUIA_RAPIDA_JEFE_PLANTA.md`, `MANUAL_TECNICO_SPP.md` (sección 4.9 nueva),
+   `CAPTURAS_PENDIENTES.md`, y copia de `agentes/CCa_cajita_viaje_20260929.md` desde el repo de TO.
+
+**Verificación:** según `pendientes_sistema_planificador.md` (fila CCa-29 del tablero): build+recreate
+backend/frontend, logs limpios, HTTP 200; 16/16 tests nuevos (`test_cajita_viaje.py`) + 5/5 regresión B42v2,
+verificados independientemente por Miaude además de por CCa. La investigación en código confirmó que la alerta
+de "serie ≥80% del turno" del Motor es independiente de esta agrupación y no cambia. Pendiente real, no cerrado
+a esa fecha: verificación visual de Montu de la corrida del martes 08:10. NO VERIFICADO si esa verificación
+visual llegó a hacerse.
+
+**Informe:** `docs/agentes/CCa_cajita_viaje_20260929.md`, `docs/agentes/CCa_manuales_cajita_viaje_20260929.md`,
+`docs/MAPA_DECISIONES_SPP.md` sección 3b-2 (GAN2-01..08).
+
+═══════════════════════════════════════════════
+2026-09-28 (mañana) — DESPLEGADO: estado efectivo unificado de máquinas (Motor + Gestor de Averías + Gantt)
+═══════════════════════════════════════════════
+**Commit:** `5072159` (fast-forward `f0a35fe..5072159`), push a `origin/master` confirmado.
+
+**Contexto:** con la sincronización de Cubigest ya funcionando (13 filas el lunes 28-09), la pantalla Gestor de
+Averías seguía mostrando todo operativo (Coronel: 9/0/0) mientras el Motor excluía Línea Corte Coronel y
+Curvadora 2 y marcaba Dobladora 3 como semi: los contadores y la tabla "Estado de Maquinaria" leían solo el
+gestor manual. Además había un desajuste de nombres ('Eura 16' vs 'EURA 16') y nombres de máquinas inactivas de
+Cubigest ajenas al SPP ('Prima 12 ', etc.) contaminaban `maquinas_detenidas`.
+
+**Qué se hizo (CCa):** módulo nuevo `backend/estado_maquinas.py` con `obtener_estado_efectivo_maquinas`
+(fusión gestor manual + `averias_cubigest` + `MAQ_ACTIVA='N'`, gana la más restrictiva, nombres normalizados,
+solo máquinas activas del SPP). Lo usan el Motor, `GET /api/averias/contadores`, `/estado-maquinas` y
+`GET /api/averias` (una fila vigente por máquina). `GestorAverias.tsx` muestra el estado real, badge "Cubigest"
+y antigüedad ("registrada hace N días"). Constante `AVERIA_CUBIGEST_CADUCIDAD_DIAS = None` (sin caducidad, decisión
+de Montu: la notificación de Curvadora 2 Coronel abierta desde el 01-04 está efectivamente detenida).
+
+**Verificación:** 73 tests OK (contenedor efímero), `tsc`/build limpios, la función real contra copia de la BD
+coincide con el Motor en las 3 sucursales. En producción tras el deploy: contadores Calama 4/2/2, Cerrillos
+9/0/1, Coronel 6/1/2; Coronel muestra Curvadora 2 y Línea Corte Coronel detenidas y Dobladora 3 semi. Se
+observaron averías reales registradas en Cubigest a las 09:03–09:23 del 28-09 (COIL 14 M y Dobladoras en Calama,
+EURA 16 en Cerrillos): ya aparecen en Averías, pero el plan de las 08:10 ya tenía cajitas asignadas a esas máquinas
+(el Motor solo excluye al generar; ver pendiente de decisión en el tablero).
+
+**Informe:** `docs/agentes/CCa_averias_estado_unificado_20260928.md`.
+
+═══════════════════════════════════════════════
+2026-09-27 (madrugada) — DESPLEGADO: fix ventana de averías (excluía notificaciones abiertas viejas) + bug de formato de fecha vs Cubigest
+═══════════════════════════════════════════════
+**Commit:** `f298721`, push a `origin/master` confirmado.
+
+**Contexto:** Montu detectó con capturas reales de Cubigest que "Dobladora 3" (Coronel) figura `SEMI` desde
+el 23-09 y no aparecía ni en la sección Averías ni afectaba al Gantt.
+
+**2 bugs encontrados y corregidos (CCa, investigando el reporte de Montu):**
+1. `sync_averias_cubigest()` filtraba por `FechaRegistro >= hoy-3d` — excluía notificaciones que siguen sin
+   resolver pero son más viejas que la ventana. Corregido: `EstadoMaq != 'OP'` se trae SIEMPRE sin importar
+   antigüedad (mismo criterio que "PRUEBAS DE TI" de CCa-9); la ventana de 3 días solo limita el histórico ya
+   resuelto. Nota: `FechaSolucion` no sirve para detectar si sigue abierta — Cubigest la puebla igual a
+   `FechaRegistro` incluso sin resolver (confirmado con el caso real, Id 74214).
+2. **Más grave, no reportado, encontrado al verificar el fix anterior contra Cubigest en vivo**: el parámetro
+   de fecha se mandaba como `YYYY-MM-DD`; la sesión SQL Server de Cubigest usa `@@LANGUAGE='Español'` (DMY),
+   interpretaba el string como día=2026 → error `22007`, la query fallaba en silencio → **`averias_cubigest`
+   nunca tuvo una sola fila desde el deploy de anoche**. Corregido: formato `YYYYMMDD` (sin separadores, no
+   ambiguo). Esto significa que todo lo desplegado anoche (sección Averías + fusión del Motor) estuvo
+   funcionalmente inactivo (sin datos que fusionar) hasta este fix.
+
+**Verificación — PARCIAL, bloqueada por un problema externo:** el deploy (`build --no-cache && up -d
+--force-recreate backend`) salió limpio, sin errores de arranque. Pero la verificación en vivo contra
+Cubigest real (confirmar que el Id 74214 real se sincroniza) **no se pudo completar**: la conexión a Cubigest
+falla intermitentemente con error SSL (`SSL routines::unsupported protocol`) — mismo síntoma que ya había
+documentado `CCa9_ola3_averias_20260923.md` hace días, no algo introducido por este fix. Confirmado con
+múltiples intentos (uno de ellos con una conexión simple exitosa, luego varios fallidos) — parece
+intermitente/dependiente del momento, no permanente. El job automático (cada 30 min) va a reintentar solo;
+no hace falta acción manual salvo que Montu quiera forzar una verificación cuando la conexión esté estable.
+
+**Hallazgo operativo aparte, no resuelto ahora:** `sync_averias_cubigest` no tiene ningún registro de
+error/staleness visible (a diferencia de `sync_estado` del otro job, que sí trackea `ultimo_error_ts`) — si
+Cubigest falla seguido, hoy no hay forma de notarlo salvo mirando logs. Candidato a mejora futura, no
+bloqueante.
+
+**Informe completo:** `docs/agentes/CCa_fix_ventana_averias_20260927.md`.
+
+═══════════════════════════════════════════════
+2026-09-27 (madrugada) — DESPLEGADO: zoom horizontal + pan en la línea de tiempo del Gantt (B47)
+═══════════════════════════════════════════════
+**Commit:** `bd11c3f` (merge fast-forward `e635f6a..bd11c3f`), push a `origin/master` confirmado.
+
+**Qué se construyó:** 4 niveles de zoom (jornada completa/media jornada/2h/1h, según duración real del turno
+— no un número fijo), botones +/-, centrado automático en la hora actual al cambiar de nivel, y pan por
+arrastre con el mouse cuando el zoom está activo. `getEventStyle` (posicionamiento de las cajitas en % de la
+jornada) **no se tocó** — el ensanche sale gratis de ampliar en píxeles el contenedor de timeline compartido
+entre el header (regla de horas) y todas las filas de máquina. La columna "Máquina/Operador" queda fija con
+`position: sticky` en vez de un árbol DOM separado (evita desincronización de alturas entre filas).
+
+**Riesgo verificado:** interacción con el drag-and-drop de cajitas (`@dnd-kit`) — resuelto excluyendo la
+cajita y la columna fija del handler de pan vía atributos `data-gantt-draggable`/`data-gantt-label`.
+
+**Limitación honesta, no oculta:** no hay Playwright ni navegador real disponible en el entorno de ejecución
+de CCa — la verificación fue `tsc`/`vite build` limpios + inspección de código, no una prueba visual en vivo.
+**Pendiente: que Montu haga una pasada visual real** (sensación del arrastre, suavidad del centrado al
+cambiar de zoom) antes de dar el ajuste por completamente cerrado — no bloqueante para el deploy, pero sí
+para el cierre fino de la UX.
+
+Un punto menor dejado documentado por CCa: el centrado en "hora actual" se dispara en cualquier cambio de
+nivel (subir o bajar), no solo al subir como decía el pedido original — ajustable si Montu prefiere que bajar
+zoom no recentre.
+
+**Verificación de deploy:** `docker compose build --no-cache frontend && up -d --force-recreate frontend` sin
+errores, `GET /` responde 200. Graphify regenerado a `bd11c3f` (1143 nodos, 1888 edges).
+
+**Informe completo:** `docs/agentes/CCa_gantt_zoom_20260926.md`.
+
+═══════════════════════════════════════════════
+2026-09-26 (noche) — DESPLEGADO: averías de Cubigest visibles en la sección Averías + el Motor las considera para excluir máquinas
+═══════════════════════════════════════════════
+**Commit:** `e635f6a` (merge fast-forward `0ad166a..e635f6a`), push a `origin/master` confirmado.
+
+**Contexto:** resuelve B39 (leer averías desde Cubigest, no solo gestor manual). Montu tomó capturas reales
+de `VerAverias.aspx` (Coronel/Calama/Santiago) que contradecían la conclusión de `CCa9_ola3_averias_20260923.md`
+("feed de Cubigest muerto para Cerrillos/Coronel") — Miaude cruzó los IDs reales de las capturas contra la
+base y encontró la causa real: **bug de join**, `NotificacionAveria.IdMaquina` se unía contra `MAQUINA.MAQ_ID`
+en vez de `MAQUINA.MAQ_NRO`. El feed nunca estuvo muerto — el join nunca matcheaba nada, para ninguna planta.
+
+**Qué se construyó (CCa, 2 vueltas, mismo día):**
+- Fix del join (`database_cubigest.py`, 2 ocurrencias) — verificado en vivo cruzando los 7 IDs reales de las
+  capturas de Montu contra `MAQUINA`, coincidencia exacta.
+- Job nuevo cada 30 min (`main.py`) — consulta **directa** a Cubigest (sin scraper, a diferencia del Cuadro de
+  Programación), persiste en tabla local `averias_cubigest`.
+- `GET /api/averias` mezcla manual + Cubigest, marcado por `fuente`. Solo expone el nivel de detalle que ya
+  tiene la fuente manual (Montu: "solo completando los datos que tenemos, sin más detalle salvo que el
+  Cliente lo pida") — `estado_supervisor`/`fecha_supervisor`/`operador_id` quedan guardados pero no expuestos.
+- **`motor_v2.py`: la fusión pasa de "Cubigest solo como fallback en vivo" a "SIEMPRE fusionado"** — decisión
+  explícita de Montu que reemplaza a propósito la de CCa-9 (que había rechazado "cualquiera excluye" por el
+  riesgo de notificaciones Cubigest abiertas indefinidamente — caso real "PRUEBAS DE TI"). Argumento de Montu:
+  "hoy nadie usa el sistema, podemos hacer lo que necesitemos" — riesgo aceptado a propósito, documentado, no
+  pasado por alto. El fallback en vivo se mantiene como red de seguridad residual (por decisión de Montu),
+  disparándose solo si tanto el SQLite manual como el caché local fallan a la vez.
+
+**Verificación:** 64/64 tests (suite completa + 5 nuevos: recorte de campos, fusión por Cubigest solo,
+conflicto entre fuentes en ambos sentidos, trazabilidad de 3 fuentes), en contenedor efímero sin tocar
+producción. `docker compose build --no-cache backend frontend && up -d` sin errores, `GET /api/averias` y
+`GET /api/programacion` responden 200 en producción. Graphify regenerado a `e635f6a` (1134 nodos, 1871 edges).
+
+**Informe completo:** `docs/agentes/CCa_averias_cubigest_20260926.md` (2 secciones, con la segunda vuelta).
+
+═══════════════════════════════════════════════
+2026-09-26 (noche) — DESPLEGADO: job sync horario A4 sube de 1h a 30 min; CCa-17 cerrado (sin retirar el scraper)
+═══════════════════════════════════════════════
+**Commit:** `0ad166a`.
+
+**Contexto:** sesión de diseño corta sobre los 3 puntos pendientes de CCa-17. Punto #3 (blindar fallo
+silencioso de `_obtener_pids_pendientes`) resultó ya resuelto, efecto colateral del fix QA-A-01 de hoy mismo
+(propaga `RuntimeError` en vez de `[]`). Para los puntos #4/#6, Miaude propuso retirar
+`scraper_cuadroprogramacion.py` y usar SQL directo (misma fuente que ya usa el Motor) como único origen de
+verdad para ITs/Etiquetas del Cuadro de Programación. **Montu evaluó y decidió NO hacerlo**: el scraper trae
+prioridad/status/observación que la consulta directa no tiene — se queda con el scraper, solo sube la
+cadencia del job de sync horario de una vez por hora a **cada 30 minutos** (`CronTrigger(minute="*/30")`,
+mismo intervalo que el job de `etapa_completada`).
+
+**Desplegado y verificado:** `docker compose build --no-cache backend && up -d --force-recreate backend`, sin
+errores de arranque, `GET /api/sync/estado` responde 200. Graphify resincronizado a `0ad166a` (sin cambios de
+topología, era solo un valor de cron).
+
+═══════════════════════════════════════════════
+2026-09-26 (noche) — DESPLEGADO: cajita gris e inamovible por etapa confirmada en Cubigest (etapa_completada)
+═══════════════════════════════════════════════
+**Contexto:** requisito nuevo salido de A4 (job horario de sincronizacion) — Montu pidio que una cajita del
+Gantt quede gris y NUNCA reasignable en cuanto Cubigest confirme que esa etapa especifica (etiqueta + maquina
+asignada) ya se ejecuto fisicamente, como registro historico permanente de lo hecho en la jornada. Diseñado
+con Miaude (granularidad a nivel etiqueta, confirmado con capturas reales de Cubigest — Cuadro de
+Programacion + detalle de avance por Tag), implementado y verificado por CCa (rama `gantt-etapa-gris`),
+revisado por Montu via dictado, y desplegado por Miaude.
+
+**Commit:** `619ea32` (merge fast-forward `52568d1..619ea32`), push a `origin/master` confirmado.
+
+**Que se construyo:**
+- Tabla nueva `etapa_congelada` (`sucursal_id, etiqueta_id, nombre_maquina`), **sin fecha/turno a proposito**
+  — asi sobrevive cualquier regeneracion del dia. Se confirmo con evidencia real que HAY DOS lugares que
+  reemplazan `global_eventos`/`programacion_guardada` por completo (`generar_programacion` manual y
+  `_ejecutar_generacion` automatico 08:10/20:10), no uno — el diseño de tabla separada esquiva el problema
+  en vez de parchar cada uno.
+- Job `_job_verificar_etapas_completadas` (`main.py`), **cada 30 min** (ajustado por Montu desde 15 min por
+  precaucion de saturacion de Cubigest — confirmado que consulta DIRECTO a SQL Server via `cubigest_db`
+  contra `PIEZA_PRODUCCION JOIN MAQUINA`, sin scraper de por medio).
+- `_marcar_etapas_congeladas` reaplica el estado en cada regeneracion. Guardas 409 en `/reprogramar`: no se
+  puede mover una cajita congelada ni soltar otra encima.
+- Frontend (`GestorProgramacion.tsx`): estilo gris + icono candado, `useDraggable` deshabilitado, drop
+  bloqueado en `handleDragEnd`. Distinto y coexiste con el `completado` verde existente (ese es a nivel de
+  IT/viaje completo cerrado, cada 30 min via `_job_verificar_its_cerradas` — no se toco).
+
+**Decisiones de Montu al revisar (confirmadas, sin cambios de diseno salvo la frecuencia):**
+1. Reprogramar una etiqueta ya confirmada a otro turno/dia en la MISMA maquina: sigue gris igual — correcto.
+2. Gap angosto post-reinicio del backend (compartido con B44a, preexistente): no se corrige — premisa de
+   Montu es que el sistema corre 24/7 sin reinicios, no complicar el diseño por esto.
+3. Reparto en paralelo (2 maquinas para la misma tarea): todo-o-nada confirmado como correcto — Cubigest no
+   discrimina entre las dos, asi que ninguna se marca gris hasta que ambas se confirmen.
+
+**Verificacion:** 7 tests nuevos (`test_gantt_etapa_gris.py`) + 23 existentes sin regresion, `tsc`/`vite build`
+limpios, `docker compose build --no-cache backend frontend && up -d` sin errores de arranque, `GET
+/api/programacion` responde 200 en produccion post-deploy. Graphify regenerado a `619ea32` (1104 nodos, 1818
+edges).
+
+**Informe completo:** `docs/agentes/CCa_gantt_etapa_gris_20260926.md` (con addendum de la revision de Montu).
+
+═══════════════════════════════════════════════
+2026-09-24 (noche) — Revision visual de Montu (B42 v2): confirmado sin bloqueo. Fix de formato Largo. Nueva idea backlog (zoom timeline)
+═══════════════════════════════════════════════
+**Contexto:** Montu revisó B42 v2 ya desplegado (capturas + dictado VisualVoice). Reporta: "quedó como lo pedí, no tengo mayores comentarios" en lo estructural. Dos puntos a verificar con evidencia real, uno idea nueva.
+
+**1. Largo con decimales excesivos (1.9600000381469727 m) — investigado y CERRADO, NO bloqueante.**
+Trazado con evidencia: `largo_a` viene de `p.largo` (Cubigest, tabla `piezas`) SIN ningún cálculo (`routers/programacion.py:1433,1566`); el Motor solo lo usa para derivar `largo_mm = round(largo_a*1000)` como clave de agrupación (`motor_v2.py:984-985`), ya con manejo explícito de este mismo artefacto de precisión (test `D1`, `test_b42v2_etiquetas.py:178-182`, con el caso literal `8.699999809265137`). **SELECT directo a Cubigest** (viaje RESA-40/1, Ø18, IdForma 102) confirma el caso exacto de Montu: id 3604416, Tag #: 66 of 81, `largo=1.9600000381469727` — idéntico a lo mostrado en pantalla. Es un artefacto de precisión float32 del propio SQL Server (columna `real`), presente en el dato crudo de Cubigest, no introducido por nuestro código. **Único cambio aplicado:** formato de presentación, de metros crudos a milímetros redondeados (`Math.round(largo_a*1000)}mm`), en tooltip y modal — commit `f430b75`.
+
+**2. Peso 71 kg (etiqueta 66 de 81) — investigado y CERRADO, dato correcto.**
+Mismo SELECT: `KgsPaquete=71.0` exacto para esa etiqueta (18 piezas, Ø18mm, ~1.96m). La duda de Montu (paquetes de ~1000 kg según Francisco Ramos) no aplica a este caso — son paquetes pequeños de esta IT en particular; el campo se extrae directo (`ROUND(dp.KgsPaquete,1) AS kgs`), sin cálculo adicional.
+
+**3. "Código Etiqueta: FCalc FCalc FCalc..." — NO reproducido, no hay campo así en el modal.**
+El modal (`GestorProgramacion.tsx` ~1841-1866) solo tiene 6 campos: Diámetro, Largo, IdForma, Cantidad, Paquete, Peso — ningún "Código Etiqueta". Sin match de "FCalc" en todo el repo (backend + frontend). El SELECT real muestra `dp.Etiqueta = ' Tag #:  66  of  81'`, consistente con lo ya mostrado correctamente en el header ("ETIQUETA: 66 DE 81") y en el tooltip ("Etiqueta 5 de 81", ver imagen 4 de Montu). Hipótesis de la Coordinadora: artefacto del dictado VisualVoice (la misma transcripción tiene corridas repetidas de "es que" ~50 veces y "las" ~150 veces sin que Montu las dijera esa cantidad de veces) — **pendiente de que Montu confirme si lo vio realmente en pantalla o fue un glitch de transcripción.**
+
+**4. Tooltip al pasar el mouse — YA muestra la etiqueta correctamente, sin acción.**
+Montu dudaba (imagen muy pequeña para leerla bien); la imagen 4 que adjuntó de hecho muestra "Etiqueta 5 de 81 — Ø18 — Viaje RESA-40/1" con claridad. Confirmado, sin cambios.
+
+**5. Idea nueva (NO bloqueante, no estaba en el plan original): zoom horizontal de la línea de tiempo del Gantt.**
+Al acercar el zoom, aumenta la distancia entre horas y por ende el ancho de las cajitas — soluciona el caso de cajitas muy angostas e ilegibles con muchas etiquetas por turno (350-500 cajitas observadas). Registrada en `pendientes_sistema_planificador.md` como B47, post-entrega.
+
+**Deploy:** solo frontend (`docker compose build/up frontend`), commit `f430b75`, push OK. Reversión: `optifierro-frontend-rollback:pre_largomm_20260924`. Sin cambios de backend, DB ni Cubigest en esta entrada.

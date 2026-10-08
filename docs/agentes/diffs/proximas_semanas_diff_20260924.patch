@@ -1,0 +1,441 @@
+diff --git a/backend/routers/calendario_futuro.py b/backend/routers/calendario_futuro.py
+index 50233b0..0c242a4 100644
+--- a/backend/routers/calendario_futuro.py
++++ b/backend/routers/calendario_futuro.py
+@@ -1,6 +1,10 @@
+ """
+ Router: /api/calendario-futuro
+-Propósito: Vista de ITs pendientes agrupadas en 3 semanas futuras.
++Propósito: Vista de ITs pendientes agrupadas en 3 semanas futuras, más un
++bloque de atrasadas (arriba) y uno de muy futuras / sin fecha confiable
++(abajo), con los mismos filtros de avance/estado/FP-LC que usa el universo
++real (QA-A-02 — hasta ahora esta vista no filtraba avance<100 ni excluía
++FP-LC, por eso sobreestimaba >2x frente a Compromisos Futuros).
+ Query separada de _obtener_pids_pendientes (FP-007 — no tocar motor_v2.py).
+ Sucursal IDs (SQLite/API): Calama=1, Cerrillos=10, Coronel=14.
+ Mapeo a Cubigest vía get_cubigest_sucursal_ids() (ej. 10→4).
+@@ -10,6 +14,11 @@ import logging
+ from datetime import date, timedelta
+ from fastapi import APIRouter, Query
+ 
++from motor_v2 import es_despacho_directo
++from universo_fechas import clasificar_fecha  # noqa: contrato acordado 24-09
++# (universo_fechas.py aun no existe en este worktree — lo crea otra ventana
++# en paralelo; ver CCa_proximas_semanas_20260924.md, "NO VERIFICADO end-to-end")
++
+ router = APIRouter(prefix="/api", tags=["calendario_futuro"])
+ logger = logging.getLogger(__name__)
+ DB_PATH = "optifierro_v2.db"
+@@ -17,6 +26,11 @@ DB_PATH = "optifierro_v2.db"
+ _MESES = ["ene", "feb", "mar", "abr", "may", "jun",
+           "jul", "ago", "sep", "oct", "nov", "dic"]
+ 
++# Ventana amplia para poder clasificar atrasada-suciedad y muy-futura sin
++# arrastrar fechas basura (2090/2099 vistas en Cerrillos, ver spec §2).
++_VENTANA_ATRAS_DIAS = 800
++_VENTANA_ADELANTE_DIAS = 900
++
+ 
+ def _fmt_label(inicio: date, fin: date) -> str:
+     return f"{inicio.day} {_MESES[inicio.month - 1]} – {fin.day} {_MESES[fin.month - 1]}"
+@@ -25,58 +39,76 @@ def _fmt_label(inicio: date, fin: date) -> str:
+ @router.get("/calendario-futuro")
+ def obtener_calendario_futuro(sucursal_id: int = Query(..., description="ID sucursal OptiFierro (1, 10, 14)")):
+     """
+-    Retorna ITs pendientes de fabricar agrupadas en 3 semanas futuras.
++    Retorna ITs pendientes de fabricar: bloque de atrasadas, 3 semanas
++    futuras (hoy → hoy+20) y bloque de muy futuras / sin fecha confiable.
+     Fuente: Cubigest (SELECT only) cruzada con it_detenida (SQLite).
+-    Rango: hoy → hoy+20 (semana1: +0..+6, semana2: +7..+13, semana3: +14..+20).
++    Mismos filtros que el universo real: avance<100, estado IT/pieza/viaje
++    vigente, FP-LC excluido (es_despacho_directo, motor_v2.py).
+     """
+     from database_cubigest import cubigest_db
+ 
+     cub_ids = cubigest_db.get_cubigest_sucursal_ids(sucursal_id)
+     placeholders = ",".join(["?"] * len(cub_ids))
+ 
+-    # CTE para calcular fecha_despacho una sola vez (FechaDespacho con fallback FechaEntrega)
++    # Granularidad por etiqueta (no por IT): necesitamos IdForma/largo/diametro
++    # de cada pieza para excluir FP-LC etiqueta por etiqueta antes de sumar
++    # kg por IT — una IT puede mezclar etiquetas FP-LC y no-FP-LC.
+     query = f"""
+-        WITH datos AS (
+-            SELECT
+-                it.Id                                                   AS id_it,
+-                v.Codigo                                                AS codigo_viaje,
+-                o.nombre                                                AS obra,
+-                it.Estado                                               AS estado,
+-                CAST(ISNULL(
+-                    NULLIF(CAST(it.FechaDespacho AS DATE), '19000101'),
+-                    NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
+-                ) AS DATE)                                              AS fecha_despacho,
+-                dp.KgsPaquete                                           AS kgs_paquete,
+-                dp.id                                                   AS dp_id
+-            FROM IT it
+-            JOIN Obras o                 ON o.id = it.IdObra
+-            JOIN Viaje v                 ON v.IdIt = it.Id
+-            JOIN detallePaquetesPieza dp ON dp.IdViaje = v.Id
+-            WHERE it.IdSucursal IN ({placeholders})
+-              AND it.Estado IN ('PEN', 'IET', 'APR', 'ING')
+-              AND v.estado <> '00'
+-        )
+         SELECT
+-            id_it,
+-            codigo_viaje,
+-            obra,
+-            estado,
+-            fecha_despacho,
+-            ROUND(SUM(kgs_paquete), 1)                              AS kgs_total,
+-            COUNT(DISTINCT dp_id)                                   AS n_etiquetas,
+-            DATEDIFF(day, CAST(GETDATE() AS DATE), fecha_despacho)  AS dias_hasta_despacho
+-        FROM datos
+-        WHERE fecha_despacho BETWEEN CAST(GETDATE() AS DATE)
+-                                 AND DATEADD(day, 20, CAST(GETDATE() AS DATE))
+-        GROUP BY id_it, codigo_viaje, obra, estado, fecha_despacho
+-        ORDER BY fecha_despacho ASC
++            dp.id                                                   AS etiqueta_id,
++            it.Id                                                   AS id_it,
++            v.Codigo                                                AS codigo_viaje,
++            o.nombre                                                AS obra,
++            it.Estado                                               AS estado,
++            p.IdForma                                               AS id_forma,
++            p.largo                                                 AS largo_a,
++            p.diametro                                              AS diametro,
++            dp.KgsPaquete                                           AS kgs_paquete,
++            CAST(ISNULL(
++                NULLIF(CAST(it.FechaDespacho AS DATE), '19000101'),
++                NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
++            ) AS DATE)                                              AS fecha_despacho,
++            CAST(rep.FechaCompromiso2 AS DATE)                      AS fecha_ultima_reprog
++        FROM IT it
++        JOIN Obras o                 ON o.id = it.IdObra
++        JOIN Viaje v                 ON v.IdIt = it.Id
++        JOIN detallePaquetesPieza dp ON dp.IdViaje = v.Id
++        JOIN piezas p                ON p.Id = dp.idpieza
++        CROSS APPLY (
++            SELECT MAX(pz.PIE_AVANCE) AS avance_pct
++            FROM PIEZA_PRODUCCION pz
++            WHERE pz.PIE_ETIQUETA_PIEZA = dp.id
++        ) av
++        LEFT JOIN (
++            SELECT IdIT, MAX(FechaMod) AS FechaCompromiso2
++            FROM Reprogramar_IT
++            GROUP BY IdIT
++        ) rep ON rep.IdIT = it.Id
++        WHERE it.IdSucursal IN ({placeholders})
++          AND it.Estado IN ('PEN', 'IET', 'APR', 'ING')
++          AND v.estado <> '00'
++          AND p.estado NOT IN ('00', 'O40', 'O60')
++          AND ISNULL(av.avance_pct, 0) < 100
++          AND ISNULL(
++                  NULLIF(CAST(it.FechaDespacho AS DATE), '19000101'),
++                  NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
++              )
++              BETWEEN DATEADD(day, -{_VENTANA_ATRAS_DIAS}, CAST(GETDATE() AS DATE))
++                  AND DATEADD(day, {_VENTANA_ADELANTE_DIAS}, CAST(GETDATE() AS DATE))
+     """
+ 
+     try:
+-        rows = cubigest_db.execute_query(query, tuple(cub_ids))
++        filas = cubigest_db.execute_query(query, tuple(cub_ids))
+     except Exception as exc:
+         logger.error(f"calendario_futuro Cubigest error (sucursal {sucursal_id}): {exc}")
+-        rows = []
++        return {"error": f"Cubigest no disponible: {exc}", "semanas": [], "atrasadas": None, "muy_futuras": None}
++
++    # B45: FP-LC (despacho directo) no entra al universo de demanda — misma
++    # regla que _obtener_pids_pendientes en programacion.py.
++    pendientes = [
++        f for f in filas
++        if not es_despacho_directo(f.get("id_forma"), f.get("largo_a"), f.get("diametro"))
++    ]
+ 
+     # Cruzar con it_detenida (SQLite)
+     detenidas: set = set()
+@@ -91,48 +123,96 @@ def obtener_calendario_futuro(sucursal_id: int = Query(..., description="ID sucu
+     except Exception as exc:
+         logger.warning(f"calendario_futuro SQLite it_detenida error: {exc}")
+ 
+-    # Definir 3 semanas
+     hoy = date.today()
++
++    # Clasificar cada etiqueta y agrupar por IT dentro de cada categoría.
++    por_it_semana: dict[tuple, list] = {}
++    por_it_atrasadas: dict[tuple, list] = {}
++    por_it_muy_futuras: dict[tuple, list] = {}
++
++    for f in pendientes:
++        fecha_raw = f.get("fecha_despacho")
++        if fecha_raw is None:
++            continue
++        if isinstance(fecha_raw, date):
++            fd = fecha_raw
++        else:
++            try:
++                fd = date.fromisoformat(str(fecha_raw)[:10])
++            except ValueError:
++                continue
++
++        reprog_raw = f.get("fecha_ultima_reprog")
++        horizonte = None
++        if reprog_raw is not None:
++            fr = reprog_raw if isinstance(reprog_raw, date) else None
++            if fr is None:
++                try:
++                    fr = date.fromisoformat(str(reprog_raw)[:10])
++                except ValueError:
++                    fr = None
++            if fr is not None:
++                horizonte = (fd - fr).days
++
++        categoria = clasificar_fecha(fd, horizonte)
++        clave = (f.get("id_it"), f.get("codigo_viaje"), f.get("obra"), f.get("estado"), fd)
++
++        if categoria in ("atrasada_valida", "atrasada_suciedad"):
++            por_it_atrasadas.setdefault(clave, []).append(f)
++        elif categoria == "muy_futura":
++            por_it_muy_futuras.setdefault(clave, []).append(f)
++        elif 0 <= (fd - hoy).days <= 20:
++            # "proxima"/"lejana_normal" que caen dentro de las 3 semanas vigentes.
++            por_it_semana.setdefault(clave, []).append(f)
++
++    def _agrupar_its(mapa: dict) -> list:
++        its = []
++        for (id_it, codigo_viaje, obra, estado, fd), etiquetas in mapa.items():
++            kg_total = sum(float(e.get("kgs_paquete") or 0) for e in etiquetas)
++            its.append({
++                "codigo_viaje": codigo_viaje,
++                "obra": obra,
++                "estado": estado,
++                "fecha_despacho": fd.isoformat(),
++                "dias_hasta_despacho": (fd - hoy).days,
++                "kgs": round(kg_total, 1),
++                "n_etiquetas": len(etiquetas),
++                "detenida": codigo_viaje in detenidas,
++            })
++        its.sort(key=lambda x: x["fecha_despacho"])
++        return its
++
++    # 3 semanas (sin cambio de rango: hoy..+20)
+     semanas_def = [
+-        (1, hoy,                    hoy + timedelta(days=6)),
+-        (2, hoy + timedelta(days=7), hoy + timedelta(days=13)),
++        (1, hoy,                     hoy + timedelta(days=6)),
++        (2, hoy + timedelta(days=7),  hoy + timedelta(days=13)),
+         (3, hoy + timedelta(days=14), hoy + timedelta(days=20)),
+     ]
+-
++    todas_semana = _agrupar_its(por_it_semana)
+     semanas = []
+     for num, inicio, fin in semanas_def:
+-        its_semana = []
+-        for row in rows:
+-            fecha_raw = row.get("fecha_despacho")
+-            if fecha_raw is None:
+-                continue
+-            # fecha_despacho puede llegar como date o como string
+-            if isinstance(fecha_raw, date):
+-                fd = fecha_raw
+-            else:
+-                try:
+-                    fd = date.fromisoformat(str(fecha_raw)[:10])
+-                except ValueError:
+-                    continue
+-            if inicio <= fd <= fin:
+-                its_semana.append({
+-                    "codigo_viaje": row.get("codigo_viaje"),
+-                    "obra": row.get("obra"),
+-                    "estado": row.get("estado"),
+-                    "fecha_despacho": fd.isoformat(),
+-                    "dias_hasta_despacho": int(row.get("dias_hasta_despacho") or 0),
+-                    "kgs": float(row.get("kgs_total") or 0),
+-                    "n_etiquetas": int(row.get("n_etiquetas") or 0),
+-                    "detenida": row.get("codigo_viaje") in detenidas,
+-                })
+-
+-        kg_total = sum(it["kgs"] for it in its_semana)
++        its_semana = [it for it in todas_semana if inicio <= date.fromisoformat(it["fecha_despacho"]) <= fin]
+         semanas.append({
+             "numero": num,
+             "label": _fmt_label(inicio, fin),
+-            "kg_total": round(kg_total, 1),
++            "kg_total": round(sum(it["kgs"] for it in its_semana), 1),
+             "n_its": len(its_semana),
+             "its": its_semana,
+         })
+ 
+-    return {"semanas": semanas}
++    its_atrasadas = _agrupar_its(por_it_atrasadas)
++    its_muy_futuras = _agrupar_its(por_it_muy_futuras)
++
++    return {
++        "semanas": semanas,
++        "atrasadas": {
++            "n_its": len(its_atrasadas),
++            "kg_total": round(sum(it["kgs"] for it in its_atrasadas), 1),
++            "its": its_atrasadas,
++        },
++        "muy_futuras": {
++            "n_its": len(its_muy_futuras),
++            "kg_total": round(sum(it["kgs"] for it in its_muy_futuras), 1),
++            "its": its_muy_futuras,
++        },
++    }
+diff --git a/frontend/src/components/domain/CalendarioFuturo.tsx b/frontend/src/components/domain/CalendarioFuturo.tsx
+index 2b8f38a..9537c90 100644
+--- a/frontend/src/components/domain/CalendarioFuturo.tsx
++++ b/frontend/src/components/domain/CalendarioFuturo.tsx
+@@ -20,8 +20,17 @@ interface Semana {
+   its: ITCalendario[];
+ }
+ 
++interface BloqueFecha {
++  n_its: number;
++  kg_total: number;
++  its: ITCalendario[];
++}
++
+ interface CalendarioResponse {
+   semanas: Semana[];
++  atrasadas?: BloqueFecha | null;
++  muy_futuras?: BloqueFecha | null;
++  error?: string;
+ }
+ 
+ interface Props {
+@@ -146,11 +155,78 @@ function ModalDetalleCalendario({
+   );
+ }
+ 
++function BloqueResumen({
++  titulo,
++  leyenda,
++  bloque,
++  colorClass,
++  expanded,
++  onToggle,
++  onSelectIT,
++}: {
++  titulo: string;
++  leyenda: string;
++  bloque: BloqueFecha;
++  colorClass: string;
++  expanded: boolean;
++  onToggle: () => void;
++  onSelectIT: (it: ITCalendario) => void;
++}) {
++  if (bloque.n_its === 0) return null;
++  return (
++    <div className={`border rounded-xl overflow-hidden shadow-sm ${colorClass}`}>
++      <button
++        onClick={onToggle}
++        className="w-full p-3 flex items-center justify-between gap-3 text-left"
++      >
++        <div>
++          <p className="text-xs font-bold uppercase tracking-wide">{titulo}</p>
++          <p className="text-[11px] mt-0.5 opacity-80">{leyenda}</p>
++        </div>
++        <div className="text-right shrink-0">
++          <p className="text-lg font-extrabold">{(bloque.kg_total / 1000).toFixed(1)} ton</p>
++          <p className="text-[11px] opacity-80">
++            {bloque.n_its} {bloque.n_its === 1 ? 'IT' : 'ITs'} · {expanded ? 'ocultar ▲' : 'ver detalle ▼'}
++          </p>
++        </div>
++      </button>
++      {expanded && (
++        <div className="overflow-y-auto border-t" style={{ maxHeight: '40vh' }}>
++          {bloque.its.map(it => (
++            <div
++              key={it.codigo_viaje}
++              className={`p-3 border-b border-l-4 last:border-b-0 bg-white cursor-pointer hover:bg-slate-50 transition-colors ${cardBorderClass(it.dias_hasta_despacho, it.detenida)}`}
++              onClick={() => onSelectIT(it)}
++            >
++              <div className="flex items-center gap-1.5 mb-0.5">
++                {it.detenida && <Lock className="w-3 h-3 text-amber-500 shrink-0" />}
++                <p className="font-bold text-xs text-gray-800 truncate">{it.codigo_viaje}</p>
++              </div>
++              <p className="text-xs text-gray-500 mb-1.5 truncate">{it.obra}</p>
++              <div className="flex items-center gap-1.5 flex-wrap">
++                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${estadoBadgeClass(it.estado)}`}>
++                  {it.estado}
++                </span>
++                <span className="text-[10px] text-gray-500 ml-auto">{(it.kgs / 1000).toFixed(1)} t</span>
++                <span className="text-[10px] text-gray-400">
++                  {it.dias_hasta_despacho >= 0 ? `+${it.dias_hasta_despacho}d` : `${it.dias_hasta_despacho}d`}
++                </span>
++              </div>
++            </div>
++          ))}
++        </div>
++      )}
++    </div>
++  );
++}
++
+ export default function CalendarioFuturo({ sucursalId, onPlanificarSemana }: Props) {
+   const [data, setData] = useState<CalendarioResponse | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+   const [selectedIT, setSelectedIT] = useState<ITCalendario | null>(null);
++  const [showAtrasadas, setShowAtrasadas] = useState(false);
++  const [showMuyFuturas, setShowMuyFuturas] = useState(false);
+ 
+   useEffect(() => {
+     const token = localStorage.getItem('auth_token');
+@@ -177,20 +253,32 @@ export default function CalendarioFuturo({ sucursalId, onPlanificarSemana }: Pro
+     );
+   }
+ 
+-  if (error) {
++  if (error || data?.error) {
+     return (
+       <div className="flex items-center justify-center h-64 text-red-500 text-sm">
+-        Error cargando calendario: {error}
++        Error cargando calendario: {error ?? data?.error}
+       </div>
+     );
+   }
+ 
+   return (
+-    <div className="p-4 h-full">
+-      <h2 className="text-lg font-bold mb-4" style={{ color: '#111827' }}>
++    <div className="p-4 h-full flex flex-col gap-4">
++      <h2 className="text-lg font-bold" style={{ color: '#111827' }}>
+         Próximas 3 Semanas
+       </h2>
+ 
++      {data?.atrasadas && (
++        <BloqueResumen
++          titulo="Atrasado"
++          leyenda="Fecha de despacho vencida (incluye atrasos >30 días, fuera de toda vista de demanda normal)"
++          bloque={data.atrasadas}
++          colorClass="border-red-300 bg-red-50 text-red-800"
++          expanded={showAtrasadas}
++          onToggle={() => setShowAtrasadas(v => !v)}
++          onSelectIT={setSelectedIT}
++        />
++      )}
++
+       <div className="flex flex-row gap-4 items-start">
+         {(data?.semanas ?? []).map((semana, idx) => {
+           const headerStyle = SEMANA_HEADER_STYLES[idx] ?? SEMANA_HEADER_STYLES[2];
+@@ -292,6 +380,18 @@ export default function CalendarioFuturo({ sucursalId, onPlanificarSemana }: Pro
+         })}
+       </div>
+ 
++      {data?.muy_futuras && (
++        <BloqueResumen
++          titulo="Sin fecha confirmada / muy futura"
++          leyenda="No considera ITs con fecha de despacho mayor a 60 días, o reprogramadas por el cliente/TO con fecha poco confiable"
++          bloque={data.muy_futuras}
++          colorClass="border-slate-300 bg-slate-50 text-slate-700"
++          expanded={showMuyFuturas}
++          onToggle={() => setShowMuyFuturas(v => !v)}
++          onSelectIT={setSelectedIT}
++        />
++      )}
++
+       {selectedIT && (
+         <ModalDetalleCalendario item={selectedIT} onClose={() => setSelectedIT(null)} />
+       )}

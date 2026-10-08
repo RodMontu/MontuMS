@@ -1,0 +1,62 @@
+From 2508cb2bc483bb100ade8cc1969b78db5c3a6f7c Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Wed, 23 Sep 2026 22:58:03 -0300
+Subject: [PATCH] feat(gantt): ribete visual para cajitas adelantadas desde
+ dias futuros (dias_atraso<0) + leyenda, 3 plantas - B43
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ .../components/domain/GestorProgramacion.tsx  | 19 ++++++++++++++++++-
+ 1 file changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index 38f1ef1..12cd5e5 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -349,6 +349,13 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+     const isUrgente   = !isCompletado && ev.prioridad === 'URGENTE';
+     const isNoLiberada = ev.estado === 'programado-no-liberada';
+     const isSemi      = ev.estado === 'programado-semi-operativa';
++    // B43: "viene del futuro" — el Cuadro OptiSteel programo esta etiqueta
++    // para hoy pero su fecha real de despacho/entrega (Cubigest) es
++    // posterior (dias_atraso negativo). SUPUESTO: se usa dias_atraso tal
++    // cual ya lo calcula el backend contra la fecha real de hoy (sin
++    // umbral extra) — Montu marco la forma final del indicador como
++    // "provisional, por definir".
++    const vieneDeFuturo = !isCompletado && (ev.dias_atraso ?? 0) < 0;
+     const baseStyle   = getEventStyle(ev.fecha_inicio, ev.fecha_fin);
+ 
+     // P1 — Color por obra; excepción: borde ámbar si calidad != A630
+@@ -383,11 +390,17 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+     const seg2LeftPct  = spansBreak ? ((bRight - evLeft)  / evWidth) * 100 : 0;
+     const seg2WidthPct = spansBreak ? ((evRight - bRight) / evWidth) * 100 : 0;
+ 
++    // B43: ribete punteado celeste — no compite con el border de obraColorStyle
++    // (completado/no-A630) ni con el borderTop de estadoMaqStyle.
++    const futuroStyle: React.CSSProperties = vieneDeFuturo
++        ? { outline: '2px dashed #0ea5e9', outlineOffset: '-2px' }
++        : {};
++
+     const outerStyle: React.CSSProperties = {
+         ...baseStyle,
+         ...(transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`, zIndex: 50 } : {}),
+         opacity: isDragging ? 0.5 : isCompletado ? 0.75 : 1,
+-        ...(spansBreak ? {} : { ...obraColorStyle, ...estadoMaqStyle }),
++        ...(spansBreak ? {} : { ...obraColorStyle, ...estadoMaqStyle, ...futuroStyle }),
+     };
+ 
+     // P2 — Texto siempre blanco, nítido, sin blur
+@@ -2105,6 +2118,10 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                             <span className="w-3 h-3 rounded-sm bg-red-100 border border-red-300 inline-block" />
+                             Detenida
+                         </span>
++                        <span className="flex items-center gap-1.5">
++                            <span className="w-3 h-3 rounded-sm bg-white dark:bg-slate-800" style={{ outline: '2px dashed #0ea5e9', outlineOffset: '-2px' }} />
++                            Adelantada (viene de días futuros)
++                        </span>
+                     </div>
+                 )}
+ 
+-- 
+2.54.0.windows.1
+

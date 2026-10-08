@@ -1,0 +1,272 @@
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 5735cca..6db1487 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -12,5 +12,5 @@ from models import (
+     ReprogramarRequest
+ )
+-from motor_v2 import programar_turno, ConocimientoMotor
++from motor_v2 import programar_turno, ConocimientoMotor, _get_config_turno, _ventana_turno
+ 
+ GEOVICTORIA_URL = os.getenv("GEOVICTORIA_API_URL", "http://192.168.1.111:8002")
+@@ -363,8 +363,17 @@ def obtener_programacion(sucursal: int, turno: str, fecha: str):
+         pendientes = [p for p in pendientes if str(p.get("id")) not in _ids_en_eventos]
+ 
++    # B35: el turno YA resuelto (misma cadena que /generar y el Motor) viaja en cada GET.
++    # Si no se puede resolver NO se inventa una hora: metadata=None y el frontend avisa.
++    try:
++        metadata_turno = _resolver_turno_gantt(sucursal, fecha, turno_norm_get)
++    except Exception as e:
++        logger.error(f"[B35] No se pudo resolver el turno (suc={sucursal} turno={turno_norm_get} fecha={fecha}): {e}")
++        metadata_turno = None
++
+     return {
+         "recursos": recursos,
+         "eventos": eventos,
+-        "pendientes": pendientes
++        "pendientes": pendientes,
++        "metadata": metadata_turno,
+     }
+ 
+@@ -931,4 +940,43 @@ def _ventana_desde_turnos_programados(sucursal_id: int, fecha: str, turno: str)
+ 
+ 
++def _resolver_ventana_override(sucursal_id: int, fecha: str, turno_norm: str) -> tuple:
++    """
++    B35 - UNICA fuente de la ventana (+15 min inicio / -15 min fin).
++    Prioridad 1: turnos_programados (SQLite). Prioridad 2: API Geovictoria.
++    Retorna (inicio_ov, fin_ov, fuente). Si no hay datos: (None, None, "jornada_config"),
++    y el Motor cae a la jornada configurada (_get_config_turno prioridades 2/3).
++    """
++    inicio_ov, fin_ov = _ventana_desde_turnos_programados(sucursal_id, fecha, turno_norm)
++    if inicio_ov:
++        return inicio_ov, fin_ov, "turnos_programados"
++    inicio_ov, fin_ov = _ventana_desde_geovictoria(sucursal_id, turno_norm)
++    if inicio_ov:
++        return inicio_ov, fin_ov, "geovictoria"
++    return None, None, "jornada_config"
++
++
++def _resolver_turno_gantt(sucursal_id: int, fecha: str, turno_norm: str) -> dict:
++    """
++    B35 - Turno YA resuelto, tal como lo usa el Motor: misma cadena de override
++    + la MISMA _get_config_turno / _ventana_turno de motor_v2 (la regla NO se reimplementa).
++    Lo consumen el GET de pantalla (metadata) y, via _resolver_ventana_override, POST /generar.
++    """
++    if turno_norm not in ("dia", "noche"):
++        raise ValueError(f"turno invalido: {turno_norm!r}")
++    inicio_ov, fin_ov, fuente = _resolver_ventana_override(sucursal_id, fecha, turno_norm)
++    config = _get_config_turno(turno_norm, fecha, sucursal_id, inicio_ov, fin_ov)
++    h_ini, h_fin, b_ini, b_fin = _ventana_turno(fecha, config)
++    return {
++        "sucursal_id":       sucursal_id,
++        "fecha":             fecha,
++        "turno":             turno_norm,
++        "hora_inicio_turno": h_ini.strftime("%H:%M"),
++        "hora_fin_turno":    h_fin.strftime("%H:%M"),
++        "break_inicio":      b_ini.strftime("%H:%M"),
++        "break_fin":         b_fin.strftime("%H:%M"),
++        "fuente":            fuente,
++    }
++
++
+ # ─────────────────────────────────────────────
+ # ENDPOINT: Generar programación con motor_v2
+@@ -997,8 +1045,8 @@ async def generar_programacion(solicitud: SolicitudProgramacion, request: Reques
+         operadores_disponibles = _obtener_operadores_disponibles(solicitud.sucursal_id, conocimiento, turno_norm)
+ 
+-    # Ventana horaria: prioridad 1 turnos_programados (SQLite local), fallback GV API
+-    inicio_ov, fin_ov = _ventana_desde_turnos_programados(solicitud.sucursal_id, solicitud.fecha_produccion, turno_norm)
+-    if not inicio_ov:
+-        inicio_ov, fin_ov = _ventana_desde_geovictoria(solicitud.sucursal_id, turno_norm)
++    # Ventana horaria (B35): misma funcion que usa el GET de pantalla - una sola fuente de verdad
++    inicio_ov, fin_ov, _fuente_ventana = _resolver_ventana_override(
++        solicitud.sucursal_id, solicitud.fecha_produccion, turno_norm
++    )
+ 
+     resultado = programar_turno(
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index aa76c5d..e067125 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -891,6 +891,12 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+     const [argumentoLoading, setArgumentoLoading] = useState(false);
+     const [capacidadMaxKg, setCapacidadMaxKg] = useState(50000);
+-    const [jornadaInicio, setJornadaInicio] = useState<string | null>(null);
+-    const [jornadaFin, setJornadaFin] = useState<string | null>(null);
++    // B35: el turno resuelto (+15 min inicio / -15 min fin) viene SIEMPRE del backend
++    // (GET /api/programacion y POST /generar). Se guarda por clave sucursal|turno|fecha para
++    // no usar jamas el turno de otra vista. Sin fallbacks locales: si falta, aviso visible.
++    type TurnoGantt = { hora_inicio_turno: string; hora_fin_turno: string; break_inicio: string; break_fin: string; fuente?: string };
++    const [turnosGantt, setTurnosGantt] = useState<Record<string, TurnoGantt | null>>({});
++    const turnoKey = `${sucursal}|${turnoGlobal}|${fecha}`;
++    const turnoGantt: TurnoGantt | null = turnosGantt[turnoKey] ?? null;
++    const turnoSinResolver = turnoKey in turnosGantt && !turnosGantt[turnoKey];
+     const [estadosAveriasMaquinas, setEstadosAveriasMaquinas] = useState<Record<string, string>>({});
+     const [undoState, setUndoState] = useState<{ tarea_id: string; maquina_origen: string; maquina_destino: string } | null>(null);
+@@ -946,5 +952,5 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+     };
+ 
+-    // Carga capacidad máxima y jornada configurable desde backend al cambiar sucursal/turno
++    // Carga capacidad máxima desde backend al cambiar sucursal
+     useEffect(() => {
+         fetch('/api/sucursales/config')
+@@ -952,15 +958,5 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+             .then(cfg => { if (cfg && cfg[sucursal]) setCapacidadMaxKg(cfg[sucursal]); })
+             .catch(() => {});
+-        const turnoKey = turnoGlobal === 'Noche' ? 'noche' : 'dia';
+-        fetch(`/api/sucursales/${sucursal}/jornada`)
+-            .then(r => r.ok ? r.json() : null)
+-            .then(j => {
+-                if (j?.[turnoKey]) {
+-                    setJornadaInicio(j[turnoKey].inicio);
+-                    setJornadaFin(j[turnoKey].fin);
+-                }
+-            })
+-            .catch(() => {});
+-    }, [sucursal, turnoGlobal]);
++    }, [sucursal]);
+ 
+     // Fetch personal disponible (operadores/ayudantes GeoVictoria) al cambiar sucursal o turno
+@@ -1102,4 +1098,11 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                 }));
+                 setMetadata(result.metadata);
++                const mg = result.metadata;
++                if (mg?.hora_inicio_turno && mg?.hora_fin_turno && mg?.break_inicio && mg?.break_fin) {
++                    setTurnosGantt(prev => ({ ...prev, [`${sucursal}|${turnoGlobal}|${fecha}`]: {
++                        hora_inicio_turno: mg.hora_inicio_turno, hora_fin_turno: mg.hora_fin_turno,
++                        break_inicio: mg.break_inicio, break_fin: mg.break_fin, fuente: 'motor',
++                    } }));
++                }
+             }
+         } catch (err) {
+@@ -1238,5 +1241,10 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                 const dropCenterX = dropRect.left + dropRect.width / 2;
+                 const pct = rowRect.width > 0 ? (dropCenterX - rowRect.left) / rowRect.width : 0;
+-                nuevaHoraInicio = getHoraFromPercent(pct);
++                const horaSoltada = getHoraFromPercent(pct);
++                if (!horaSoltada) {
++                    alert('⚠️ No se puede posicionar la cajita: el servidor no entregó el horario del turno.');
++                    return;
++                }
++                nuevaHoraInicio = horaSoltada;
+             } else if (eventosMaquina.length > 0) {
+                 // Fallback: no se pudo medir el punto de soltado, ir al final de la fila
+@@ -1245,5 +1253,10 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+             } else {
+                 // Fallback: máquina vacía y sin medición, ir al inicio del turno
+-                nuevaHoraInicio = getHoraFromPercent(0);
++                const horaInicioTurno = getHoraFromPercent(0);
++                if (!horaInicioTurno) {
++                    alert('⚠️ No se puede posicionar la cajita: el servidor no entregó el horario del turno.');
++                    return;
++                }
++                nuevaHoraInicio = horaInicioTurno;
+             }
+ 
+@@ -1403,4 +1416,11 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+ 
+                 setData(normalizedData);
++
++                // B35: turno resuelto por el backend (unica fuente de verdad). Sin dato => null => aviso visible.
++                const mt = json?.metadata;
++                const turnoRecibido: TurnoGantt | null = (mt?.hora_inicio_turno && mt?.hora_fin_turno && mt?.break_inicio && mt?.break_fin)
++                    ? { hora_inicio_turno: mt.hora_inicio_turno, hora_fin_turno: mt.hora_fin_turno, break_inicio: mt.break_inicio, break_fin: mt.break_fin, fuente: mt.fuente }
++                    : null;
++                setTurnosGantt(prev => ({ ...prev, [`${sucursal}|${turnoGlobal}|${fecha}`]: turnoRecibido }));
+             })
+             .catch(err => setError(err.message))
+@@ -1548,7 +1568,9 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+ 
+     const getEventStyle = (inicio: string, fin: string) => {
++        // B35: sin turno resuelto por el backend no se dibuja (el aviso visible explica por que). No se inventa hora.
++        if (!turnoGantt) return { left: '0%', width: '0%' };
+         const esNoche = turnoGlobal === 'Noche';
+-        const inicioTurno = metadata?.hora_inicio_turno ?? jornadaInicio ?? (esNoche ? '20:10' : '08:00');
+-        const finTurno    = metadata?.hora_fin_turno    ?? jornadaFin    ?? (esNoche ? '05:45' : '17:45');
++        const inicioTurno = turnoGantt.hora_inicio_turno;
++        const finTurno    = turnoGantt.hora_fin_turno;
+         const parseHHMM   = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+         const inicioMins  = parseHHMM(inicioTurno);
+@@ -1572,8 +1594,10 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+ 
+     // Inversa de getEventStyle: de un % horizontal dentro de la fila de timeline a la hora real que representa
+-    const getHoraFromPercent = (pct: number) => {
++    const getHoraFromPercent = (pct: number): Date | null => {
++        // B35: sin turno resuelto no se puede convertir % -> hora; el llamador bloquea y avisa.
++        if (!turnoGantt) return null;
+         const esNoche = turnoGlobal === 'Noche';
+-        const inicioTurno = metadata?.hora_inicio_turno ?? jornadaInicio ?? (esNoche ? '20:10' : '08:00');
+-        const finTurno    = metadata?.hora_fin_turno    ?? jornadaFin    ?? (esNoche ? '05:45' : '17:45');
++        const inicioTurno = turnoGantt.hora_inicio_turno;
++        const finTurno    = turnoGantt.hora_fin_turno;
+         const parseHHMM   = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+         const inicioMins  = parseHHMM(inicioTurno);
+@@ -1595,7 +1619,8 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+ 
+     const breakStyle = (() => {
++        if (!turnoGantt) return null;
+         const esNoche = turnoGlobal === 'Noche';
+-        const inicioTurno = metadata?.hora_inicio_turno ?? jornadaInicio ?? (esNoche ? '20:10' : '08:00');
+-        const finTurno    = metadata?.hora_fin_turno    ?? jornadaFin    ?? (esNoche ? '05:45' : '17:45');
++        const inicioTurno = turnoGantt.hora_inicio_turno;
++        const finTurno    = turnoGantt.hora_fin_turno;
+         const parseHHMM = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+         const inicioMins  = parseHHMM(inicioTurno);
+@@ -1604,6 +1629,6 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+         const HORA_INICIO_MINS = inicioMins;
+         const totalMins        = finMins - inicioMins;
+-        const bIni = esNoche ? '01:00' : (metadata?.break_inicio ?? '13:00');
+-        const bFin = esNoche ? '02:00' : (metadata?.break_fin ?? '14:00');
++        const bIni = turnoGantt.break_inicio;
++        const bFin = turnoGantt.break_fin;
+         const ajustarNoche = (mins: number) => (esNoche && mins < inicioMins ? mins + 24 * 60 : mins);
+         const bStart = ajustarNoche(parseHHMM(bIni)) - HORA_INICIO_MINS;
+@@ -2089,4 +2114,9 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                 ) : (
+                                     <>
++                                        {turnoSinResolver && (
++                                            <div className="p-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-800 text-sm font-semibold">
++                                                ⚠️ El servidor no entregó el horario del turno (regla +15 min inicio / −15 min fin). El Gantt no se dibuja ni permite reposicionar cajitas hasta resolverlo. Recarga la pantalla; si persiste, avisa a Montu.
++                                            </div>
++                                        )}
+                                         {/* LIENZO GANTT */}
+                                         <div className="bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 flex flex-col shadow-inner">
+@@ -2097,20 +2127,25 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                                 <div className="flex-1 relative flex items-end h-10">
+                                                     {(() => {
++                                                        // B35: marcas en horas de reloj reales (9:00, 10:00...) posicionadas por minutos sobre la ventana resuelta
++                                                        if (!turnoGantt) return null;
+                                                         const esNoche = turnoGlobal === 'Noche';
+-                                                        const inicioStr = metadata?.hora_inicio_turno ?? jornadaInicio ?? (esNoche ? '20:10' : '08:00');
+-                                                        const finStr    = metadata?.hora_fin_turno    ?? jornadaFin    ?? (esNoche ? '05:45' : '17:45');
+-                                                        const hIni = parseInt(inicioStr.split(':')[0]);
+-                                                        let   hFin = parseInt(finStr.split(':')[0]);
+-                                                        if (esNoche && hFin <= hIni) hFin += 24;
+-                                                        const totalHoras = hFin - hIni;
+-                                                        return Array.from({ length: totalHoras + 1 }, (_, i) => (hIni + i) % 24).map((h, i) => (
+-                                                            <div key={i} className="absolute border-l border-slate-300 dark:border-slate-600 h-2 -bottom-0" style={{ left: `${(i / totalHoras) * 100}%` }}>
+-                                                                <span className="absolute -top-5 -left-3 text-[10px] font-bold text-slate-400">{h}:00</span>
++                                                        const parseHM = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
++                                                        const iniM = parseHM(turnoGantt.hora_inicio_turno);
++                                                        let   finM = parseHM(turnoGantt.hora_fin_turno);
++                                                        if (esNoche && finM <= iniM) finM += 24 * 60;
++                                                        const totalM = finM - iniM;
++                                                        const marcas: number[] = [];
++                                                        for (let t = Math.ceil(iniM / 60) * 60; t <= finM; t += 60) marcas.push(t);
++                                                        return marcas.map((t, i) => (
++                                                            <div key={i} className="absolute border-l border-slate-300 dark:border-slate-600 h-2 -bottom-0" style={{ left: `${((t - iniM) / totalM) * 100}%` }}>
++                                                                <span className="absolute -top-5 -left-3 text-[10px] font-bold text-slate-400">{(t / 60) % 24}:00</span>
+                                                             </div>
+                                                         ));
+                                                     })()}
+-                                                    <div className="absolute h-full bg-slate-200/50 dark:bg-slate-700/30 border-x border-slate-300/50" style={breakStyle}>
+-                                                        <span className="absolute top-2 w-full text-center text-[10px] text-slate-400 font-bold">BREAK</span>
+-                                                    </div>
++                                                    {breakStyle && (
++                                                        <div className="absolute h-full bg-slate-200/50 dark:bg-slate-700/30 border-x border-slate-300/50" style={breakStyle}>
++                                                            <span className="absolute top-2 w-full text-center text-[10px] text-slate-400 font-bold">BREAK</span>
++                                                        </div>
++                                                    )}
+                                                 </div>
+                                             </div>

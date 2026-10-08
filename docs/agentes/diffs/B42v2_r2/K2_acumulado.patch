@@ -1,0 +1,669 @@
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index 76d2985..0d5543d 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -796,6 +796,30 @@ def _sugerir_maquina_reparto(
+     return elegibles[0]
+ 
+ 
++def _partir_serie_por_kg(etiquetas: list[dict]) -> tuple[list[dict], list[dict]]:
++    """K2: parte una lista de etiquetas de una SERIE (orden de prioridad, sin
++    reordenar) en 2 bloques CONTIGUOS lo mas parejos posible por kg acumulado
++    (~50/50) para el reparto en paralelo. Bloque A = prefijo, Bloque B =
++    resto. Con < 2 etiquetas o kg total 0, retorna (etiquetas, []) — sin
++    reparto posible."""
++    if len(etiquetas) < 2:
++        return list(etiquetas), []
++    kg_total = sum(e.get("kgs", 0) for e in etiquetas)
++    if kg_total <= 0:
++        mid = len(etiquetas) // 2 or 1
++        return etiquetas[:mid], etiquetas[mid:]
++    objetivo = kg_total / 2.0
++    acumulado = 0.0
++    corte = 1
++    for i, e in enumerate(etiquetas):
++        acumulado += e.get("kgs", 0)
++        if acumulado >= objetivo:
++            corte = i + 1
++            break
++    corte = max(1, min(corte, len(etiquetas) - 1))
++    return etiquetas[:corte], etiquetas[corte:]
++
++
+ # ─────────────────────────────────────────────
+ # FASE 2 — SCHEDULING
+ # ─────────────────────────────────────────────
+@@ -1081,12 +1105,17 @@ def programar_turno(
+             activas = MAQUINAS_ACTIVAS.get(sucursal_nombre, set())
+             if activas and nombre_maquina not in activas:
+                 candidatas_alt = [
+-                    m for m in activas
++                    m for m in sorted(activas)
+                     if m not in maquinas_detenidas
+                     and m not in maquinas_no_liberadas
+                     and diametro in conocimiento.diametros_x_maquina.get((sucursal_nombre, m), [])
+                 ]
+-                candidatas_alt.sort(key=lambda m: sum(1 for t in tareas if t["nombre_maquina"] == m))
++                # K1 (determinismo): desempate estable por nombre tras la carga
++                # actual (antes: solo carga, con empate resuelto por el orden
++                # de iteracion de `activas` -- un set, cuyo orden depende de
++                # PYTHONHASHSEED. Mismo criterio de eleccion, solo se agrega
++                # el desempate explicito).
++                candidatas_alt.sort(key=lambda m: (sum(1 for t in tareas if t["nombre_maquina"] == m), m))
+                 if candidatas_alt:
+                     logger.info(
+                         "Fallback maquina: '%s' no activa → usando '%s' para IdForma=%s Ø%smm",
+@@ -1143,126 +1172,126 @@ def programar_turno(
+             )
+             kgs_pendientes_paso = sum(e.get("kgs", 0) for e in pendientes)
+ 
+-            siguientes_pendientes = []
+-            for e in pendientes:
+-                eid_e = e["etiqueta_id"]
+-                kg_e  = e.get("kgs", 0)
+-                dur_e = (duracion_total_paso * (kg_e / kgs_pendientes_paso)) if kgs_pendientes_paso else 0.0
+-
+-                cursor = cursor_maquinas.get(nombre_maquina, hora_inicio)
+-                hpaf = hora_paso_anterior_fin_por_etiqueta.get(eid_e)
+-                if hpaf:
+-                    cursor = max(cursor, hpaf)
+-
+-                if nombre_maquina in ultimo_diametro and ultimo_diametro[nombre_maquina] != diametro:
+-                    cursor += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
+-
+-                cursor = _saltar_break(cursor, brk_ini, brk_fin)
+-
+-                hora_fin_tarea = cursor + timedelta(minutes=dur_e)
+-                if cursor < brk_ini < hora_fin_tarea:
+-                    hora_fin_tarea += (brk_fin - brk_ini)
+-
+-                # ── Alerta de reparto en paralelo (umbral 80%/100%, B2) — mismo
+-                # mecanismo que hoy, ahora evaluado sobre la duracion de ESTA
+-                # etiqueta (antes: duracion del grupo completo). D5/CCa12 §2d:
+-                # se preserva el codigo tal cual, solo cambia la unidad sobre
+-                # la que opera.
+-                alerta_reparto = None
+-                maquina_sugerida = None
+-                _minutos_restantes = (hora_fin - cursor).total_seconds() / 60
+-                if _minutos_restantes > 0:
+-                    pct_jornada = dur_e / _minutos_restantes if _minutos_restantes else 0
+-                    if pct_jornada >= 0.80:
+-                        maquina_sugerida = _sugerir_maquina_reparto(
+-                            sucursal_nombre, id_forma, diametro, nombre_maquina,
+-                            conocimiento, operadores_disponibles,
+-                            maquinas_detenidas, maquinas_no_liberadas,
+-                        )
+-                        alerta_reparto = {
+-                            "nivel": "suave" if pct_jornada < 1.0 else "dura",
+-                            "pct_jornada": round(pct_jornada, 3),
+-                            "maquina_sugerida": maquina_sugerida,
+-                        }
+-
+-                if (alerta_reparto and alerta_reparto["nivel"] == "dura"
+-                        and hora_fin_tarea > hora_fin and maquina_sugerida):
+-                    kg_mitad = kg_e / 2.0
+-                    UMBRAL_DUR_MIN_REPARTO = 1.0
+-                    reparto_info = []
+-                    fines_reparto = []
+-                    for _maq_r in (nombre_maquina, maquina_sugerida):
+-                        _cursor_r = cursor if _maq_r == nombre_maquina else cursor_maquinas.get(_maq_r, hora_inicio)
+-                        if hpaf:
+-                            _cursor_r = max(_cursor_r, hpaf)
+-                        if _maq_r in ultimo_diametro and ultimo_diametro[_maq_r] != diametro:
+-                            _cursor_r += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
+-                        _cursor_r = _saltar_break(_cursor_r, brk_ini, brk_fin)
+-
+-                        _dur_r = estimar_duracion_min(
+-                            sucursal_nombre, id_forma, diametro, _maq_r, kg_mitad, conocimiento
++            # K2 (CCa-14): umbral 80%/100% de auto-reparto evaluado a nivel de
++            # SERIE (antes: por etiqueta suelta — D5/CCa13, que subestimaba el
++            # umbral al partir la duracion en fracciones chicas). Se evalua UNA
++            # vez por paso con `duracion_total_paso` (duracion de la SERIE
++            # completa, D2) contra el tiempo libre en la maquina AL INICIO del
++            # paso — antes de programar ninguna etiqueta de esta serie aqui.
++            _cursor_paso = cursor_maquinas.get(nombre_maquina, hora_inicio)
++            if nombre_maquina in ultimo_diametro and ultimo_diametro[nombre_maquina] != diametro:
++                _cursor_paso += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
++            _cursor_paso = _saltar_break(_cursor_paso, brk_ini, brk_fin)
++            _minutos_restantes_serie = (hora_fin - _cursor_paso).total_seconds() / 60
++
++            alerta_reparto_serie = None
++            bloque_a, bloque_b = pendientes, []
++            maquina_b = None
++            if _minutos_restantes_serie > 0:
++                pct_jornada_serie = duracion_total_paso / _minutos_restantes_serie
++                # K2: la alerta/decision de reparto solo tiene sentido si hay
++                # >= 2 etiquetas pendientes que partir en 2 bloques; con 1 sola
++                # etiqueta pendiente (comun al final de una serie corta, o de
++                # una serie ya casi agotada por pasos previos) no hay nada que
++                # repartir y el umbral 80/100% dispara casi siempre cerca del
++                # cierre del turno (minutos_restantes chico) sin ser accionable
++                # -- evitar el falso positivo de alerta_reparto sin reparto real.
++                if pct_jornada_serie >= 0.80 and len(pendientes) >= 2:
++                    maquina_sugerida = _sugerir_maquina_reparto(
++                        sucursal_nombre, id_forma, diametro, nombre_maquina,
++                        conocimiento, operadores_disponibles,
++                        maquinas_detenidas, maquinas_no_liberadas,
++                    )
++                    alerta_reparto_serie = {
++                        "nivel": "suave" if pct_jornada_serie < 1.0 else "dura",
++                        "pct_jornada": round(pct_jornada_serie, 3),
++                        "maquina_sugerida": maquina_sugerida,
++                    }
++                    _fin_estimado_serie = _cursor_paso + timedelta(minutes=duracion_total_paso)
++                    if _cursor_paso < brk_ini < _fin_estimado_serie:
++                        _fin_estimado_serie += (brk_fin - brk_ini)
++                    if (alerta_reparto_serie["nivel"] == "dura" and _fin_estimado_serie > hora_fin
++                            and maquina_sugerida and len(pendientes) >= 2):
++                        _cand_a, _cand_b = _partir_serie_por_kg(pendientes)
++                        if _cand_b:
++                            bloque_a, bloque_b, maquina_b = _cand_a, _cand_b, maquina_sugerida
++
++            def _asignar_bloque(etiquetas_bloque, nombre_maquina_bloque, id_maquina_str_bloque,
++                                 duracion_bloque, kgs_bloque_proporcion, primera_alerta, marca_repartida):
++                """Asigna secuencialmente `etiquetas_bloque` (orden de prioridad,
++                sin reordenar) a UNA maquina, con las mismas reglas de siempre
++                (tope de jornada, solape de operador, cursor de maquina). Usada
++                tanto para el camino sin reparto (1 bloque = toda la serie) como
++                para cada uno de los 2 bloques de un reparto por serie (K2)."""
++                asignadas_bloque = []
++                primera_tarea = True
++                for e in etiquetas_bloque:
++                    eid_e = e["etiqueta_id"]
++                    kg_e = e.get("kgs", 0)
++                    dur_e = (duracion_bloque * (kg_e / kgs_bloque_proporcion)) if kgs_bloque_proporcion else 0.0
++
++                    cursor = cursor_maquinas.get(nombre_maquina_bloque, hora_inicio)
++                    hpaf = hora_paso_anterior_fin_por_etiqueta.get(eid_e)
++                    if hpaf:
++                        cursor = max(cursor, hpaf)
++                    if nombre_maquina_bloque in ultimo_diametro and ultimo_diametro[nombre_maquina_bloque] != diametro:
++                        cursor += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
++                    cursor = _saltar_break(cursor, brk_ini, brk_fin)
++
++                    hora_fin_tarea = cursor + timedelta(minutes=dur_e)
++                    if cursor < brk_ini < hora_fin_tarea:
++                        hora_fin_tarea += (brk_fin - brk_ini)
++
++                    _alerta_tarea = primera_alerta if primera_tarea else None
++
++                    if hora_fin_tarea > hora_fin:
++                        bolsa_sin_asignar.append(_bolsa_entry(
++                            e, f"No cabe en el turno ({nombre_maquina_bloque} ocupada hasta {cursor.strftime('%H:%M')})",
++                            "turno_lleno", _alerta_tarea,
++                        ))
++                        primera_tarea = False
++                        continue
++
++                    candidatos_operador_bloque: list[str] = []
++                    if nombre_maquina_bloque not in MAQUINAS_SIN_OPERADOR:
++                        candidatos_operador_bloque = _operadores_candidatos(
++                            sucursal_nombre, nombre_maquina_bloque,
++                            operadores_disponibles, conocimiento,
++                            habitual=habituales_turno.get(nombre_maquina_bloque),
+                         )
+-                        _fin_r = _cursor_r + timedelta(minutes=_dur_r)
+-                        if _cursor_r < brk_ini < _fin_r:
+-                            _fin_r += (brk_fin - brk_ini)
+-
+-                        _kgs_r = kg_mitad
+-                        if _fin_r > hora_fin:
+-                            _fin_r = max(_cursor_r, hora_fin)
+-                            _dur_r_capada = (_fin_r - _cursor_r).total_seconds() / 60.0
+-                            if _dur_r > 0:
+-                                _kgs_r = kg_mitad * (_dur_r_capada / _dur_r)
+-                            _dur_r = _dur_r_capada
+-
+-                        if _dur_r < UMBRAL_DUR_MIN_REPARTO:
++                        if not candidatos_operador_bloque:
++                            bolsa_sin_asignar.append(_bolsa_entry(
++                                e, f"Sin operador disponible para {nombre_maquina_bloque}", "sin_operador",
++                            ))
++                            primera_tarea = False
+                             continue
+ 
+-                        _operador_r = None
+-                        if _maq_r not in MAQUINAS_SIN_OPERADOR:
+-                            _cands_r = _operadores_candidatos(
+-                                sucursal_nombre, _maq_r, operadores_disponibles, conocimiento,
+-                                habitual=habituales_turno.get(_maq_r),
+-                            )
+-                            for _cand_r in _cands_r:
+-                                _solapes_r = [
+-                                    (ini, fin, maq, tid)
+-                                    for ini, fin, maq, tid in intervalos_operador.get(_cand_r, [])
+-                                    if _cursor_r < fin and _fin_r > ini
+-                                ]
+-                                if _solapes_r:
+-                                    continue
+-                                _operador_r = _cand_r
+-                                break
+-
+-                        reparto_info.append({
+-                            "recurso_id":     _maq_r,
+-                            "nombre_maquina": _maq_r,
+-                            "pct_carga":      50.0,
+-                            "kgs":            round(_kgs_r, 1),
+-                            "duracion_min":   round(_dur_r, 1),
+-                            "operador":       conocimiento.nombre_por_username.get(
+-                                                  _operador_r or '', _operador_r or ''),
+-                            "fecha_inicio":   _cursor_r.isoformat(),
+-                            "fecha_fin":      _fin_r.isoformat(),
+-                        })
+-                        cursor_maquinas[_maq_r] = _fin_r
+-                        ultimo_diametro[_maq_r] = diametro
+-                        if _operador_r:
+-                            intervalos_operador[_operador_r].append(
+-                                (_cursor_r, _fin_r, _maq_r, f"{eid_e}_p{paso_idx+1}")
++                    operador_asignado = None
++                    if candidatos_operador_bloque:
++                        for candidato in candidatos_operador_bloque:
++                            solapes = [
++                                (ini, fin, maq, tid)
++                                for ini, fin, maq, tid in intervalos_operador.get(candidato, [])
++                                if cursor < fin and hora_fin_tarea > ini
++                            ]
++                            if solapes:
++                                continue
++                            operador_asignado = candidato
++                            break
++
++                        if not operador_asignado:
++                            logger.warning(
++                                "Etiqueta a bolsa por solapamiento operador: etiqueta=%s maquina=%s intervalo=%s-%s candidatos=%s",
++                                eid_e, nombre_maquina_bloque, cursor.strftime("%H:%M"), hora_fin_tarea.strftime("%H:%M"),
++                                candidatos_operador_bloque,
+                             )
+-                        fines_reparto.append(_fin_r)
+-
+-                    if not reparto_info:
+-                        bolsa_sin_asignar.append(_bolsa_entry(
+-                            e, f"No cabe en el turno ({nombre_maquina} ocupada hasta {cursor.strftime('%H:%M')})",
+-                            "turno_lleno", alerta_reparto,
+-                        ))
+-                        continue
++                            bolsa_sin_asignar.append(_bolsa_entry(
++                                e, f"Operador disponible solapado para {nombre_maquina_bloque}", "operador_solapado",
++                            ))
++                            primera_tarea = False
++                            continue
+ 
+-                    _reparto_efectivo = len(reparto_info) >= 2
+-                    _sobreviviente = reparto_info[0]
+-                    tareas.append({
++                    tarea_nueva = {
+                         "id_tarea":       f"{eid_e}_p{paso_idx+1}",
+                         "etiqueta_id":    eid_e,
+                         "codigo_viaje":   e.get("codigo_viaje", ""),
+@@ -1270,122 +1299,85 @@ def programar_turno(
+                         "obra":           e.get("obra", ""),
+                         "paso_secuencia": paso_idx + 1,
+                         "total_pasos":    len(ruta),
+-                        "id_maquina":     maquina_str if _reparto_efectivo else _sobreviviente["recurso_id"],
+-                        "nombre_maquina": nombre_maquina if _reparto_efectivo else _sobreviviente["nombre_maquina"],
++                        "id_maquina":     id_maquina_str_bloque,
++                        "nombre_maquina": nombre_maquina_bloque,
+                         "id_forma":       id_forma,
+                         "diametro":       diametro,
+                         "calidad_acero":  calidad,
+-                        "kilos":          kg_e if _reparto_efectivo else _sobreviviente["kgs"],
++                        "kilos":          kg_e,
+                         "nr_piezas":      e.get("nr_piezas", 1),
+-                        "fecha_inicio":   reparto_info[0]["fecha_inicio"],
+-                        "fecha_fin":      max(fines_reparto).isoformat(),
+-                        "duracion_min":   round(dur_e, 1) if _reparto_efectivo else _sobreviviente["duracion_min"],
+-                        "operador":       reparto_info[0]["operador"],
+-                        "estado":         "programado",
++                        "fecha_inicio":   cursor.isoformat(),
++                        "fecha_fin":      hora_fin_tarea.isoformat(),
++                        "duracion_min":   round(dur_e, 1),
++                        # CRÍTICO: Este campo DEBE ser nombre_completo desde operadores_matriz
++                        # NO usar username. Bug recurrente — no revertir.
++                        "operador":       conocimiento.nombre_por_username.get(
++                                              operador_asignado or '', operador_asignado or ''),
++                        "estado":         (
++                            "programado-semi-operativa"   if nombre_maquina_bloque in maquinas_semi
++                            else "programado-no-liberada" if nombre_maquina_bloque in maquinas_no_liberadas
++                            else "programado"
++                        ),
+                         "prioridad":      prioridad,
+                         "dias_atraso":    e.get("dias_atraso", 0),
+                         "ruta_completa":  ruta,
+                         "hebras":         conocimiento.hebras_x_maquina.get(
+-                                              (sucursal_nombre,
+-                                               nombre_maquina if _reparto_efectivo else _sobreviviente["nombre_maquina"],
+-                                               diametro), 1),
++                                              (sucursal_nombre, nombre_maquina_bloque, diametro), 1),
+                         "nr_tags":        1,
+                         "largo_a":        e.get("largo_a", largo_a),
+                         "tipo":           "normal",
+                         "lista_etiqueta_ids": [eid_e],
+                         "numero_etiqueta": e.get("numero_etiqueta"),
+                         "total_etiquetas": e.get("total_etiquetas"),
+-                        "alerta_reparto": alerta_reparto,
+-                        "reparto":        reparto_info if _reparto_efectivo else None,
+-                    })
+-
+-                    hora_paso_anterior_fin_por_etiqueta[eid_e] = max(fines_reparto)
+-                    siguientes_pendientes.append(e)
+-                    continue
+-
+-                if hora_fin_tarea > hora_fin:
+-                    bolsa_sin_asignar.append(_bolsa_entry(
+-                        e, f"No cabe en el turno ({nombre_maquina} ocupada hasta {cursor.strftime('%H:%M')})",
+-                        "turno_lleno", alerta_reparto,
+-                    ))
+-                    continue
+-
+-                operador_asignado = None
+-                if candidatos_operador:
+-                    for candidato in candidatos_operador:
+-                        solapes = [
+-                            (ini, fin, maq, tid)
+-                            for ini, fin, maq, tid in intervalos_operador.get(candidato, [])
+-                            if cursor < fin and hora_fin_tarea > ini
+-                        ]
+-                        if solapes:
+-                            continue
+-                        operador_asignado = candidato
+-                        break
+-
+-                    if not operador_asignado:
+-                        logger.warning(
+-                            "Etiqueta a bolsa por solapamiento operador: etiqueta=%s maquina=%s intervalo=%s-%s candidatos=%s",
+-                            eid_e, nombre_maquina, cursor.strftime("%H:%M"), hora_fin_tarea.strftime("%H:%M"),
+-                            candidatos_operador,
+-                        )
+-                        bolsa_sin_asignar.append(_bolsa_entry(
+-                            e, f"Operador disponible solapado para {nombre_maquina}", "operador_solapado",
++                        "alerta_reparto": _alerta_tarea,
++                    }
++                    if marca_repartida:
++                        tarea_nueva["serie_repartida"] = True
++                    tareas.append(tarea_nueva)
++
++                    cursor_maquinas[nombre_maquina_bloque] = hora_fin_tarea
++                    ultimo_diametro[nombre_maquina_bloque] = diametro
++                    if operador_asignado:
++                        intervalos_operador[operador_asignado].append((
++                            cursor, hora_fin_tarea, nombre_maquina_bloque, f"{eid_e}_p{paso_idx+1}",
+                         ))
+-                        continue
+-
+-                # Registrar tarea — 1 etiqueta = 1 cajita (D3)
+-                tareas.append({
+-                    "id_tarea":       f"{eid_e}_p{paso_idx+1}",
+-                    "etiqueta_id":    eid_e,
+-                    "codigo_viaje":   e.get("codigo_viaje", ""),
+-                    "fecha_entrega":  e.get("fecha_entrega", ""),
+-                    "obra":           e.get("obra", ""),
+-                    "paso_secuencia": paso_idx + 1,
+-                    "total_pasos":    len(ruta),
+-                    "id_maquina":     maquina_str,
+-                    "nombre_maquina": nombre_maquina,
+-                    "id_forma":       id_forma,
+-                    "diametro":       diametro,
+-                    "calidad_acero":  calidad,
+-                    "kilos":          kg_e,
+-                    "nr_piezas":      e.get("nr_piezas", 1),
+-                    "fecha_inicio":   cursor.isoformat(),
+-                    "fecha_fin":      hora_fin_tarea.isoformat(),
+-                    "duracion_min":   round(dur_e, 1),
+-                    # CRÍTICO: Este campo DEBE ser nombre_completo desde operadores_matriz
+-                    # NO usar username. Bug recurrente — no revertir.
+-                    "operador":       conocimiento.nombre_por_username.get(
+-                                          operador_asignado or '', operador_asignado or ''),
+-                    "estado":         (
+-                        "programado-semi-operativa"   if nombre_maquina in maquinas_semi
+-                        else "programado-no-liberada" if nombre_maquina in maquinas_no_liberadas
+-                        else "programado"
+-                    ),
+-                    "prioridad":      prioridad,
+-                    "dias_atraso":    e.get("dias_atraso", 0),
+-                    "ruta_completa":  ruta,
+-                    "hebras":         conocimiento.hebras_x_maquina.get(
+-                                          (sucursal_nombre, nombre_maquina, diametro), 1),
+-                    "nr_tags":        1,
+-                    "largo_a":        e.get("largo_a", largo_a),
+-                    "tipo":           "normal",
+-                    "lista_etiqueta_ids": [eid_e],
+-                    "numero_etiqueta": e.get("numero_etiqueta"),
+-                    "total_etiquetas": e.get("total_etiquetas"),
+-                    "alerta_reparto": alerta_reparto,
+-                })
+-
+-                cursor_maquinas[nombre_maquina] = hora_fin_tarea
+-                ultimo_diametro[nombre_maquina] = diametro
+-                if operador_asignado:
+-                    intervalos_operador[operador_asignado].append((
+-                        cursor, hora_fin_tarea, nombre_maquina, f"{eid_e}_p{paso_idx+1}",
+-                    ))
+-                hora_paso_anterior_fin_por_etiqueta[eid_e] = hora_fin_tarea
+-                siguientes_pendientes.append(e)
++                    hora_paso_anterior_fin_por_etiqueta[eid_e] = hora_fin_tarea
++                    asignadas_bloque.append(e)
++                    primera_tarea = False
++                return asignadas_bloque
++
++            if bloque_b:
++                # K2: reparto EN PARALELO a nivel de SERIE — 2 bloques
++                # contiguos de etiquetas (~50/50 por kg), cada uno en SU
++                # maquina, con la duracion recalculada para el kg de CADA
++                # bloque (mismo criterio que el reparto manual/B2 existente:
++                # estimar_duracion_min con el kg del bloque, no una fraccion
++                # proporcional de la duracion total).
++                kg_bloque_a = sum(e.get("kgs", 0) for e in bloque_a)
++                kg_bloque_b = sum(e.get("kgs", 0) for e in bloque_b)
++                dur_bloque_a = estimar_duracion_min(
++                    sucursal_nombre, id_forma, diametro, nombre_maquina, kg_bloque_a, conocimiento
++                )
++                dur_bloque_b = estimar_duracion_min(
++                    sucursal_nombre, id_forma, diametro, maquina_b, kg_bloque_b, conocimiento
++                )
++                asignadas_a = _asignar_bloque(
++                    bloque_a, nombre_maquina, maquina_str, dur_bloque_a, kg_bloque_a,
++                    alerta_reparto_serie, True,
++                )
++                asignadas_b = _asignar_bloque(
++                    bloque_b, maquina_b, maquina_b, dur_bloque_b, kg_bloque_b,
++                    None, True,
++                )
++                asignadas = asignadas_a + asignadas_b
++            else:
++                asignadas = _asignar_bloque(
++                    pendientes, nombre_maquina, maquina_str, duracion_total_paso, kgs_pendientes_paso,
++                    alerta_reparto_serie, False,
++                )
+ 
+-            pendientes = siguientes_pendientes
++            _asignadas_ids = {a["etiqueta_id"] for a in asignadas}
++            pendientes = [e for e in pendientes if e["etiqueta_id"] in _asignadas_ids]
+ 
+     # ── Persistir historial en SQLite ──────────────────────────────────────
+     try:
+diff --git a/backend/test_b42v2_etiquetas.py b/backend/test_b42v2_etiquetas.py
+index 8d0ee48..0646ca1 100644
+--- a/backend/test_b42v2_etiquetas.py
++++ b/backend/test_b42v2_etiquetas.py
+@@ -244,5 +244,181 @@ class TestB42v2Series(unittest.TestCase):
+             self.assertAlmostEqual(suma_duraciones, duracion_esperada, delta=0.5)
+ 
+ 
++class TestB42v2K2Reparto(unittest.TestCase):
++    """K2 (CCa-14): auto-reparto en paralelo evaluado a nivel de SERIE. Una
++    serie "filler" (8 etiquetas x 1000 kg, IdForma=2 Ø10mm -> PRIMA 3D)
++    consume ~275 min de PRIMA 3D desde el inicio del turno; una segunda
++    serie "target" (12 etiquetas x 1000 kg, mismo IdForma/diametro, viaje
++    distinto) queda con < 300 min libres en PRIMA 3D, con duracion de
++    serie completa (~413 min) que excede ese remanente -> debe repartirse
++    en 2 bloques contiguos de 6 etiquetas (~50/50 kg) entre PRIMA 3D y la
++    maquina sugerida (EURA 16, unica alternativa Ø10mm elegible en este
++    universo sintetico)."""
++
++    def test_k2_serie_larga_se_reparte_en_2_bloques_2_maquinas(self):
++        filler = [
++            _etiqueta(eid=9000 + i, kgs=1000.0, id_forma=2, diametro=10,
++                      codigo_viaje="K2-FILLER/1", n=i + 1, m=8)
++            for i in range(8)
++        ]
++        target = [
++            _etiqueta(eid=9100 + i, kgs=1000.0, id_forma=2, diametro=10,
++                      codigo_viaje="K2-TARGET/1", n=i + 1, m=12)
++            for i in range(12)
++        ]
++        resultado = _run(filler + target)
++        tareas = resultado["tareas"]
++        bolsa = resultado["bolsa_sin_asignar"]
++
++        target_ids = {e["etiqueta_id"] for e in target}
++        target_tareas = [t for t in tareas if t["etiqueta_id"] in target_ids]
++        target_bolsa = [b for b in bolsa if b["etiqueta_id"] in target_ids]
++
++        # Conservacion: las 12 etiquetas de la serie larga deben conservarse
++        # (0 a bolsa) -- si no hay split, varias caerian a turno_lleno.
++        self.assertEqual(len(target_tareas), 12, f"faltan etiquetas de la serie target en tareas: bolsa={target_bolsa}")
++        self.assertEqual(len(target_bolsa), 0)
++        self.assertAlmostEqual(sum(t["kilos"] for t in target_tareas), 12000.0, places=1)
++
++        maquinas_target = {t["nombre_maquina"] for t in target_tareas}
++        self.assertEqual(len(maquinas_target), 2, f"se esperaban exactamente 2 maquinas, hubo: {maquinas_target}")
++
++        # serie_repartida: true en TODAS las tareas de ambos bloques.
++        self.assertTrue(all(t.get("serie_repartida") is True for t in target_tareas))
++
++        # alerta_reparto: SOLO en la primera tarea de la serie (1 badge por serie).
++        con_alerta = [t for t in target_tareas if t.get("alerta_reparto")]
++        self.assertEqual(len(con_alerta), 1, f"debia haber 1 sola alerta_reparto en la serie, hubo {len(con_alerta)}")
++        self.assertEqual(con_alerta[0]["alerta_reparto"]["nivel"], "dura")
++        self.assertEqual(con_alerta[0]["etiqueta_id"], 9100, "la alerta debe ir en la primera etiqueta de la serie")
++
++        # Orden preservado dentro de cada bloque: sin intercalar, fecha_inicio
++        # creciente sigue el orden original de etiqueta_id dentro del bloque.
++        por_maquina: dict = {}
++        for t in target_tareas:
++            por_maquina.setdefault(t["nombre_maquina"], []).append(t)
++        for maquina, ts in por_maquina.items():
++            ts_ordenadas = sorted(ts, key=lambda t: t["fecha_inicio"])
++            ids_por_fecha = [t["etiqueta_id"] for t in ts_ordenadas]
++            self.assertEqual(ids_por_fecha, sorted(ids_por_fecha), f"orden alterado dentro del bloque en {maquina}: {ids_por_fecha}")
++
++
++class TestB42v2Determinismo(unittest.TestCase):
++    """K1 (CCa-14): el resultado de programar_turno debe ser independiente de
++    PYTHONHASHSEED. Antes del fix, `candidatas_alt` (motor_v2.py, fallback de
++    maquina no activa) iteraba `for m in activas` (un `set` de nombres): el
++    orden de iteracion de un set de strings depende del hash de las strings,
++    que Python aleatoriza por proceso salvo que PYTHONHASHSEED este fijo. El
++    `.sort(key=lambda m: carga)` posterior no desempataba por nombre, asi que
++    dos maquinas con igual carga podian quedar en cualquier orden segun la
++    semilla, y la elegida (`candidatas_alt[0]`) cambiaba de una corrida a
++    otra con el MISMO universo. Fix: `sorted(activas)` antes del filtro +
++    desempate explicito `(carga, nombre)` en el sort final.
++
++    Este test lanza subprocesos con distintas PYTHONHASHSEED sobre un
++    universo sintetico grande (45 series x 7 etiquetas = 315 etiquetas,
++    combinaciones IdForma/Diametro reales de Cerrillos con ruta hacia
++    maquinas distintas) y exige que la firma del resultado (id_tarea,
++    maquina, inicio por tarea) sea IDENTICA en todas las semillas. Sin el
++    fix de K1 este test FALLA (firmas distintas entre semillas); con el fix
++    pasa."""
++
++    # 45 combos reales (IdForma, Diametro) de Cerrillos (matriz_rutas.json),
++    # muestreados para cubrir rutas historicas hacia maquinas distintas
++    # (no solo PRIMA 3D/EURA 16 de los tests AC4/AC6 de arriba).
++    _COMBOS = [
++        (147, 16), (8, 22), (2, 12), (225, 8), (35, 12), (32, 16), (30, 10),
++        (10, 18), (217, 16), (8, 8), (164, 25), (385, 8), (101, 16), (7, 8),
++        (129, 8), (60, 25), (2, 25), (2, 22), (7, 16), (28, 22), (30, 25),
++        (89, 12), (133, 12), (2, 16), (106, 8), (22, 18), (207, 10),
++        (150, 22), (191, 10), (60, 18), (35, 8), (10, 12), (28, 16),
++        (101, 8), (133, 8), (89, 16), (207, 16), (150, 16), (191, 16),
++        (30, 12), (60, 12), (2, 10), (7, 22), (22, 25), (106, 16),
++    ]
++
++    def _universo_sintetico(self):
++        etiquetas = []
++        eid = 90000
++        for i, (id_forma, diametro) in enumerate(self._COMBOS):
++            for j in range(7):
++                etiquetas.append(_etiqueta(
++                    eid=eid, kgs=25.0 + (j % 5) * 3.0, id_forma=id_forma,
++                    diametro=diametro, codigo_viaje=f"K1-TEST-{i:03d}/1",
++                    n=j + 1, m=7,
++                ))
++                eid += 1
++        return etiquetas
++
++    def test_k1_determinismo_multiseed_universo_sintetico(self):
++        n_etiquetas = len(self._COMBOS) * 7
++        self.assertGreaterEqual(n_etiquetas, 300, "universo sintetico debe tener >= 300 etiquetas")
++        self.assertGreaterEqual(len(self._COMBOS), 40, "universo sintetico debe tener >= 40 series")
++
++        conocimiento = _cargar_conocimiento()
++        activas = getattr(__import__("motor_v2"), "MAQUINAS_ACTIVAS", {}).get(SUCURSAL_NOMBRE, set())
++        self.assertGreaterEqual(len(activas), 6, "se requieren >= 6 maquinas equivalentes activas en Cerrillos")
++
++        import subprocess
++        etiquetas = self._universo_sintetico()
++        base_dir = os.environ.get("MOTOR_BASE_DIR") or os.path.dirname(os.path.abspath(__file__))
++        here = os.path.dirname(os.path.abspath(__file__))
++
++        runner = f'''
++import sys, os, json, hashlib
++sys.path.insert(0, {here!r})
++os.chdir({base_dir!r})
++from motor_v2 import ConocimientoMotor, programar_turno
++c = ConocimientoMotor({base_dir!r})
++c.cargar()
++import sqlite3
++mapa_cub = {_CUB_MAQ_MAP!r}
++mapa_suc = {_CUB_TO_SQL_SUC!r}
++with sqlite3.connect(os.path.join({base_dir!r}, "optifierro_v2.db")) as conn:
++    conn.row_factory = sqlite3.Row
++    sql_nombre = {{(r["sucursal_id"], r["maquina_id"]): r["maquina"] for r in conn.execute("SELECT sucursal_id, maquina_id, maquina FROM maquinas_info")}}
++mapa = {{}}
++for (cub_suc, maq_nro), sql_maq_id in mapa_cub.items():
++    sql_suc = mapa_suc[cub_suc]
++    nombre = sql_nombre.get((sql_suc, sql_maq_id))
++    if nombre:
++        mapa[(sql_suc, maq_nro)] = nombre
++c.cargar_mapa_maquinas(mapa)
++ops = set()
++for (suc, _maq), lista in c.operadores_x_maquina.items():
++    if suc == {SUCURSAL_NOMBRE!r}:
++        ops.update(lista)
++etiquetas = json.load(open(os.environ["UNV"]))
++res = programar_turno(etiquetas=etiquetas, sucursal_id={SUCURSAL_ID!r}, fecha="2026-09-24", turno="dia", operadores_disponibles=sorted(ops), conocimiento=c)
++t = res["tareas"]
++sig = hashlib.sha1(json.dumps(sorted([(x.get("id_tarea"), x.get("nombre_maquina"), str(x.get("fecha_inicio"))) for x in t])).encode()).hexdigest()
++print("SIG", sig, len(t), round(sum((x.get("kilos") or 0) for x in t)))
++'''
++        import json as _json
++        import tempfile
++        fd, universo_path = tempfile.mkstemp(suffix=".json")
++        with os.fdopen(fd, "w") as f:
++            _json.dump(etiquetas, f)
++        try:
++            firmas = {}
++            for seed in ("0", "1", "2", "3", "42"):
++                env = dict(os.environ)
++                env["PYTHONHASHSEED"] = seed
++                env["UNV"] = universo_path
++                out = subprocess.run(
++                    [sys.executable, "-c", runner], env=env,
++                    capture_output=True, text=True, timeout=120,
++                )
++                self.assertEqual(out.returncode, 0, f"seed={seed} fallo: {out.stderr[-2000:]}")
++                linea = [l for l in out.stdout.splitlines() if l.startswith("SIG")]
++                self.assertTrue(linea, f"seed={seed} sin salida SIG: {out.stdout!r} {out.stderr[-500:]!r}")
++                firmas[seed] = linea[0]
++            self.assertEqual(
++                len(set(firmas.values())), 1,
++                f"NO DETERMINISTA: firmas distintas entre semillas (K1): {firmas}",
++            )
++        finally:
++            os.unlink(universo_path)
++
++
+ if __name__ == "__main__":
+     unittest.main(verbosity=2)

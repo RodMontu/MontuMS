@@ -1,0 +1,101 @@
+From 834425b27efb516a98f8ca1ab4644d4f8ab4070c Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 12:32:48 -0300
+Subject: [PATCH 1/6] feat(b42v2): propagar Tag N de M tambien desde el
+ scheduler automatico - D4
+
+_obtener_pids_pendientes (camino del scheduler automatico) no traia
+dp.Etiqueta y por eso _mapa_numero_etiqueta nunca se poblaba fuera de
+/generar (CCa12 hallazgo 2b/6a). Se agrega dp.Etiqueta AS etiqueta_raw
+al SELECT, se extiende el parseo con parse_numero_y_total_etiqueta
+(N y M, sin romper parse_numero_etiqueta existente) y se anota
+numero_etiqueta/total_etiquetas en el dict de cada etiqueta en AMBOS
+caminos de entrada, para que viajen con la tarea a traves del Motor
+sin depender solo de la memoria volatil del mapa.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/database_cubigest.py    | 13 +++++++++++++
+ backend/routers/programacion.py | 25 ++++++++++++++++++++++---
+ 2 files changed, 35 insertions(+), 3 deletions(-)
+
+diff --git a/backend/database_cubigest.py b/backend/database_cubigest.py
+index 3ae1b77..7c01858 100644
+--- a/backend/database_cubigest.py
++++ b/backend/database_cubigest.py
+@@ -34,6 +34,19 @@ def parse_numero_etiqueta(etiqueta_raw: str | None) -> int | None:
+     return int(m.group(1)) if m else None
+ 
+ 
++def parse_numero_y_total_etiqueta(etiqueta_raw: str | None) -> tuple[int | None, int | None]:
++    """
++    Igual que parse_numero_etiqueta, pero tambien devuelve M (total de
++    etiquetas del grupo fisico, "Tag #: N of M") — B42 v2, "Etiqueta N de M".
++    """
++    if not etiqueta_raw:
++        return None, None
++    m = _RE_NUMERO_ETIQUETA.search(str(etiqueta_raw))
++    if not m:
++        return None, None
++    return int(m.group(1)), int(m.group(2))
++
++
+ class CubigestDB:
+     _instance = None
+ 
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 3a63271..59363b3 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -1440,7 +1440,8 @@ def _obtener_pids_pendientes(sucursal_id: int, fecha: str) -> list[dict]:
+                 NULLIF(CAST(it.FechaDespacho AS DATE), '19000101'),
+                 NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
+             ) AS date)                                  AS fecha_despacho_date,
+-            CASE WHEN p.diametro <= 16 THEN 'AD' ELSE 'AG' END AS tipo_acero
++            CASE WHEN p.diametro <= 16 THEN 'AD' ELSE 'AG' END AS tipo_acero,
++            dp.Etiqueta                                  AS etiqueta_raw
+         FROM IT it
+         JOIN Obras o                    ON o.id = it.IdObra
+         JOIN Viaje v                    ON v.IdIt = it.Id
+@@ -1499,6 +1500,20 @@ def _obtener_pids_pendientes(sucursal_id: int, fecha: str) -> list[dict]:
+         logger.error(f"Error obteniendo PIDs pendientes: {e}")
+         return []
+ 
++    # B42 v2: poblar mapa etiqueta_id -> numero fisico de etiqueta (dp.Etiqueta)
++    # tambien en el camino del scheduler automatico (antes solo lo hacia
++    # _piezas_optisteel_por_viajes, usado por /generar). Ademas se anota N/M
++    # directo en el dict de cada etiqueta para que viaje con la tarea a
++    # traves del Motor sin depender de esta memoria volatil (D4, CCa12 §2b/§4).
++    from database_cubigest import parse_numero_y_total_etiqueta
++    for f in filas:
++        eid = f.get("etiqueta_id")
++        n, m = parse_numero_y_total_etiqueta(f.get("etiqueta_raw"))
++        f["numero_etiqueta"] = n
++        f["total_etiquetas"] = m
++        if eid is not None:
++            _mapa_numero_etiqueta[eid] = n
++
+     # B45: FP-LC (despacho directo) no entra al universo del Motor/Bolsa.
+     pendientes, excluidas = [], []
+     for f in filas:
+@@ -1611,11 +1626,15 @@ def _piezas_optisteel_por_viajes(sucursal_id: int, viajes: list[str]) -> list[di
+ 
+     # B42: poblar mapa etiqueta_id -> numero fisico de etiqueta (dp.Etiqueta)
+     # para que _tarea_a_evento y /tags-viaje lo puedan mostrar en la cajita.
+-    from database_cubigest import parse_numero_etiqueta
++    # B42 v2: ademas se anota N/M directo en el dict de cada etiqueta (D4).
++    from database_cubigest import parse_numero_y_total_etiqueta
+     for f in filas:
+         eid = f.get("etiqueta_id")
++        n, m = parse_numero_y_total_etiqueta(f.get("etiqueta_raw"))
++        f["numero_etiqueta"] = n
++        f["total_etiquetas"] = m
+         if eid is not None:
+-            _mapa_numero_etiqueta[eid] = parse_numero_etiqueta(f.get("etiqueta_raw"))
++            _mapa_numero_etiqueta[eid] = n
+ 
+     # B45: FP-LC (despacho directo) no entra al universo del Motor/Bolsa
+     # (comparte este JOIN _obtener_pids_pendientes_optisteel y
+-- 
+2.54.0.windows.1
+

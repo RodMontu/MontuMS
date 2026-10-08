@@ -1,0 +1,138 @@
+{
+  "id_forma": 1,
+  "diametro": 10,
+  "meses_consultados": 24,
+  "total_registros": 3448,
+  "dotacion_detectable": false,
+  "peso_aprox_kg_consultado": 3.7037037037037033,
+  "nota_metodologica": "Producciones estimadas en base a antecedentes historicos de produccion; rango tipico segun el historial (P25-P75). Es una estimacion referencial: no es un intervalo de confianza ni esta validada a nivel de operario y pedido.",
+  "nota_rutas": "Las maquinas listadas son las que procesaron esta forma y diametro segun el historial; no corresponden al ruteo que calcula el Planificador.",
+  "criterios": {
+    "n_min_tonh": 15,
+    "tonh_max": 50.0,
+    "rango_pct": [
+      0.05,
+      0.95
+    ],
+    "bins_5_min_n": 50,
+    "bins_3_min_n": 30,
+    "ratio_barra_max": 1.5,
+    "metodo": "delta crudo entre registros consecutivos (2-480 min); no validado a nivel operario+pedido (ver B26-B)"
+  },
+  "por_maquina": [
+    {
+      "maquina_id": 10,
+      "maquina_nombre": "EURA 16",
+      "sucursal_id": 10,
+      "n_registros": 873,
+      "avg_largo_mm": 5501.0,
+      "peso_etiqueta_tipico_kg": 128.0,
+      "ton_hora_estimado": 0.474,
+      "ton_hora_p25": 0.133,
+      "ton_hora_p75": 1.601,
+      "n_grupo": 174,
+      "datos_suficientes": true,
+      "estado_rango": "ok",
+      "rango_barra_kg": [
+        1.2,
+        7.4
+      ],
+      "ajuste_por_largo": true,
+      "peso_referencia_kg": 3.74
+    },
+    {
+      "maquina_id": 11,
+      "maquina_nombre": "EURA 20_3",
+      "sucursal_id": 10,
+      "n_registros": 476,
+      "avg_largo_mm": 6135.0,
+      "peso_etiqueta_tipico_kg": 207.0,
+      "ton_hora_estimado": 0.775,
+      "ton_hora_p25": 0.166,
+      "ton_hora_p75": 1.922,
+      "n_grupo": 95,
+      "datos_suficientes": true,
+      "estado_rango": "ok",
+      "rango_barra_kg": [
+        1.5,
+        6.8
+      ],
+      "ajuste_por_largo": true,
+      "peso_referencia_kg": 2.87
+    },
+    {
+      "maquina_id": 14,
+      "maquina_nombre": "FORMULA 12",
+      "sucursal_id": 10,
+      "n_registros": 821,
+      "avg_largo_mm": 5888.0,
+      "peso_etiqueta_tipico_kg": 133.6,
+      "ton_hora_estimado": 0.893,
+      "ton_hora_p25": 0.297,
+      "ton_hora_p75": 2.0,
+      "n_grupo": 164,
+      "datos_suficientes": true,
+      "estado_rango": "ok",
+      "rango_barra_kg": [
+        1.0,
+        7.5
+      ],
+      "ajuste_por_largo": true,
+      "peso_referencia_kg": 3.74
+    },
+    {
+      "maquina_id": 16,
+      "maquina_nombre": "LINEA DE CORTE",
+      "sucursal_id": 10,
+      "n_registros": 100,
+      "avg_largo_mm": 11554.0,
+      "peso_etiqueta_tipico_kg": 1537.0,
+      "ton_hora_estimado": 1.176,
+      "ton_hora_p25": 0.342,
+      "ton_hora_p75": 10.302,
+      "n_grupo": 100,
+      "datos_suficientes": true,
+      "estado_rango": "no_evaluable",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 18,
+      "maquina_nombre": "FP-LC",
+      "sucursal_id": 10,
+      "n_registros": 3,
+      "avg_largo_mm": 12000.0,
+      "peso_etiqueta_tipico_kg": 1544.0,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 3,
+      "datos_suficientes": false,
+      "estado_rango": "no_evaluable",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 22,
+      "maquina_nombre": "PRIMA 3D",
+      "sucursal_id": 10,
+      "n_registros": 1175,
+      "avg_largo_mm": 4877.0,
+      "peso_etiqueta_tipico_kg": 67.0,
+      "ton_hora_estimado": 0.387,
+      "ton_hora_p25": 0.164,
+      "ton_hora_p75": 1.05,
+      "n_grupo": 235,
+      "datos_suficientes": true,
+      "estado_rango": "ok",
+      "rango_barra_kg": [
+        0.8,
+        6.5
+      ],
+      "ajuste_por_largo": true,
+      "peso_referencia_kg": 4.0
+    }
+  ]
+}

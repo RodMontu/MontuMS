@@ -1,0 +1,143 @@
+--- /dev/null	2026-09-24 23:18:42.000000000 -0300
++++ universo_fechas.py	2026-09-24 23:18:24.281426200 -0300
+@@ -0,0 +1,60 @@
++"""
++universo_fechas.py — Clasificación única de fechas de despacho para el universo
++de compromisos (ITs pendientes). Reemplaza las ventanas -30d/+21d duplicadas en
++database_cubigest.py, materias_primas.py y programacion.py.
++
++Puro: sin acceso a BD, solo datetime.date/int. Ver
++/Users/montu/MontuMS/docs/agentes/UNIVERSO_FECHAS_spec.md (sección 3) para el
++acuerdo de umbrales con Montu (24-09-2026).
++"""
++from datetime import date
++
++UMBRAL_ATRASADA_SUCIEDAD_DIAS = 30
++UMBRAL_PROXIMA_DIAS = 21
++UMBRAL_LEJANA_DIAS = 60
++UMBRAL_HORIZONTE_SOSPECHOSO_DIAS = 120
++
++
++def clasificar_fecha(
++    fecha_despacho: date,
++    horizonte_reprog: int | None = None,
++    hoy: date | None = None,
++) -> str:
++    """Clasifica una fecha de despacho respecto de hoy.
++
++    Args:
++        fecha_despacho: fecha efectiva de despacho (FechaDespacho con
++            fallback FechaEntrega).
++        horizonte_reprog: días entre fecha de despacho y fecha de última
++            reprogramación (proxy de "espera de confirmación del cliente").
++            None si no se conoce.
++        hoy: fecha de referencia; por defecto date.today().
++
++    Returns:
++        Una de: "atrasada_valida", "atrasada_suciedad", "proxima",
++        "lejana_normal", "muy_futura".
++    """
++    if hoy is None:
++        hoy = date.today()
++
++    dias = (fecha_despacho - hoy).days
++
++    if dias < 0:
++        dias_atraso = -dias
++        if dias_atraso > UMBRAL_ATRASADA_SUCIEDAD_DIAS:
++            return "atrasada_suciedad"
++        return "atrasada_valida"
++
++    if dias <= UMBRAL_PROXIMA_DIAS:
++        return "proxima"
++
++    if dias > UMBRAL_LEJANA_DIAS:
++        return "muy_futura"
++
++    if (
++        horizonte_reprog is not None
++        and horizonte_reprog > UMBRAL_HORIZONTE_SOSPECHOSO_DIAS
++    ):
++        return "muy_futura"
++
++    return "lejana_normal"
+--- /dev/null	2026-09-24 23:18:42.000000000 -0300
++++ test_universo_fechas.py	2026-09-24 23:18:24.631203300 -0300
+@@ -0,0 +1,77 @@
++"""
++Pruebas de universo_fechas.clasificar_fecha — un caso por categoría, más el
++caso límite de "muy futura por horizonte" (sección 3 del spec).
++
++Ejecutar: python -m unittest test_universo_fechas -v
++"""
++import unittest
++from datetime import date, timedelta
++
++import universo_fechas as uf
++
++HOY = date(2026, 9, 24)
++
++
++class TestClasificarFecha(unittest.TestCase):
++
++    def test_atrasada_valida_1_a_30_dias(self):
++        fecha = HOY - timedelta(days=15)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "atrasada_valida")
++
++    def test_atrasada_valida_limite_30_dias(self):
++        fecha = HOY - timedelta(days=30)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "atrasada_valida")
++
++    def test_atrasada_suciedad_mas_de_30_dias(self):
++        fecha = HOY - timedelta(days=31)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "atrasada_suciedad")
++
++    def test_proxima_hoy(self):
++        self.assertEqual(uf.clasificar_fecha(HOY, hoy=HOY), "proxima")
++
++    def test_proxima_limite_21_dias(self):
++        fecha = HOY + timedelta(days=21)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "proxima")
++
++    def test_lejana_normal_22_a_60_dias(self):
++        fecha = HOY + timedelta(days=45)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "lejana_normal")
++
++    def test_lejana_normal_limite_60_dias(self):
++        fecha = HOY + timedelta(days=60)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "lejana_normal")
++
++    def test_muy_futura_mas_de_60_dias(self):
++        fecha = HOY + timedelta(days=61)
++        self.assertEqual(uf.clasificar_fecha(fecha, hoy=HOY), "muy_futura")
++
++    def test_muy_futura_por_horizonte_sospechoso(self):
++        # Caso sintético (el ejemplo del spec, IT 1384 de Cerrillos, es un mal
++        # ejemplo para esta regla: +98d ya supera +60d por el umbral simple).
++        # Aquí: +45d cae en lejana_normal por umbral simple, pero un horizonte
++        # de reprogramación de 150d (>120) la reclasifica a muy_futura.
++        fecha = HOY + timedelta(days=45)
++        self.assertEqual(
++            uf.clasificar_fecha(fecha, horizonte_reprog=150, hoy=HOY),
++            "muy_futura",
++        )
++
++    def test_horizonte_sospechoso_no_reclasifica_proxima(self):
++        # La regla de horizonte nunca debe sacar algo de "proxima" (dias<=21),
++        # aunque el horizonte sea sospechoso.
++        fecha = HOY + timedelta(days=10)
++        self.assertEqual(
++            uf.clasificar_fecha(fecha, horizonte_reprog=500, hoy=HOY),
++            "proxima",
++        )
++
++    def test_horizonte_none_no_afecta_clasificacion(self):
++        fecha = HOY + timedelta(days=45)
++        self.assertEqual(
++            uf.clasificar_fecha(fecha, horizonte_reprog=None, hoy=HOY),
++            "lejana_normal",
++        )
++
++
++if __name__ == "__main__":
++    unittest.main()

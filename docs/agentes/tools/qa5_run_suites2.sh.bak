@@ -1,0 +1,6 @@
+cd /c/Users/OptiFierro/Desktop/optifierro_int/backend
+for t in test_migracion_scraper_optisteel test_motor_averias_cubigest_fusion test_sync_unificado test_averias_cubigest test_b44b_capacidad_real test_decodificar_material test_f4_operadores test_f8_ribete_adelanto test_cuadro_resumen; do
+  R=$(timeout 100 python -m unittest $t 2>&1 | grep -E '^(Ran|OK|FAILED)' | tr '\n' ' ')
+  echo "$t: $R"
+done
+echo FIN

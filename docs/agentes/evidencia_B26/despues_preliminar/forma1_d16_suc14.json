@@ -1,0 +1,138 @@
+{
+  "id_forma": 1,
+  "diametro": 16,
+  "meses_consultados": 24,
+  "total_registros": 297,
+  "dotacion_detectable": false,
+  "peso_aprox_kg_consultado": null,
+  "nota_metodologica": "Producciones estimadas en base a antecedentes historicos de produccion; rango tipico segun el historial (P25-P75). Es una estimacion referencial: no es un intervalo de confianza ni esta validada a nivel de operario y pedido.",
+  "nota_rutas": "Las maquinas listadas son las que procesaron esta forma y diametro segun el historial; no corresponden al ruteo que calcula el Planificador.",
+  "criterios": {
+    "n_min_tonh": 15,
+    "tonh_max": 50.0,
+    "rango_pct": [
+      0.05,
+      0.95
+    ],
+    "bins_5_min_n": 50,
+    "bins_3_min_n": 30,
+    "ratio_barra_max": 1.5,
+    "metodo": "delta crudo entre registros consecutivos (2-480 min); no validado a nivel operario+pedido (ver B26-B)"
+  },
+  "por_maquina": [
+    {
+      "maquina_id": 401,
+      "maquina_nombre": "Cortadora 1",
+      "sucursal_id": 14,
+      "n_registros": 7,
+      "avg_largo_mm": 6422.0,
+      "peso_etiqueta_tipico_kg": 574.0,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 7,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 402,
+      "maquina_nombre": "Cortadora 2",
+      "sucursal_id": 14,
+      "n_registros": 34,
+      "avg_largo_mm": 6825.0,
+      "peso_etiqueta_tipico_kg": 995.8,
+      "ton_hora_estimado": 0.465,
+      "ton_hora_p25": 0.179,
+      "ton_hora_p75": 0.765,
+      "n_grupo": 34,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        4.8,
+        1201.3
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 414,
+      "maquina_nombre": "ESTRIBADORA TJK 2",
+      "sucursal_id": 14,
+      "n_registros": 11,
+      "avg_largo_mm": 5000.0,
+      "peso_etiqueta_tipico_kg": 146.0,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 11,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 415,
+      "maquina_nombre": "EURA 20_2",
+      "sucursal_id": 14,
+      "n_registros": 65,
+      "avg_largo_mm": 5100.0,
+      "peso_etiqueta_tipico_kg": 144.0,
+      "ton_hora_estimado": 0.2,
+      "ton_hora_p25": 0.076,
+      "ton_hora_p75": 0.867,
+      "n_grupo": 65,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        3.2,
+        15.8
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 416,
+      "maquina_nombre": "Linea Corte Coronel",
+      "sucursal_id": 14,
+      "n_registros": 75,
+      "avg_largo_mm": 7886.0,
+      "peso_etiqueta_tipico_kg": 190.0,
+      "ton_hora_estimado": 0.333,
+      "ton_hora_p25": 0.086,
+      "ton_hora_p75": 0.839,
+      "n_grupo": 75,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        4.5,
+        459.8
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 417,
+      "maquina_nombre": "Cortadora Manual",
+      "sucursal_id": 14,
+      "n_registros": 105,
+      "avg_largo_mm": 6498.0,
+      "peso_etiqueta_tipico_kg": 29.0,
+      "ton_hora_estimado": 0.156,
+      "ton_hora_p25": 0.049,
+      "ton_hora_p75": 0.334,
+      "n_grupo": 105,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        3.0,
+        1203.7
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    }
+  ]
+}

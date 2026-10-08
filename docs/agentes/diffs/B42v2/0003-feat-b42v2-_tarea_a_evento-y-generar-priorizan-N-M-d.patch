@@ -1,0 +1,74 @@
+From 04d61a1c032a1b8b5cd2ba7e80af75519580c997 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 12:38:14 -0300
+Subject: [PATCH 3/6] feat(b42v2): _tarea_a_evento y /generar priorizan N/M de
+ la tarea sobre el mapa volatil - D3/D4/D6
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+_tarea_a_evento y la anotacion cruda en /generar ahora toman
+numero_etiqueta/total_etiquetas directo del dict de la tarea (que
+el Motor ya puebla por etiqueta desde T1/T2) y solo caen a
+_mapa_numero_etiqueta si la tarea no trae el valor (ej. reaplicada
+de una corrida vieja). Antes /generar pisaba siempre con el mapa,
+descartando el valor que ya traia la tarea.
+
+D6 confirmado sin cambios: el bucle de programacion_detalle en
+/generar itera lista_etiqueta_ids (ahora siempre 1 elemento) e
+inserta kilos/nro_piezas/id_forma de _t — como _t ya es 1 etiqueta
+(no un grupo fusionado), la fila queda con los valores reales de
+esa etiqueta sin necesidad de tocar el bucle.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/routers/programacion.py | 26 +++++++++++++++++---------
+ 1 file changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 59363b3..e1224ab 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -220,11 +220,15 @@ def _tarea_a_evento(t: dict, sucursal_id: int, turno: str = None, fecha: str = N
+         "id_forma":       t.get("id_forma"),
+         "nr_piezas":          t.get("nr_piezas", 0),
+         "lista_etiqueta_ids": t.get("lista_etiqueta_ids", []),
+-        # B42: numero fisico de etiqueta (ver _mapa_numero_etiqueta). None si
+-        # aun no se poblo el mapa para este etiqueta_id (ej. tras un reinicio
+-        # de backend, antes del siguiente "Generar") — el frontend cae a
+-        # codigo_viaje en ese caso.
+-        "numero_etiqueta": _mapa_numero_etiqueta.get(t.get("etiqueta_id")),
++        # B42 v2 (D4): numero fisico de etiqueta "N de M" viaja CON la tarea
++        # desde el Motor (numero_etiqueta/total_etiquetas, poblados en
++        # _obtener_pids_pendientes/_piezas_optisteel_por_viajes y propagados
++        # por etiqueta en programar_turno). _mapa_numero_etiqueta es memoria
++        # volatil y solo se usa como respaldo (ej. tras un reinicio de
++        # backend, antes del siguiente "Generar") — si tampoco esta ahi, el
++        # frontend cae a codigo_viaje.
++        "numero_etiqueta": t.get("numero_etiqueta") if t.get("numero_etiqueta") is not None else _mapa_numero_etiqueta.get(t.get("etiqueta_id")),
++        "total_etiquetas": t.get("total_etiquetas"),
+         "ajuste_manual": t.get("ajuste_manual", False),
+     }
+ 
+@@ -1390,10 +1394,14 @@ async def generar_programacion(solicitud: SolicitudProgramacion, request: Reques
+         _aplicar_ajustes_duracion(resultado.get("tareas", []), solicitud.sucursal_id, solicitud.fecha_produccion, turno_norm)
+ 
+         for t in resultado.get("tareas", []):
+-            # B42: anotar numero fisico de etiqueta tambien en la tarea cruda
+-            # que se devuelve por HTTP (el frontend pinta result.tareas
+-            # directo, sin pasar por _tarea_a_evento/GET).
+-            t["numero_etiqueta"] = _mapa_numero_etiqueta.get(t.get("etiqueta_id"))
++            # B42 v2 (D4/D6): la tarea ya trae numero_etiqueta/total_etiquetas
++            # propios desde el Motor (D3) — el mapa solo es respaldo si por
++            # algun motivo no vinieron (ej. tarea de una corrida vieja
++            # reaplicada). Se anota tambien en la tarea cruda que se devuelve
++            # por HTTP (el frontend pinta result.tareas directo, sin pasar
++            # por _tarea_a_evento/GET).
++            if t.get("numero_etiqueta") is None:
++                t["numero_etiqueta"] = _mapa_numero_etiqueta.get(t.get("etiqueta_id"))
+             global_eventos.append(_tarea_a_evento(t, solicitud.sucursal_id, turno=turno_norm, fecha=solicitud.fecha_produccion))
+     except Exception as e:
+         logger.warning(f"No se pudo persistir programación generada: {e}")
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,159 @@
+From c6eb3493b922f3c6160429f58531dc87fcbabe25 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 12:40:24 -0300
+Subject: [PATCH 4/6] feat(b42v2): caratula y tooltip muestran Etiqueta N de M
+ - D7
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Caratula (DraggableTimelineEvent): cuando numero_etiqueta viene del
+Motor, linea 1 = Ø{diametro} + N de M (prioridad 1-2), linea 2 =
+peso + viaje (prioridad 3-4), ambas con truncate/ellipsis CSS —
+mecanismo simple sin min-width ni JS: lo de menor prioridad se
+recorta primero por quedar al final de cada linea (spec B42_v2
+seccion 10/12, decision Montu 24-09). Elimina la linea TAGs (sin
+sentido con 1 tarea = 1 etiqueta). Fallback intacto a codigo_viaje/
+id_tarea si numero_etiqueta es null (planes generados antes del
+deploy o via scheduler automatico sin match Cubigest).
+
+Tooltip: header con Etiqueta N de M, agrega Largo y Forma (antes
+ausentes), Cantidad y Peso renombrados desde PIEZAS/Kilos, elimina
+la fila TAGs: N etiquetas.
+
+Agrega total_etiquetas a la interfaz Tarea y al mapeo de POST
+/generar (result.tareas) — GET /api/programacion no necesita mapeo
+explicito porque ya hace spread de todos los campos del evento.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ .../components/domain/GestorProgramacion.tsx  | 78 +++++++++++++------
+ 1 file changed, 53 insertions(+), 25 deletions(-)
+
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index da4826e..52eeea8 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -50,6 +50,8 @@ interface Tarea {
+     // "Tag #: N of M"); distinto de etiqueta_id (PK interna). undefined/null
+     // si aun no se resolvio (fallback a codigo_viaje/etiqueta_id en UI).
+     numero_etiqueta?: number | null;
++    // B42 v2: total de etiquetas del grupo fisico ("N of M" -> M).
++    total_etiquetas?: number | null;
+     // B44(a): true si esta cajita tiene un ajuste manual de duracion vigente.
+     ajuste_manual?: boolean;
+     // B43 (fix): senal real de "adelantada" - true si esta cajita viene de la
+@@ -421,24 +423,43 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+                 fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+             }}
+         >
+-            {/* Line 1: numero de etiqueta de fabricacion (B42) - bold.
+-                Fallback a codigo_viaje/id_tarea si Cubigest aun no resolvio
+-                el numero fisico (ver numero_etiqueta en Tarea/backend). */}
+-            <span
+-                className="truncate uppercase font-bold"
+-                style={{ color: obraColor.textColor, fontSize: '10px' }}
+-                title={ev.numero_etiqueta != null ? `Etiqueta ${ev.numero_etiqueta} — Viaje ${ev.codigo_viaje}` : (ev.codigo_viaje || ev.id_tarea)}
+-            >
+-                {ev.numero_etiqueta != null ? `Etiq. ${ev.numero_etiqueta}` : (ev.codigo_viaje || ev.id_tarea)}
+-            </span>
+-
+-            {/* Line 2: TAG count - slightly smaller */}
+-            <span
+-                className="truncate opacity-90"
+-                style={{ color: obraColor.textColor, fontSize: '9px' }}
+-            >
+-                {ev.nr_tags ?? 1} TAGs
+-            </span>
++            {/* B42 v2: una cajita = una etiqueta. Prioridad de lectura cuando la
++                cajita es angosta (spec B42_v2 §10/§12, decision Montu 24-09):
++                Diametro > Etiqueta N de M > Peso > Viaje. Cada linea trunca con
++                ellipsis (CSS puro, sin min-width ni JS) — lo que no entra se
++                omite visualmente y queda disponible en el tooltip on-hover.
++                Fallback a lo que se mostraba hoy (viaje/id_tarea) si el plan
++                vigente no trae numero_etiqueta (ej. generado antes del deploy
++                o por el scheduler automatico sin Cubigest.Etiqueta). */}
++            {ev.numero_etiqueta != null ? (
++                <>
++                    <span
++                        className="truncate uppercase font-bold"
++                        style={{ color: obraColor.textColor, fontSize: '10px' }}
++                        title={`Ø${ev.diametro} — Etiqueta ${ev.numero_etiqueta}${ev.total_etiquetas != null ? ` de ${ev.total_etiquetas}` : ''} — Viaje ${ev.codigo_viaje}`}
++                    >
++                        {`Ø${ev.diametro} · ${ev.numero_etiqueta}${ev.total_etiquetas != null ? ` de ${ev.total_etiquetas}` : ''}`}
++                    </span>
++                    <span
++                        className="truncate opacity-90"
++                        style={{ color: obraColor.textColor, fontSize: '9px' }}
++                        title={`${ev.kilos != null ? Math.round(ev.kilos).toLocaleString('es-CL') + ' kg' : ''} — ${ev.codigo_viaje}`}
++                    >
++                        {[
++                            ev.kilos != null ? `${Math.round(ev.kilos).toLocaleString('es-CL')} kg` : null,
++                            ev.codigo_viaje,
++                        ].filter(Boolean).join(' · ')}
++                    </span>
++                </>
++            ) : (
++                <span
++                    className="truncate uppercase font-bold"
++                    style={{ color: obraColor.textColor, fontSize: '10px' }}
++                    title={ev.codigo_viaje || ev.id_tarea}
++                >
++                    {ev.codigo_viaje || ev.id_tarea}
++                </span>
++            )}
+ 
+             {/* Line 3: ONLY if delayed — red warning indicator */}
+             {ev.dias_atraso != null && ev.dias_atraso > 0 && (
+@@ -1098,6 +1119,7 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                     nr_piezas: t.nr_piezas,
+                     lista_etiqueta_ids: t.lista_etiqueta_ids ?? [],
+                     numero_etiqueta: t.numero_etiqueta ?? null,
++                    total_etiquetas: t.total_etiquetas ?? null,
+                 }));
+                 const pendientesNormalizados = result.bolsa_sin_asignar.map((p: any) => ({
+                     id_tarea: String(p.etiqueta_id),
+@@ -1765,10 +1787,12 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                             transform: tooltipPos.x > window.innerWidth - 310 ? 'translateX(-100%)' : undefined,
+                         }}
+                     >
+-                        {/* Fila 1: numero de etiqueta (B42) + viaje + badge prioridad */}
++                        {/* Fila 1: etiqueta N de M (B42 v2) + viaje + badge prioridad */}
+                         <div className="flex justify-between items-center px-4 pt-3 pb-2">
+                             <span className="text-base font-black text-white tracking-tight">
+-                                {hoveredEvent.numero_etiqueta != null ? `Etiq. ${hoveredEvent.numero_etiqueta}` : hoveredEvent.codigo_viaje}
++                                {hoveredEvent.numero_etiqueta != null
++                                    ? `Etiqueta ${hoveredEvent.numero_etiqueta}${hoveredEvent.total_etiquetas != null ? ` de ${hoveredEvent.total_etiquetas}` : ''}`
++                                    : hoveredEvent.codigo_viaje}
+                                 {hoveredEvent.numero_etiqueta != null && (
+                                     <span className="text-slate-400 font-normal text-xs ml-2">{hoveredEvent.codigo_viaje}</span>
+                                 )}
+@@ -1790,16 +1814,20 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                 <span className="font-semibold text-slate-200">{hoveredEvent.diametro}mm <span className="text-slate-400 ml-1">{hoveredEvent.calidad_acero}</span></span>
+                             </div>
+                             <div className="flex justify-between items-center">
+-                                <span className="text-slate-500 w-20 shrink-0">Kilos:</span>
+-                                <span className="font-semibold text-slate-200">{Math.round(hoveredEvent.kilos ?? 0).toLocaleString('es-CL')} kg</span>
++                                <span className="text-slate-500 w-20 shrink-0">Largo:</span>
++                                <span className="font-semibold text-slate-200">{hoveredEvent.largo_a != null ? `${hoveredEvent.largo_a} m` : '—'}</span>
++                            </div>
++                            <div className="flex justify-between items-center">
++                                <span className="text-slate-500 w-20 shrink-0">Forma:</span>
++                                <span className="font-semibold text-slate-200">{hoveredEvent.id_forma ?? '—'}</span>
+                             </div>
+                             <div className="flex justify-between items-center">
+-                                <span className="text-slate-500 w-20 shrink-0">PIEZAS:</span>
++                                <span className="text-slate-500 w-20 shrink-0">Cantidad:</span>
+                                 <span className="font-semibold text-slate-200">{hoveredEvent.nr_piezas != null && !isNaN(Number(hoveredEvent.nr_piezas)) ? Math.round(Number(hoveredEvent.nr_piezas)) : '-'}</span>
+                             </div>
+                             <div className="flex justify-between items-center">
+-                                <span className="text-slate-500 w-20 shrink-0">TAGs:</span>
+-                                <span className="font-semibold text-slate-200">{hoveredEvent.nr_tags ?? 1} etiquetas</span>
++                                <span className="text-slate-500 w-20 shrink-0">Peso:</span>
++                                <span className="font-semibold text-slate-200">{Math.round(hoveredEvent.kilos ?? 0).toLocaleString('es-CL')} kg</span>
+                             </div>
+                             <div className="flex justify-between items-center pt-1 border-t border-slate-800/50">
+                                 <span className="text-slate-500 w-20 shrink-0">Operador:</span>
+-- 
+2.54.0.windows.1
+

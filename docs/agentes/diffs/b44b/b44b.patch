@@ -1,0 +1,621 @@
+diff --git a/backend/routers/tiempos_maquina.py b/backend/routers/tiempos_maquina.py
+index 45489c2..1de51fa 100644
+--- a/backend/routers/tiempos_maquina.py
++++ b/backend/routers/tiempos_maquina.py
+@@ -30,22 +30,34 @@ FP-006: Cerrillos SQLite=10, Cubigest=4.
+ 
+ Pendiente B26-B: portar el metodo validado FASE3 a este endpoint
+ (ver docs/B26_B_pendiente_metodo_validado.md).
++
++--- B44(b) (24-09-2026) ---
++Campo de "capacidad real" ingresado manualmente por el jefe de planta,
++independiente del estimado historico de arriba (ver docstring de
++_ensure_tabla_capacidad_real). Es referencial: no modifica la programacion
++ni retroalimenta el Motor (ese mecanismo de auto-aprendizaje sigue abierto,
++ver B44 en pendientes_sistema_planificador.md).
+ """
+ import logging
++import sqlite3
+ import statistics
+ from collections import defaultdict
+ from typing import Optional
+ 
+ from fastapi import APIRouter, HTTPException, Query
++from pydantic import BaseModel, Field
+ 
+ logger = logging.getLogger(__name__)
+ 
+ router = APIRouter(prefix="/api", tags=["tiempos_maquina"])
+ 
++DB_PATH = "optifierro_v2.db"
++
+ # Mapeo SQLite sucursal_id → Cubigest IdSucursal (FP-006)
+ _SQLITE_TO_CUB = {1: 1, 10: 4, 14: 14}
+ _CUB_TO_SQLITE = {1: 1, 4: 10, 14: 14}
+ _ALL_CUBIGEST  = [1, 4, 14]
++_SUCURSALES_SQLITE_VALIDAS = (1, 10, 14)
+ 
+ _DELTA_MIN_MIN = 2.0    # descartar ruido intra-lote
+ _DELTA_MAX_MIN = 480.0  # descartar gaps entre turnos/días
+@@ -60,6 +72,11 @@ _BINS_5_MIN_N    = 50
+ _BINS_3_MIN_N    = 30
+ _RATIO_BARRA_MAX = 1.5
+ 
++# Capacidad real ingresada por jefe de planta (B44-b) — misma cota que el
++# estimado historico (_TONH_MAX), es el limite fisico razonable para una
++# maquina de esta linea.
++_CAPACIDAD_REAL_MAX = 50.0
++
+ NOTA_METODOLOGICA = (
+     "Producciones estimadas en base a antecedentes historicos de produccion; "
+     "rango tipico segun el historial (P25-P75). Es una estimacion "
+@@ -73,6 +90,137 @@ NOTA_RUTAS = (
+     "Planificador."
+ )
+ 
++NOTA_CAPACIDAD_REAL = (
++    "Referencial: no modifica la programacion."
++)
++
++
++def _ensure_tabla_capacidad_real():
++    """Tabla append-only: cada guardado/limpieza inserta una fila nueva.
++
++    Clave logica = (sucursal_id, maquina_id, id_forma, diametro). El valor
++    vigente es la fila de mayor id para esa clave; ton_hora NULL representa
++    una limpieza (se conserva el historial en vez de borrar filas).
++    """
++    with sqlite3.connect(DB_PATH, timeout=10) as conn:
++        conn.execute("""
++            CREATE TABLE IF NOT EXISTS capacidad_real_maquina (
++                id           INTEGER PRIMARY KEY AUTOINCREMENT,
++                sucursal_id  INTEGER NOT NULL,
++                maquina_id   INTEGER NOT NULL,
++                id_forma     INTEGER NOT NULL,
++                diametro     REAL    NOT NULL,
++                ton_hora     REAL,
++                usuario      TEXT    NOT NULL,
++                nota         TEXT,
++                creado_en    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
++            )
++        """)
++        conn.execute("""
++            CREATE INDEX IF NOT EXISTS idx_capacidad_real_clave
++            ON capacidad_real_maquina (sucursal_id, maquina_id, id_forma, diametro)
++        """)
++
++
++_ensure_tabla_capacidad_real()
++
++
++class CapacidadRealPayload(BaseModel):
++    sucursal_id: int
++    maquina_id: int
++    id_forma: int
++    diametro: float
++    ton_hora: float = Field(..., gt=0, le=_CAPACIDAD_REAL_MAX)
++    usuario: str = Field(..., min_length=1)
++    nota: Optional[str] = None
++
++
++class CapacidadRealClearPayload(BaseModel):
++    sucursal_id: int
++    maquina_id: int
++    id_forma: int
++    diametro: float
++    usuario: str = Field(..., min_length=1)
++
++
++def _validar_clave_capacidad(sucursal_id: int):
++    if sucursal_id not in _SUCURSALES_SQLITE_VALIDAS:
++        raise HTTPException(
++            status_code=400,
++            detail=f"sucursal_id {sucursal_id} no válido. Use: 1, 10 o 14."
++        )
++
++
++def _capacidades_reales_vigentes(id_forma: int, diametro: float) -> dict[tuple, dict]:
++    """Ultimo valor (por id) de cada (sucursal_id, maquina_id) para esta forma+diametro."""
++    with sqlite3.connect(DB_PATH, timeout=10) as conn:
++        conn.row_factory = sqlite3.Row
++        rows = conn.execute(
++            """
++            SELECT c.sucursal_id, c.maquina_id, c.ton_hora, c.usuario, c.nota, c.creado_en
++            FROM capacidad_real_maquina c
++            WHERE c.id_forma = ? AND c.diametro = ?
++              AND c.id = (
++                  SELECT MAX(c2.id) FROM capacidad_real_maquina c2
++                  WHERE c2.sucursal_id = c.sucursal_id
++                    AND c2.maquina_id  = c.maquina_id
++                    AND c2.id_forma    = c.id_forma
++                    AND c2.diametro    = c.diametro
++              )
++            """,
++            (id_forma, diametro),
++        ).fetchall()
++    resultado = {}
++    for r in rows:
++        if r["ton_hora"] is None:
++            continue  # ultima accion fue una limpieza: no hay capacidad real vigente
++        resultado[(r["sucursal_id"], r["maquina_id"])] = {
++            "ton_hora":       r["ton_hora"],
++            "usuario":        r["usuario"],
++            "nota":           r["nota"],
++            "actualizado_en": r["creado_en"],
++        }
++    return resultado
++
++
++@router.put("/tiempos-maquina/capacidad-real")
++def guardar_capacidad_real(payload: CapacidadRealPayload):
++    _validar_clave_capacidad(payload.sucursal_id)
++    with sqlite3.connect(DB_PATH, timeout=10) as conn:
++        conn.execute(
++            """
++            INSERT INTO capacidad_real_maquina
++                (sucursal_id, maquina_id, id_forma, diametro, ton_hora, usuario, nota)
++            VALUES (?, ?, ?, ?, ?, ?, ?)
++            """,
++            (
++                payload.sucursal_id, payload.maquina_id, payload.id_forma,
++                payload.diametro, payload.ton_hora, payload.usuario.strip(),
++                payload.nota,
++            ),
++        )
++    return {"ok": True, **_capacidades_reales_vigentes(payload.id_forma, payload.diametro).get(
++        (payload.sucursal_id, payload.maquina_id), {}
++    )}
++
++
++@router.delete("/tiempos-maquina/capacidad-real")
++def limpiar_capacidad_real(payload: CapacidadRealClearPayload):
++    _validar_clave_capacidad(payload.sucursal_id)
++    with sqlite3.connect(DB_PATH, timeout=10) as conn:
++        conn.execute(
++            """
++            INSERT INTO capacidad_real_maquina
++                (sucursal_id, maquina_id, id_forma, diametro, ton_hora, usuario, nota)
++            VALUES (?, ?, ?, ?, NULL, ?, NULL)
++            """,
++            (
++                payload.sucursal_id, payload.maquina_id, payload.id_forma,
++                payload.diametro, payload.usuario.strip(),
++            ),
++        )
++    return {"ok": True}
++
+ 
+ def _peso_estimado_kg(diametro_mm: float, largo_aprox_mm: float) -> float:
+     """Peso estimado de barra corrugada: kg/m = diametro_mm^2 / 162."""
+@@ -151,6 +299,8 @@ def get_tiempos_maquina(
+ 
+     placeholders = ",".join("?" * len(cubigest_ids))
+ 
++    capacidades_reales = _capacidades_reales_vigentes(id_forma, diametro)
++
+     query = f"""
+         SELECT
+             pp.PIE_MAQUINA          AS MaquinaId,
+@@ -204,6 +354,7 @@ def get_tiempos_maquina(
+             "peso_aprox_kg_consultado": peso_aprox_kg,
+             "nota_metodologica":   NOTA_METODOLOGICA,
+             "nota_rutas":          NOTA_RUTAS,
++            "nota_capacidad_real": NOTA_CAPACIDAD_REAL,
+             "criterios":           criterios,
+             "por_maquina":         [],
+         }
+@@ -367,10 +518,11 @@ def get_tiempos_maquina(
+         peso_etiqueta_tipico_kg = round(statistics.median(pesos_etq), 1) if pesos_etq else None
+ 
+         meta = maq_meta[key]
++        sucursal_sqlite = meta["sucursal_sqlite"]
+         por_maquina.append({
+             "maquina_id":               maq_id,
+             "maquina_nombre":           meta["maquina_nombre"],
+-            "sucursal_id":              meta["sucursal_sqlite"],
++            "sucursal_id":              sucursal_sqlite,
+             "n_registros":              n,
+             "avg_largo_mm":             avg_largo,
+             "peso_etiqueta_tipico_kg":  peso_etiqueta_tipico_kg,
+@@ -383,6 +535,7 @@ def get_tiempos_maquina(
+             "rango_barra_kg":           rango_barra_kg,
+             "ajuste_por_largo":         ajuste_por_largo,
+             "peso_referencia_kg":       peso_referencia_kg,
++            "capacidad_real":           capacidades_reales.get((sucursal_sqlite, maq_id)),
+         })
+         total_registros += n
+ 
+@@ -395,6 +548,7 @@ def get_tiempos_maquina(
+         "peso_aprox_kg_consultado": peso_aprox_kg,
+         "nota_metodologica":   NOTA_METODOLOGICA,
+         "nota_rutas":          NOTA_RUTAS,
++        "nota_capacidad_real": NOTA_CAPACIDAD_REAL,
+         "criterios":           criterios,
+         "por_maquina":         por_maquina,
+     }
+diff --git a/backend/test_b44b_capacidad_real.py b/backend/test_b44b_capacidad_real.py
+new file mode 100644
+index 0000000..2af422f
+--- /dev/null
++++ b/backend/test_b44b_capacidad_real.py
+@@ -0,0 +1,121 @@
++"""
++B44(b) — Capacidad real de máquina (jefe de planta). Pruebas AC1-AC7.
++
++Ejecutar: python -m unittest test_b44b_capacidad_real -v
++
++Corre sobre una COPIA de la SQLite real en /tmp (nunca sobre optifierro_v2.db
++del contenedor). No requiere Cubigest: prueba directamente las funciones del
++router (guardado, limpieza, lectura vigente), no el endpoint GET completo
++(ese requiere Cubigest y se verifica aparte con una llamada real de solo
++lectura).
++"""
++import os
++import shutil
++import sqlite3
++import sys
++import tempfile
++import unittest
++
++sys.path.insert(0, "/app")
++
++import routers.tiempos_maquina as tm  # noqa: E402
++from fastapi import HTTPException  # noqa: E402
++
++
++class TestB44bCapacidadReal(unittest.TestCase):
++
++    def setUp(self):
++        self._tmpdir = tempfile.mkdtemp(prefix="b44b_test_")
++        self._tmp_db = os.path.join(self._tmpdir, "copia_optifierro_v2.db")
++        shutil.copyfile("/app/optifierro_v2.db", self._tmp_db)
++        self._orig_db_path = tm.DB_PATH
++        tm.DB_PATH = self._tmp_db
++        tm._ensure_tabla_capacidad_real()
++
++    def tearDown(self):
++        tm.DB_PATH = self._orig_db_path
++        shutil.rmtree(self._tmpdir, ignore_errors=True)
++
++    def test_ac1_tabla_se_crea_vacia(self):
++        vigentes = tm._capacidades_reales_vigentes(id_forma=421, diametro=12.0)
++        self.assertEqual(vigentes, {})
++
++    def test_ac2_guardar_y_leer_vigente(self):
++        payload = tm.CapacidadRealPayload(
++            sucursal_id=10, maquina_id=5, id_forma=421, diametro=12.0,
++            ton_hora=3.5, usuario="Jose Auger",
++        )
++        resultado = tm.guardar_capacidad_real(payload)
++        self.assertTrue(resultado["ok"])
++        self.assertEqual(resultado["ton_hora"], 3.5)
++
++        vigentes = tm._capacidades_reales_vigentes(id_forma=421, diametro=12.0)
++        self.assertIn((10, 5), vigentes)
++        self.assertEqual(vigentes[(10, 5)]["ton_hora"], 3.5)
++        self.assertEqual(vigentes[(10, 5)]["usuario"], "Jose Auger")
++
++    def test_ac3_actualizar_conserva_historial_append_only(self):
++        base = dict(sucursal_id=14, maquina_id=7, id_forma=500, diametro=16.0, usuario="Remiz")
++        tm.guardar_capacidad_real(tm.CapacidadRealPayload(**base, ton_hora=2.0))
++        tm.guardar_capacidad_real(tm.CapacidadRealPayload(**base, ton_hora=2.8))
++
++        vigentes = tm._capacidades_reales_vigentes(id_forma=500, diametro=16.0)
++        self.assertEqual(vigentes[(14, 7)]["ton_hora"], 2.8)
++
++        with sqlite3.connect(tm.DB_PATH) as conn:
++            n = conn.execute(
++                "SELECT COUNT(*) FROM capacidad_real_maquina WHERE sucursal_id=14 AND maquina_id=7"
++            ).fetchone()[0]
++        self.assertEqual(n, 2)
++
++    def test_ac4_limpiar_deja_vigente_nulo_sin_borrar_historial(self):
++        base = dict(sucursal_id=1, maquina_id=9, id_forma=600, diametro=10.0, usuario="Montu")
++        tm.guardar_capacidad_real(tm.CapacidadRealPayload(**base, ton_hora=4.1))
++        tm.limpiar_capacidad_real(
++            tm.CapacidadRealClearPayload(
++                sucursal_id=1, maquina_id=9, id_forma=600, diametro=10.0, usuario="Montu"
++            )
++        )
++        vigentes = tm._capacidades_reales_vigentes(id_forma=600, diametro=10.0)
++        self.assertNotIn((1, 9), vigentes)
++
++        with sqlite3.connect(tm.DB_PATH) as conn:
++            n = conn.execute(
++                "SELECT COUNT(*) FROM capacidad_real_maquina WHERE sucursal_id=1 AND maquina_id=9"
++            ).fetchone()[0]
++        self.assertEqual(n, 2)  # guardado + limpieza, ninguna fila borrada
++
++    def test_ac5_validacion_ton_hora_fuera_de_rango(self):
++        with self.assertRaises(Exception):
++            tm.CapacidadRealPayload(
++                sucursal_id=10, maquina_id=1, id_forma=1, diametro=8.0,
++                ton_hora=0, usuario="x",
++            )
++        with self.assertRaises(Exception):
++            tm.CapacidadRealPayload(
++                sucursal_id=10, maquina_id=1, id_forma=1, diametro=8.0,
++                ton_hora=51, usuario="x",
++            )
++
++    def test_ac6_validacion_sucursal_invalida(self):
++        payload = tm.CapacidadRealPayload(
++            sucursal_id=4, maquina_id=1, id_forma=1, diametro=8.0,
++            ton_hora=3.0, usuario="x",
++        )  # 4 es Cerrillos en Cubigest, NO en SQLite (FP-006) -> debe rechazarse
++        with self.assertRaises(HTTPException) as ctx:
++            tm.guardar_capacidad_real(payload)
++        self.assertEqual(ctx.exception.status_code, 400)
++
++    def test_ac7_clave_es_por_forma_y_diametro_no_cruza(self):
++        base = dict(sucursal_id=10, maquina_id=2, usuario="x")
++        tm.guardar_capacidad_real(tm.CapacidadRealPayload(**base, id_forma=1, diametro=12.0, ton_hora=3.0))
++        tm.guardar_capacidad_real(tm.CapacidadRealPayload(**base, id_forma=1, diametro=16.0, ton_hora=4.0))
++
++        vig_12 = tm._capacidades_reales_vigentes(id_forma=1, diametro=12.0)
++        vig_16 = tm._capacidades_reales_vigentes(id_forma=1, diametro=16.0)
++        self.assertEqual(vig_12[(10, 2)]["ton_hora"], 3.0)
++        self.assertEqual(vig_16[(10, 2)]["ton_hora"], 4.0)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 8fc6e8d..2405fe0 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -147,7 +147,7 @@ export default function App() {
+       case 'gestor_averias': return <GestorAverias sucursal={globalSucursal} onAveriaRegistrada={() => setAveriaTimestamp(Date.now())} />;
+       case 'vista_semanal': return <VistaSemanal userRol={authUser.rol} sucursal={globalSucursal} />;
+       case 'calendario_futuro': return <CalendarioFuturo sucursalId={globalSucursal} onPlanificarSemana={(offset) => { setPendingCompromisoOffset(offset); setCurrentView('programacion'); }} />;
+-      case 'tiempos_maquina': return <TiemposPorMaquina />;
++      case 'tiempos_maquina': return <TiemposPorMaquina userNombre={authUser.nombre} isReadOnly={isReadOnly} />;
+       case 'administracion': return <Administracion userRol={authUser.rol} sucursal={globalSucursal} sucursalAsignada={authUser.sucursal_asignada} />;
+       default: return (
+         <div className="flex flex-col items-center justify-center h-full animate-in fade-in duration-300">
+diff --git a/frontend/src/components/domain/TiemposPorMaquina.tsx b/frontend/src/components/domain/TiemposPorMaquina.tsx
+index be948f5..fccad16 100644
+--- a/frontend/src/components/domain/TiemposPorMaquina.tsx
++++ b/frontend/src/components/domain/TiemposPorMaquina.tsx
+@@ -1,5 +1,5 @@
+ import { useState } from 'react';
+-import { Timer, Search, AlertCircle, Loader2 } from 'lucide-react';
++import { Timer, Search, AlertCircle, Loader2, Save, X } from 'lucide-react';
+ 
+ interface Criterios {
+   n_min_tonh: number;
+@@ -14,6 +14,13 @@ interface Criterios {
+ 
+ type EstadoRango = 'sin_largo' | 'no_evaluable' | 'fuera_de_rango' | 'ok';
+ 
++interface CapacidadReal {
++  ton_hora: number;
++  usuario: string;
++  nota: string | null;
++  actualizado_en: string;
++}
++
+ interface MaquinaData {
+   maquina_id: number;
+   maquina_nombre: string;
+@@ -30,6 +37,7 @@ interface MaquinaData {
+   rango_barra_kg: [number, number] | null;
+   ajuste_por_largo: boolean;
+   peso_referencia_kg: number | null;
++  capacidad_real: CapacidadReal | null;
+ }
+ 
+ interface TiemposResponse {
+@@ -41,6 +49,7 @@ interface TiemposResponse {
+   peso_aprox_kg_consultado: number | null;
+   nota_metodologica: string;
+   nota_rutas: string;
++  nota_capacidad_real: string;
+   criterios: Criterios;
+   por_maquina: MaquinaData[];
+ }
+@@ -60,7 +69,18 @@ const SUCURSAL_BADGE: Record<number, string> = {
+ 
+ const fmtCL = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
+ 
+-export default function TiemposPorMaquina() {
++const fmtFecha = (iso: string) => {
++  const d = new Date(iso.replace(' ', 'T'));
++  if (Number.isNaN(d.getTime())) return iso;
++  return d.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
++};
++
++interface TiemposPorMaquinaProps {
++  userNombre: string;
++  isReadOnly: boolean;
++}
++
++export default function TiemposPorMaquina({ userNombre, isReadOnly }: TiemposPorMaquinaProps) {
+   const [idForma, setIdForma]       = useState('');
+   const [diametro, setDiametro]     = useState('');
+   const [sucursal, setSucursal]     = useState('');
+@@ -68,6 +88,9 @@ export default function TiemposPorMaquina() {
+   const [largoAprox, setLargoAprox] = useState('');
+   const [estado, setEstado]         = useState<'idle' | 'loading' | 'ok' | 'empty' | 'error'>('idle');
+   const [data, setData]             = useState<TiemposResponse | null>(null);
++  const [capacidadInputs, setCapacidadInputs] = useState<Record<string, string>>({});
++  const [capacidadBusy, setCapacidadBusy]     = useState<Record<string, boolean>>({});
++  const [capacidadError, setCapacidadError]   = useState<Record<string, string>>({});
+   const [errorMsg, setErrorMsg]     = useState('');
+ 
+   const handleConsultar = async () => {
+@@ -103,6 +126,94 @@ export default function TiemposPorMaquina() {
+     }
+   };
+ 
++  const claveFila = (m: MaquinaData) => `${m.sucursal_id}-${m.maquina_id}`;
++
++  const actualizarCapacidadEnData = (m: MaquinaData, capacidad: CapacidadReal | null) => {
++    setData(prev => {
++      if (!prev) return prev;
++      return {
++        ...prev,
++        por_maquina: prev.por_maquina.map(row =>
++          row.maquina_id === m.maquina_id && row.sucursal_id === m.sucursal_id
++            ? { ...row, capacidad_real: capacidad }
++            : row
++        ),
++      };
++    });
++  };
++
++  const handleGuardarCapacidad = async (m: MaquinaData) => {
++    if (!data) return;
++    const key = claveFila(m);
++    const valorTexto = capacidadInputs[key];
++    const valor = Number(valorTexto);
++    if (!valorTexto || Number.isNaN(valor) || valor <= 0 || valor > 50) {
++      setCapacidadError(prev => ({ ...prev, [key]: 'Ingresa un valor entre 0 y 50 ton/hora' }));
++      return;
++    }
++    setCapacidadBusy(prev => ({ ...prev, [key]: true }));
++    setCapacidadError(prev => ({ ...prev, [key]: '' }));
++    try {
++      const res = await fetch('/api/tiempos-maquina/capacidad-real', {
++        method: 'PUT',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({
++          sucursal_id: m.sucursal_id,
++          maquina_id: m.maquina_id,
++          id_forma: data.id_forma,
++          diametro: data.diametro,
++          ton_hora: valor,
++          usuario: userNombre,
++        }),
++      });
++      if (!res.ok) {
++        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
++        throw new Error(err.detail || `HTTP ${res.status}`);
++      }
++      const json = await res.json();
++      actualizarCapacidadEnData(m, {
++        ton_hora: json.ton_hora ?? valor,
++        usuario: json.usuario ?? userNombre,
++        nota: json.nota ?? null,
++        actualizado_en: json.actualizado_en ?? new Date().toISOString(),
++      });
++      setCapacidadInputs(prev => ({ ...prev, [key]: '' }));
++    } catch (e: unknown) {
++      setCapacidadError(prev => ({ ...prev, [key]: e instanceof Error ? e.message : 'Error desconocido' }));
++    } finally {
++      setCapacidadBusy(prev => ({ ...prev, [key]: false }));
++    }
++  };
++
++  const handleLimpiarCapacidad = async (m: MaquinaData) => {
++    if (!data) return;
++    const key = claveFila(m);
++    setCapacidadBusy(prev => ({ ...prev, [key]: true }));
++    setCapacidadError(prev => ({ ...prev, [key]: '' }));
++    try {
++      const res = await fetch('/api/tiempos-maquina/capacidad-real', {
++        method: 'DELETE',
++        headers: { 'Content-Type': 'application/json' },
++        body: JSON.stringify({
++          sucursal_id: m.sucursal_id,
++          maquina_id: m.maquina_id,
++          id_forma: data.id_forma,
++          diametro: data.diametro,
++          usuario: userNombre,
++        }),
++      });
++      if (!res.ok) {
++        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
++        throw new Error(err.detail || `HTTP ${res.status}`);
++      }
++      actualizarCapacidadEnData(m, null);
++    } catch (e: unknown) {
++      setCapacidadError(prev => ({ ...prev, [key]: e instanceof Error ? e.message : 'Error desconocido' }));
++    } finally {
++      setCapacidadBusy(prev => ({ ...prev, [key]: false }));
++    }
++  };
++
+   return (
+     <div className="h-full flex flex-col gap-4 p-4 overflow-auto custom-scrollbar">
+       {/* ── Header ─────────────────────────────────────────────────── */}
+@@ -283,11 +394,15 @@ export default function TiemposPorMaquina() {
+                       <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Peso típ. etiqueta (kg)</th>
+                       <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Ton/hora (mediana)</th>
+                       <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Rango típico P25–P75</th>
++                      <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Capacidad real (ton/hora)</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {data.por_maquina.map((m) => {
+                       const esMayor = m.n_registros === maxN;
++                      const key = claveFila(m);
++                      const busy = Boolean(capacidadBusy[key]);
++                      const err = capacidadError[key];
+                       return (
+                         <tr key={`${m.maquina_id}-${m.sucursal_id}`}
+                           style={{
+@@ -354,6 +469,63 @@ export default function TiemposPorMaquina() {
+                               ? `${fmtCL(m.ton_hora_p25)} – ${fmtCL(m.ton_hora_p75)}`
+                               : '—'}
+                           </td>
++                          <td className="px-4 py-3 text-right" style={{ color: '#374151' }}>
++                            <div className="flex flex-col items-end gap-1">
++                              {m.capacidad_real != null && (
++                                <div className="text-right">
++                                  <span className="font-semibold tabular-nums" style={{ color: '#111827' }}>
++                                    {fmtCL(m.capacidad_real.ton_hora)}
++                                  </span>
++                                  <span className="block text-xs font-normal" style={{ color: '#9ca3af' }}>
++                                    ingresada por {m.capacidad_real.usuario} ({fmtFecha(m.capacidad_real.actualizado_en)})
++                                  </span>
++                                </div>
++                              )}
++                              {!isReadOnly && (
++                                <div className="flex items-center gap-1.5">
++                                  <input
++                                    type="number"
++                                    step="0.1"
++                                    min="0"
++                                    max="50"
++                                    placeholder="ej. 3.5"
++                                    value={capacidadInputs[key] ?? ''}
++                                    onChange={e => setCapacidadInputs(prev => ({ ...prev, [key]: e.target.value }))}
++                                    onKeyDown={e => e.key === 'Enter' && handleGuardarCapacidad(m)}
++                                    disabled={busy}
++                                    className="w-20 px-2 py-1 rounded-md text-xs outline-none text-right"
++                                    style={{ background: '#f9fafb', color: '#111827', border: '1px solid #d1d5db' }}
++                                  />
++                                  <button
++                                    onClick={() => handleGuardarCapacidad(m)}
++                                    disabled={busy || !capacidadInputs[key]}
++                                    title="Guardar capacidad real"
++                                    className="p-1.5 rounded-md text-white disabled:opacity-40"
++                                    style={{ background: '#16a34a' }}
++                                  >
++                                    {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
++                                  </button>
++                                  {m.capacidad_real != null && (
++                                    <button
++                                      onClick={() => handleLimpiarCapacidad(m)}
++                                      disabled={busy}
++                                      title="Limpiar capacidad real"
++                                      className="p-1.5 rounded-md disabled:opacity-40"
++                                      style={{ background: '#f3f4f6', color: '#6b7280', border: '1px solid #d1d5db' }}
++                                    >
++                                      <X className="w-3.5 h-3.5" />
++                                    </button>
++                                  )}
++                                </div>
++                              )}
++                              {err && (
++                                <span className="text-xs font-normal" style={{ color: '#dc2626' }}>{err}</span>
++                              )}
++                              <span className="text-xs font-normal" style={{ color: '#9ca3af' }}>
++                                {data.nota_capacidad_real}
++                              </span>
++                            </div>
++                          </td>
+                         </tr>
+                       );
+                     })}

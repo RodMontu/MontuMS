@@ -1,0 +1,1031 @@
+From 48d946c4f25af3907025fbd2f083929fe5e15127 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 12:37:27 -0300
+Subject: [PATCH 2/6] feat(b42v2): una cajita = una etiqueta - series por
+ (viaje,diametro,forma,largo,calidad,avance) - D1/D2/D3
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Cambia la clave de agrupacion de programar_turno de (codigo_viaje,
+diametro, etapa_avance) a (codigo_viaje, diametro, id_forma,
+largo_mm=round(largo_a*1000), calidad_acero_real, etapa_avance) —
+D1. El redondeo de largo evita partir una serie fisica por el
+float noise de Cubigest (8.699999809265137 vs 8.7, CCa12 6c).
+
+Ruta/maquina/operador se resuelven UNA vez por serie con el
+representante (ahora homogeneo en forma/largo/calidad/diametro —
+D2). La duracion de la serie se calcula igual que hoy
+(estimar_duracion_min con los kg de la serie) y se reparte entre
+sus etiquetas proporcional a kg; el cursor de la maquina avanza
+etiqueta a etiqueta dentro de la serie (consecutivas, sin
+reordenar por prioridad una vez que la serie empieza a asignarse).
+
+Se emite 1 tarea del Motor POR ETIQUETA (nr_tags=1,
+lista_etiqueta_ids=[etiqueta_id], numero_etiqueta/total_etiquetas
+propios) en vez de 1 tarea fusionada por grupo — D3.
+
+El bloque de alerta/auto-reparto en paralelo (umbral 80porciento/100porciento, B2)
+se preserva sin cambios de logica, ahora evaluado sobre la
+duracion de 1 etiqueta en vez de la del grupo completo — D5, ver
+informe CCa13 para el detalle de esta decision.
+
+Se elimina el bloque muerto de pasos_saltados (variable declarada
+pero nunca poblada, confirmado por grep antes de tocar) y se
+extrae _bolsa_entry()/_etapa_avance()/_largo_mm()/_calidad_real()
+como helpers para no repetir el dict de bolsa_sin_asignar 12 veces.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/motor_v2.py | 885 +++++++++++++++++---------------------------
+ 1 file changed, 347 insertions(+), 538 deletions(-)
+
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index bd516e9..76d2985 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -948,99 +948,96 @@ def programar_turno(
+ 
+     kgs_totales = sum(e.get("kgs", 0) for e in etiquetas_ordenadas)
+ 
+-    # Agrupar etiquetas por (codigo_viaje, diametro, etapa_avance) — cada
+-    # grupo = una cajita en el Gantt. etapa_avance separa piezas en 0%
+-    # (ruta normal desde el primer paso) de piezas con 0%<avance<100% (ya
+-    # pasaron por corte, van a la etapa siguiente) para no mezclar en una
+-    # misma cajita piezas que requieren rutas distintas.
++    # B42 v2: agrupar etiquetas en SERIES por (codigo_viaje, diametro, id_forma,
++    # largo_mm, calidad_acero_real, etapa_avance) — cada serie se asigna a UNA
++    # maquina y emite 1 tarea POR ETIQUETA (cajita), consecutivas en esa
++    # maquina (D1/D2/D3, spec B42_v2 seccion 3). largo_mm = round(largo_a*1000):
++    # en Cubigest el mismo largo aparece como 8.699999809265137 y 8.7 (evidencia
++    # CCa-12 §6c); sin redondeo una serie fisica se parte en dos series falsas.
+     def _etapa_avance(e: dict) -> str:
+         return "avanzada" if (e.get("avance_pct") or 0) > 0 else "inicio"
+ 
++    def _largo_mm(e: dict) -> int:
++        return round((e.get("largo_a") or 0) * 1000)
++
++    def _calidad_real(e: dict) -> str:
++        return e.get("calidad_acero_real", e.get("calidad_acero", "A630"))
++
++    def _bolsa_entry(e: dict, motivo: str, motivo_key: str, alerta_reparto: dict = None) -> dict:
++        entry = {
++            "etiqueta_id":    e.get("etiqueta_id"),
++            "codigo_viaje":   e.get("codigo_viaje", ""),
++            "motivo":         motivo,
++            "motivo_key":     motivo_key,
++            "kgs":            e.get("kgs", 0),
++            "diametro":       e.get("diametro", 0),
++            "nr_piezas":      e.get("nr_piezas", 0),
++            "id_forma":       e.get("id_forma"),
++            "obra":           e.get("obra", ""),
++            "calidad_acero":  e.get("calidad_acero", "A630"),
++            "fecha_despacho": e.get("fecha_despacho"),
++            "fecha_it":       e.get("fecha_it"),
++        }
++        if alerta_reparto is not None:
++            entry["alerta_reparto"] = alerta_reparto
++        return entry
++
+     grupos: dict = defaultdict(list)
+-    for etiqueta in etiquetas_ordenadas:
+-        key = (etiqueta.get("codigo_viaje", ""), etiqueta.get("diametro", 0), _etapa_avance(etiqueta))
+-        grupos[key].append(etiqueta)
++    for etq in etiquetas_ordenadas:
++        key = (
++            etq.get("codigo_viaje", ""),
++            etq.get("diametro", 0),
++            etq.get("id_forma"),
++            _largo_mm(etq),
++            _calidad_real(etq),
++            _etapa_avance(etq),
++        )
++        grupos[key].append(etq)
+ 
+-    for (codigo_viaje_g, diametro_g, etapa_avance_g), grupo_etiquetas in grupos.items():
++    for (codigo_viaje_g, diametro_g, id_forma_g, largo_mm_g, calidad_g, etapa_avance_g), grupo_etiquetas in grupos.items():
+         etiqueta_ref   = grupo_etiquetas[0]
+         kgs_grupo      = sum(e.get("kgs", 0) for e in grupo_etiquetas)
+         nr_tags        = len(grupo_etiquetas)
+-        dias_atraso_g  = max(e.get("dias_atraso", 0) for e in grupo_etiquetas)
+-        fecha_despacho_g = min(
+-            e.get("fecha_despacho", "9999-12-31") for e in grupo_etiquetas
+-        )
+-        tipo_g = "megaproyecto" if nr_tags > 500 else "normal"
+-        avance_pct_g = max((e.get("avance_pct") or 0) for e in grupo_etiquetas)
+-
+-        etiqueta = {
+-            **etiqueta_ref,
+-            "kgs":                kgs_grupo,
+-            "nr_tags":            nr_tags,
+-            "dias_atraso":        dias_atraso_g,
+-            "fecha_despacho":     fecha_despacho_g,
+-            "tipo":               tipo_g,
+-            "avance_pct":         avance_pct_g,
+-            "lista_etiqueta_ids": [e["etiqueta_id"] for e in grupo_etiquetas],
+-        }
+-
+-        etiqueta_id  = etiqueta["etiqueta_id"]
+-        id_forma     = etiqueta["id_forma"]
+-        diametro     = etiqueta["diametro"]
+-        calidad      = etiqueta.get("calidad_acero_real", etiqueta.get("calidad_acero", "A630"))
+-        largo_a      = etiqueta.get("largo_a")
+-        nr_piezas    = etiqueta.get("nr_piezas", 1)
+-        kgs          = etiqueta.get("kgs", 0)
+-        dias_atraso  = etiqueta.get("dias_atraso", 0)
+-        prioridad    = _etiqueta_prioridad(etiqueta)
+-
+-        # Fase 1: resolver ruta
++        avance_pct_g   = max((e.get("avance_pct") or 0) for e in grupo_etiquetas)
++
++        # D2: ruta/maquina/operador se resuelven UNA vez por serie, con el
++        # representante — ahora homogeneo en forma/largo/calidad/diametro (a
++        # diferencia del grupo v1, que solo compartia viaje+diametro).
++        etiqueta_id  = etiqueta_ref["etiqueta_id"]
++        id_forma     = etiqueta_ref["id_forma"]
++        diametro     = etiqueta_ref["diametro"]
++        calidad      = _calidad_real(etiqueta_ref)
++        largo_a      = etiqueta_ref.get("largo_a")
++        kgs          = kgs_grupo  # D2: duracion de la serie = estimar_duracion_min con los kg de la SERIE (igual que hoy)
++        prioridad    = _etiqueta_prioridad(etiqueta_ref)
++
++        # Fase 1: resolver ruta (una vez por serie)
+         ruta, sin_historial = resolver_ruta(
+             sucursal_nombre, id_forma, diametro, calidad, largo_a, conocimiento
+         )
+ 
+         # Regla avance B: pieza con 0%<avance<100% ya paso por corte —
+         # saltar a la etapa siguiente (o estribadora-equivalente si es AD).
+-        # Nunca aplica a avance=0% (regla c) ni deberia recibir avance>=100%
+-        # (ya filtrado en Cubigest, ver _piezas_optisteel_por_viajes).
+-        avance_pct = etiqueta.get("avance_pct") or 0
+-        if ruta and 0 < avance_pct < 100:
++        if ruta and 0 < avance_pct_g < 100:
+             ruta_original = ruta
+             ruta = ajustar_ruta_por_avance(ruta, sucursal_nombre, diametro, conocimiento, id_forma)
+             if not ruta:
+-                bolsa_sin_asignar.append({
+-                    "etiqueta_id": etiqueta_id,
+-                    "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                    "motivo": (
+-                        f"Pieza con avance {avance_pct:.0f}% ya paso por corte "
+-                        f"({' -> '.join(ruta_original)}), sin ruta definida para la etapa siguiente"
+-                    ),
+-                    "motivo_key": "sin_ruta_etapa_siguiente",
+-                    "kgs":            etiqueta.get("kgs", 0),
+-                    "diametro":       etiqueta.get("diametro", 0),
+-                    "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                    "id_forma":       etiqueta.get("id_forma"),
+-                    "obra":           etiqueta.get("obra", ""),
+-                    "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                    "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                    "fecha_it":       etiqueta.get("fecha_it"),
+-                })
++                for e in grupo_etiquetas:
++                    bolsa_sin_asignar.append(_bolsa_entry(
++                        e,
++                        f"Pieza con avance {avance_pct_g:.0f}% ya paso por corte "
++                        f"({' -> '.join(ruta_original)}), sin ruta definida para la etapa siguiente",
++                        "sin_ruta_etapa_siguiente",
++                    ))
+                 continue
+ 
+         if not ruta:
+-            bolsa_sin_asignar.append({
+-                "etiqueta_id": etiqueta_id,
+-                "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                "motivo": f"Pieza sin historial — IdForma={id_forma} Ø{diametro}mm sin máquina compatible en {sucursal_nombre}",
+-                "motivo_key": "pieza_sin_historial",
+-                "kgs":            etiqueta.get("kgs", 0),
+-                "diametro":       etiqueta.get("diametro", 0),
+-                "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                "id_forma":       etiqueta.get("id_forma"),
+-                "obra":           etiqueta.get("obra", ""),
+-                "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                "fecha_it":       etiqueta.get("fecha_it"),
+-            })
++            for e in grupo_etiquetas:
++                bolsa_sin_asignar.append(_bolsa_entry(
++                    e,
++                    f"Pieza sin historial — IdForma={id_forma} Ø{diametro}mm sin máquina compatible en {sucursal_nombre}",
++                    "pieza_sin_historial",
++                ))
+             continue
+ 
+         if sin_historial:
+@@ -1048,71 +1045,47 @@ def programar_turno(
+                 f"Fallback usado para IdForma={id_forma} Ø{diametro}mm en {sucursal_nombre} — ruta: {ruta}"
+             )
+ 
+-        # Fase 2: asignar cada paso de la ruta
+-        tarea_asignada = True
+-        hora_paso_anterior_fin = None
+-        pasos_saltados = []
++        # Fase 2: asignar cada paso de la ruta, emitiendo 1 tarea POR ETIQUETA
++        # de la serie (D3), consecutivas en la maquina resuelta para ese paso.
++        # `pendientes` preserva el orden de prioridad de la serie (sin
++        # reordenar dentro de ella una vez que empieza a asignarse — D2).
++        pendientes = list(grupo_etiquetas)
++        hora_paso_anterior_fin_por_etiqueta: dict = {}
+ 
+         for paso_idx, maquina_str in enumerate(ruta):
+-            # Resolver nombre de máquina (la ruta histórica viene con MAQ_NRO)
++            if not pendientes:
++                break
++
+             nombre_maquina = _resolver_nombre_maquina(maquina_str, sucursal_nombre, conocimiento)
+ 
+-            # Excluir máquinas detenidas o sin clasificar (ING) por avería
++            # ── Guards a nivel de MAQUINA/PASO — validos para toda la serie ──
+             if nombre_maquina in maquinas_detenidas:
+                 if nombre_maquina in maquinas_ingresadas:
+-                    motivo_key = "maquina_ingresada"
+-                    motivo_txt = f"Máquina {nombre_maquina} sin clasificar (avería ingresada)"
++                    motivo_key, motivo_txt = "maquina_ingresada", f"Máquina {nombre_maquina} sin clasificar (avería ingresada)"
+                 else:
+-                    motivo_key = "maquina_detenida"
+-                    motivo_txt = f"Máquina {nombre_maquina} detenida por avería"
+-                bolsa_sin_asignar.append({
+-                    "etiqueta_id": etiqueta_id,
+-                    "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                    "motivo": motivo_txt,
+-                    "motivo_key": motivo_key,
+-                    "kgs":            etiqueta.get("kgs", 0),
+-                    "diametro":       etiqueta.get("diametro", 0),
+-                    "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                    "id_forma":       etiqueta.get("id_forma"),
+-                    "obra":           etiqueta.get("obra", ""),
+-                    "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                    "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                    "fecha_it":       etiqueta.get("fecha_it"),
+-                })
+-                tarea_asignada = False
++                    motivo_key, motivo_txt = "maquina_detenida", f"Máquina {nombre_maquina} detenida por avería"
++                for e in pendientes:
++                    bolsa_sin_asignar.append(_bolsa_entry(e, motivo_txt, motivo_key))
++                pendientes = []
+                 break
+ 
+-            # Excluir máquinas no liberadas (FIX-G06)
+             if nombre_maquina in maquinas_no_liberadas:
+-                logger.info(f"IT [{etiqueta_id}] sin maquina disponible — maquina {nombre_maquina} no liberada")
+-                bolsa_sin_asignar.append({
+-                    "etiqueta_id": etiqueta_id,
+-                    "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                    "motivo": f"Máquina {nombre_maquina} no liberada por supervisor",
+-                    "motivo_key": "maquina_no_liberada",
+-                    "kgs":            etiqueta.get("kgs", 0),
+-                    "diametro":       etiqueta.get("diametro", 0),
+-                    "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                    "id_forma":       etiqueta.get("id_forma"),
+-                    "obra":           etiqueta.get("obra", ""),
+-                    "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                    "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                    "fecha_it":       etiqueta.get("fecha_it"),
+-                })
+-                tarea_asignada = False
++                logger.info(f"Serie [{etiqueta_id}] sin maquina disponible — maquina {nombre_maquina} no liberada")
++                for e in pendientes:
++                    bolsa_sin_asignar.append(_bolsa_entry(
++                        e, f"Máquina {nombre_maquina} no liberada por supervisor", "maquina_no_liberada",
++                    ))
++                pendientes = []
+                 break
+ 
+-            # Filtrar máquinas inactivas (filtramos aquí, tras resolver el nombre)
+             activas = MAQUINAS_ACTIVAS.get(sucursal_nombre, set())
+             if activas and nombre_maquina not in activas:
+-                # Fallback: buscar máquina activa alternativa que soporte este diámetro
+                 candidatas_alt = [
+                     m for m in activas
+                     if m not in maquinas_detenidas
+                     and m not in maquinas_no_liberadas
+                     and diametro in conocimiento.diametros_x_maquina.get((sucursal_nombre, m), [])
+                 ]
+-                # Ordenar por carga actual (menor número de tareas asignadas = preferida)
+                 candidatas_alt.sort(key=lambda m: sum(1 for t in tareas if t["nombre_maquina"] == m))
+                 if candidatas_alt:
+                     logger.info(
+@@ -1121,45 +1094,25 @@ def programar_turno(
+                     )
+                     nombre_maquina = candidatas_alt[0]
+                 else:
+-                    bolsa_sin_asignar.append({
+-                        "etiqueta_id": etiqueta_id,
+-                        "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                        "motivo": f"Sin máquina activa disponible para Ø{diametro}mm en {sucursal_nombre}",
+-                        "motivo_key": "sin_maquina_disponible",
+-                        "kgs":            etiqueta.get("kgs", 0),
+-                        "diametro":       etiqueta.get("diametro", 0),
+-                        "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                        "id_forma":       etiqueta.get("id_forma"),
+-                        "obra":           etiqueta.get("obra", ""),
+-                        "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                        "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                        "fecha_it":       etiqueta.get("fecha_it"),
+-                    })
+-                    tarea_asignada = False
++                    for e in pendientes:
++                        bolsa_sin_asignar.append(_bolsa_entry(
++                            e, f"Sin máquina activa disponible para Ø{diametro}mm en {sucursal_nombre}", "sin_maquina_disponible",
++                        ))
++                    pendientes = []
+                     break
+ 
+-            # Verificar diámetro compatible
+             diams_ok = conocimiento.diametros_x_maquina.get((sucursal_nombre, nombre_maquina), [])
+             if diams_ok and diametro not in diams_ok and nombre_maquina not in MAQUINAS_SIN_OPERADOR:
+-                bolsa_sin_asignar.append({
+-                    "etiqueta_id": etiqueta_id,
+-                    "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                    "motivo": f"Máquina {nombre_maquina} no opera diámetro {diametro}mm",
+-                    "motivo_key": "diametro_incompatible",
+-                    "kgs":            etiqueta.get("kgs", 0),
+-                    "diametro":       etiqueta.get("diametro", 0),
+-                    "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                    "id_forma":       etiqueta.get("id_forma"),
+-                    "obra":           etiqueta.get("obra", ""),
+-                    "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                    "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                    "fecha_it":       etiqueta.get("fecha_it"),
+-                })
+-                tarea_asignada = False
++                for e in pendientes:
++                    bolsa_sin_asignar.append(_bolsa_entry(
++                        e, f"Máquina {nombre_maquina} no opera diámetro {diametro}mm", "diametro_incompatible",
++                    ))
++                pendientes = []
+                 break
+ 
+-            # Verificar operador disponible (excepto máquinas sin operador)
+-            operador_asignado = None
++            # Candidatos de operador: resueltos UNA vez por (serie, paso) —
++            # D2/CCa12 §2d. El chequeo de solape sigue siendo por etiqueta
++            # (cada una ocupa un intervalo de tiempo distinto en la maquina).
+             candidatos_operador: list[str] = []
+             if nombre_maquina not in MAQUINAS_SIN_OPERADOR:
+                 candidatos_operador = _operadores_candidatos(
+@@ -1167,416 +1120,272 @@ def programar_turno(
+                     operadores_disponibles, conocimiento,
+                     habitual=habituales_turno.get(nombre_maquina),
+                 )
+-                operador_asignado = candidatos_operador[0] if candidatos_operador else None
+-                if not operador_asignado:
+-                    bolsa_sin_asignar.append({
+-                        "etiqueta_id": etiqueta_id,
+-                        "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                        "motivo": f"Sin operador disponible para {nombre_maquina}",
+-                        "motivo_key": "sin_operador",
+-                        "kgs":            etiqueta.get("kgs", 0),
+-                        "diametro":       etiqueta.get("diametro", 0),
+-                        "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                        "id_forma":       etiqueta.get("id_forma"),
+-                        "obra":           etiqueta.get("obra", ""),
+-                        "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                        "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                        "fecha_it":       etiqueta.get("fecha_it"),
+-                    })
+-                    tarea_asignada = False
++                if not candidatos_operador:
++                    for e in pendientes:
++                        bolsa_sin_asignar.append(_bolsa_entry(
++                            e, f"Sin operador disponible para {nombre_maquina}", "sin_operador",
++                        ))
++                    pendientes = []
+                     break
+ 
+-            # Calcular tiempo de inicio
+-            cursor = cursor_maquinas.get(nombre_maquina, hora_inicio)
+-            # Si hay un paso anterior, no puede empezar antes de que termine
+-            if hora_paso_anterior_fin:
+-                cursor = max(cursor, hora_paso_anterior_fin)
+-
+-            # Penalización setup por cambio de diámetro
+-            if (nombre_maquina in ultimo_diametro
+-                    and ultimo_diametro[nombre_maquina] != diametro):
+-                cursor += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
+-
+-            # Saltar break: si el cursor cae dentro del descanso, avanzar al fin del break
+-            cursor = _saltar_break(cursor, brk_ini, brk_fin)
++            restricciones_maquina = conocimiento.restricciones_x_maquina.get((sucursal_id, nombre_maquina), [])
++            for restriccion in restricciones_maquina:
++                logger.warning(
++                    "Restriccion blanda en asignacion: serie=%s maquina=%s sucursal=%s restriccion=%s",
++                    etiqueta_id, nombre_maquina, sucursal_id, restriccion,
++                )
+ 
+-            # Verificar que cabe en el turno
+-            duracion = estimar_duracion_min(
++            # Duracion de la SERIE para este paso — calculada como hoy (D2:
++            # estimar_duracion_min con los kg de la serie completa), luego
++            # repartida entre las etiquetas de `pendientes` proporcional a kg.
++            duracion_total_paso = estimar_duracion_min(
+                 sucursal_nombre, id_forma, diametro, nombre_maquina, kgs, conocimiento
+             )
+-            hora_fin_tarea = cursor + timedelta(minutes=duracion)
+-            # Si la tarea cruza el break: sumar la duración del break al tiempo final
+-            if cursor < brk_ini < hora_fin_tarea:
+-                hora_fin_tarea += (brk_fin - brk_ini)
+-
+-            # ── Alerta de reparto en paralelo (umbral 80%/100%, B2) ─────────
+-            # 80-99% ("suave"): solo informativa, la asignación sigue siendo a
+-            # 1 sola máquina. 100%+ ("dura"): ver bloque de auto-reparto abajo
+-            # (corrección Montu 12-09-2026) — ya no es solo alerta.
+-            alerta_reparto = None
+-            maquina_sugerida = None
+-            _minutos_restantes = (hora_fin - cursor).total_seconds() / 60
+-            if _minutos_restantes > 0:
+-                pct_jornada = duracion / _minutos_restantes
+-                if pct_jornada >= 0.80:
+-                    maquina_sugerida = _sugerir_maquina_reparto(
+-                        sucursal_nombre, id_forma, diametro, nombre_maquina,
+-                        conocimiento, operadores_disponibles,
+-                        maquinas_detenidas, maquinas_no_liberadas,
+-                    )
+-                    alerta_reparto = {
+-                        "nivel": "suave" if pct_jornada < 1.0 else "dura",
+-                        "pct_jornada": round(pct_jornada, 3),
+-                        "maquina_sugerida": maquina_sugerida,
+-                    }
+-
+-            # ── 100%+: auto-reparto a 2 máquinas (corrección Montu 12-09-2026) ──
+-            # El trabajo no fitear completo es argumento suficiente para dividir:
+-            # en vez de mandarlo a bolsa_sin_asignar, el Motor auto-asigna a la
+-            # máquina original + la sugerida (mismo criterio kg/hora histórico,
+-            # fallback primera elegible; ver _sugerir_maquina_reparto), 50/50 en
+-            # kgs. La alerta_reparto se agrega igual, para que el Jefe vea que
+-            # se auto-repartió y por qué. Si no hay 2da máquina elegible, cae al
+-            # comportamiento anterior (bolsa_sin_asignar, bloque siguiente).
+-            if (alerta_reparto and alerta_reparto["nivel"] == "dura"
+-                    and hora_fin_tarea > hora_fin and maquina_sugerida):
+-                kgs_mitad = kgs / 2.0
+-                UMBRAL_DUR_MIN_REPARTO = 1.0
+-                reparto_info = []
+-                fines_reparto = []
+-                for _maq_r in (nombre_maquina, maquina_sugerida):
+-                    _cursor_r = cursor if _maq_r == nombre_maquina else cursor_maquinas.get(_maq_r, hora_inicio)
+-                    if hora_paso_anterior_fin:
+-                        _cursor_r = max(_cursor_r, hora_paso_anterior_fin)
+-                    if _maq_r in ultimo_diametro and ultimo_diametro[_maq_r] != diametro:
+-                        _cursor_r += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
+-                    _cursor_r = _saltar_break(_cursor_r, brk_ini, brk_fin)
+-
+-                    _dur_r = estimar_duracion_min(
+-                        sucursal_nombre, id_forma, diametro, _maq_r, kgs_mitad, conocimiento
+-                    )
+-                    _fin_r = _cursor_r + timedelta(minutes=_dur_r)
+-                    if _cursor_r < brk_ini < _fin_r:
+-                        _fin_r += (brk_fin - brk_ini)
+-
+-                    # Tope de jornada (fix 14-09-2026, AR-009/FAILURE_LOG): el reparto
+-                    # no queda exento del fin de turno como sí valida el flujo normal
+-                    # (L1116) — se corta al límite y el remanente lo recoge el turno
+-                    # siguiente vía el cuadro OptiSteel (decisión Montu 14-09, no se
+-                    # manda a bolsa_sin_asignar). max() evita duración negativa si
+-                    # _cursor_r ya viene después de hora_fin (ej. la máquina sugerida
+-                    # ya estaba ocupada más allá del turno por otra tarea previa).
+-                    # Los kg de esta mitad se ajustan proporcionalmente a la duración
+-                    # real recortada (estimar_duracion_min es lineal en kilos_grupo).
+-                    _kgs_r = kgs_mitad
+-                    if _fin_r > hora_fin:
+-                        _fin_r = max(_cursor_r, hora_fin)
+-                        _dur_r_capada = (_fin_r - _cursor_r).total_seconds() / 60.0
+-                        if _dur_r > 0:
+-                            _kgs_r = kgs_mitad * (_dur_r_capada / _dur_r)
+-                        _dur_r = _dur_r_capada
+-
+-                    # Mitad fantasma (fix 15-09-2026, AR-009 seguimiento): si el tope
+-                    # de jornada de arriba dejó esta mitad en ~0 min, no hay trabajo
+-                    # real que asignarle — no debe aparecer como fila en el reparto
+-                    # final (ni consumir operador/cursor de esa máquina). El remanente
+-                    # sigue sin programar en este turno, igual que el resto del kg
+-                    # recortado por el tope (ver comentario L1042-1048).
+-                    if _dur_r < UMBRAL_DUR_MIN_REPARTO:
+-                        continue
+-
+-                    _operador_r = None
+-                    if _maq_r not in MAQUINAS_SIN_OPERADOR:
+-                        _cands_r = _operadores_candidatos(
+-                            sucursal_nombre, _maq_r, operadores_disponibles, conocimiento,
+-                            habitual=habituales_turno.get(_maq_r),
++            kgs_pendientes_paso = sum(e.get("kgs", 0) for e in pendientes)
++
++            siguientes_pendientes = []
++            for e in pendientes:
++                eid_e = e["etiqueta_id"]
++                kg_e  = e.get("kgs", 0)
++                dur_e = (duracion_total_paso * (kg_e / kgs_pendientes_paso)) if kgs_pendientes_paso else 0.0
++
++                cursor = cursor_maquinas.get(nombre_maquina, hora_inicio)
++                hpaf = hora_paso_anterior_fin_por_etiqueta.get(eid_e)
++                if hpaf:
++                    cursor = max(cursor, hpaf)
++
++                if nombre_maquina in ultimo_diametro and ultimo_diametro[nombre_maquina] != diametro:
++                    cursor += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
++
++                cursor = _saltar_break(cursor, brk_ini, brk_fin)
++
++                hora_fin_tarea = cursor + timedelta(minutes=dur_e)
++                if cursor < brk_ini < hora_fin_tarea:
++                    hora_fin_tarea += (brk_fin - brk_ini)
++
++                # ── Alerta de reparto en paralelo (umbral 80%/100%, B2) — mismo
++                # mecanismo que hoy, ahora evaluado sobre la duracion de ESTA
++                # etiqueta (antes: duracion del grupo completo). D5/CCa12 §2d:
++                # se preserva el codigo tal cual, solo cambia la unidad sobre
++                # la que opera.
++                alerta_reparto = None
++                maquina_sugerida = None
++                _minutos_restantes = (hora_fin - cursor).total_seconds() / 60
++                if _minutos_restantes > 0:
++                    pct_jornada = dur_e / _minutos_restantes if _minutos_restantes else 0
++                    if pct_jornada >= 0.80:
++                        maquina_sugerida = _sugerir_maquina_reparto(
++                            sucursal_nombre, id_forma, diametro, nombre_maquina,
++                            conocimiento, operadores_disponibles,
++                            maquinas_detenidas, maquinas_no_liberadas,
+                         )
+-                        # Chequeo de solape de operador (fix 14-09-2026, AR-009): mismo
+-                        # criterio que el flujo normal (L1136-1146) — iterar candidatos
+-                        # hasta encontrar uno sin solape contra sus intervalos ya
+-                        # asignados. Si ninguno está libre, _operador_r queda None
+-                        # (igual que el caso MAQUINAS_SIN_OPERADOR de arriba).
+-                        for _cand_r in _cands_r:
+-                            _solapes_r = [
+-                                (ini, fin, maq, tid)
+-                                for ini, fin, maq, tid in intervalos_operador.get(_cand_r, [])
+-                                if _cursor_r < fin and _fin_r > ini
+-                            ]
+-                            if _solapes_r:
+-                                logger.warning(
+-                                    "Solapamiento operador en auto-reparto: %s ya tiene %s; intento %s en %s %s-%s",
+-                                    _cand_r,
+-                                    [
+-                                        {
+-                                            "maquina": maq,
+-                                            "id_tarea": tid,
+-                                            "inicio": ini.strftime("%H:%M"),
+-                                            "fin": fin.strftime("%H:%M"),
+-                                        }
+-                                        for ini, fin, maq, tid in _solapes_r
+-                                    ],
+-                                    f"{etiqueta_id}_p{paso_idx+1}",
+-                                    _maq_r,
+-                                    _cursor_r.strftime("%H:%M"),
+-                                    _fin_r.strftime("%H:%M"),
+-                                )
+-                                continue
+-                            _operador_r = _cand_r
+-                            break
+-
+-                    reparto_info.append({
+-                        "recurso_id":     _maq_r,
+-                        "nombre_maquina": _maq_r,
+-                        "pct_carga":      50.0,
+-                        "kgs":            round(_kgs_r, 1),
+-                        "duracion_min":   round(_dur_r, 1),
+-                        "operador":       conocimiento.nombre_por_username.get(
+-                                              _operador_r or '', _operador_r or ''),
+-                        "fecha_inicio":   _cursor_r.isoformat(),
+-                        "fecha_fin":      _fin_r.isoformat(),
+-                    })
+-                    cursor_maquinas[_maq_r] = _fin_r
+-                    ultimo_diametro[_maq_r] = diametro
+-                    if _operador_r:
+-                        intervalos_operador[_operador_r].append(
+-                            (_cursor_r, _fin_r, _maq_r, f"{etiqueta_id}_p{paso_idx+1}")
++                        alerta_reparto = {
++                            "nivel": "suave" if pct_jornada < 1.0 else "dura",
++                            "pct_jornada": round(pct_jornada, 3),
++                            "maquina_sugerida": maquina_sugerida,
++                        }
++
++                if (alerta_reparto and alerta_reparto["nivel"] == "dura"
++                        and hora_fin_tarea > hora_fin and maquina_sugerida):
++                    kg_mitad = kg_e / 2.0
++                    UMBRAL_DUR_MIN_REPARTO = 1.0
++                    reparto_info = []
++                    fines_reparto = []
++                    for _maq_r in (nombre_maquina, maquina_sugerida):
++                        _cursor_r = cursor if _maq_r == nombre_maquina else cursor_maquinas.get(_maq_r, hora_inicio)
++                        if hpaf:
++                            _cursor_r = max(_cursor_r, hpaf)
++                        if _maq_r in ultimo_diametro and ultimo_diametro[_maq_r] != diametro:
++                            _cursor_r += timedelta(minutes=SETUP_CAMBIO_DIAMETRO_MIN)
++                        _cursor_r = _saltar_break(_cursor_r, brk_ini, brk_fin)
++
++                        _dur_r = estimar_duracion_min(
++                            sucursal_nombre, id_forma, diametro, _maq_r, kg_mitad, conocimiento
+                         )
+-                    fines_reparto.append(_fin_r)
+-
+-                if not reparto_info:
+-                    # Las dos mitades quedaron en ~0 min tras el tope de jornada
+-                    # (fix 15-09-2026, AR-009 seguimiento): no hay trabajo real que
+-                    # programar en este turno — mismo tratamiento que "no cabe en
+-                    # el turno" (ver bloque bolsa_sin_asignar más abajo).
+-                    bolsa_sin_asignar.append({
+-                        "etiqueta_id": etiqueta_id,
+-                        "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                        "motivo": f"No cabe en el turno ({nombre_maquina} ocupada hasta {cursor.strftime('%H:%M')})",
+-                        "motivo_key": "turno_lleno",
+-                        "kgs":            etiqueta.get("kgs", 0),
+-                        "diametro":       etiqueta.get("diametro", 0),
+-                        "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                        "id_forma":       etiqueta.get("id_forma"),
+-                        "obra":           etiqueta.get("obra", ""),
+-                        "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                        "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                        "fecha_it":       etiqueta.get("fecha_it"),
++                        _fin_r = _cursor_r + timedelta(minutes=_dur_r)
++                        if _cursor_r < brk_ini < _fin_r:
++                            _fin_r += (brk_fin - brk_ini)
++
++                        _kgs_r = kg_mitad
++                        if _fin_r > hora_fin:
++                            _fin_r = max(_cursor_r, hora_fin)
++                            _dur_r_capada = (_fin_r - _cursor_r).total_seconds() / 60.0
++                            if _dur_r > 0:
++                                _kgs_r = kg_mitad * (_dur_r_capada / _dur_r)
++                            _dur_r = _dur_r_capada
++
++                        if _dur_r < UMBRAL_DUR_MIN_REPARTO:
++                            continue
++
++                        _operador_r = None
++                        if _maq_r not in MAQUINAS_SIN_OPERADOR:
++                            _cands_r = _operadores_candidatos(
++                                sucursal_nombre, _maq_r, operadores_disponibles, conocimiento,
++                                habitual=habituales_turno.get(_maq_r),
++                            )
++                            for _cand_r in _cands_r:
++                                _solapes_r = [
++                                    (ini, fin, maq, tid)
++                                    for ini, fin, maq, tid in intervalos_operador.get(_cand_r, [])
++                                    if _cursor_r < fin and _fin_r > ini
++                                ]
++                                if _solapes_r:
++                                    continue
++                                _operador_r = _cand_r
++                                break
++
++                        reparto_info.append({
++                            "recurso_id":     _maq_r,
++                            "nombre_maquina": _maq_r,
++                            "pct_carga":      50.0,
++                            "kgs":            round(_kgs_r, 1),
++                            "duracion_min":   round(_dur_r, 1),
++                            "operador":       conocimiento.nombre_por_username.get(
++                                                  _operador_r or '', _operador_r or ''),
++                            "fecha_inicio":   _cursor_r.isoformat(),
++                            "fecha_fin":      _fin_r.isoformat(),
++                        })
++                        cursor_maquinas[_maq_r] = _fin_r
++                        ultimo_diametro[_maq_r] = diametro
++                        if _operador_r:
++                            intervalos_operador[_operador_r].append(
++                                (_cursor_r, _fin_r, _maq_r, f"{eid_e}_p{paso_idx+1}")
++                            )
++                        fines_reparto.append(_fin_r)
++
++                    if not reparto_info:
++                        bolsa_sin_asignar.append(_bolsa_entry(
++                            e, f"No cabe en el turno ({nombre_maquina} ocupada hasta {cursor.strftime('%H:%M')})",
++                            "turno_lleno", alerta_reparto,
++                        ))
++                        continue
++
++                    _reparto_efectivo = len(reparto_info) >= 2
++                    _sobreviviente = reparto_info[0]
++                    tareas.append({
++                        "id_tarea":       f"{eid_e}_p{paso_idx+1}",
++                        "etiqueta_id":    eid_e,
++                        "codigo_viaje":   e.get("codigo_viaje", ""),
++                        "fecha_entrega":  e.get("fecha_entrega", ""),
++                        "obra":           e.get("obra", ""),
++                        "paso_secuencia": paso_idx + 1,
++                        "total_pasos":    len(ruta),
++                        "id_maquina":     maquina_str if _reparto_efectivo else _sobreviviente["recurso_id"],
++                        "nombre_maquina": nombre_maquina if _reparto_efectivo else _sobreviviente["nombre_maquina"],
++                        "id_forma":       id_forma,
++                        "diametro":       diametro,
++                        "calidad_acero":  calidad,
++                        "kilos":          kg_e if _reparto_efectivo else _sobreviviente["kgs"],
++                        "nr_piezas":      e.get("nr_piezas", 1),
++                        "fecha_inicio":   reparto_info[0]["fecha_inicio"],
++                        "fecha_fin":      max(fines_reparto).isoformat(),
++                        "duracion_min":   round(dur_e, 1) if _reparto_efectivo else _sobreviviente["duracion_min"],
++                        "operador":       reparto_info[0]["operador"],
++                        "estado":         "programado",
++                        "prioridad":      prioridad,
++                        "dias_atraso":    e.get("dias_atraso", 0),
++                        "ruta_completa":  ruta,
++                        "hebras":         conocimiento.hebras_x_maquina.get(
++                                              (sucursal_nombre,
++                                               nombre_maquina if _reparto_efectivo else _sobreviviente["nombre_maquina"],
++                                               diametro), 1),
++                        "nr_tags":        1,
++                        "largo_a":        e.get("largo_a", largo_a),
++                        "tipo":           "normal",
++                        "lista_etiqueta_ids": [eid_e],
++                        "numero_etiqueta": e.get("numero_etiqueta"),
++                        "total_etiquetas": e.get("total_etiquetas"),
+                         "alerta_reparto": alerta_reparto,
++                        "reparto":        reparto_info if _reparto_efectivo else None,
+                     })
+-                    tarea_asignada = False
+-                    break
+ 
+-                # Si tras excluir mitades fantasma queda 1 sola máquina con
+-                # trabajo real, ya no es un reparto — es una asignación normal
+-                # a esa máquina (fix 15-09-2026, AR-009 seguimiento). La otra
+-                # mitad (0 min) no se programa este turno, igual que el resto
+-                # del kg recortado por el tope (ver comentario L1042-1048).
+-                _reparto_efectivo = len(reparto_info) >= 2
+-                _sobreviviente = reparto_info[0]
++                    hora_paso_anterior_fin_por_etiqueta[eid_e] = max(fines_reparto)
++                    siguientes_pendientes.append(e)
++                    continue
++
++                if hora_fin_tarea > hora_fin:
++                    bolsa_sin_asignar.append(_bolsa_entry(
++                        e, f"No cabe en el turno ({nombre_maquina} ocupada hasta {cursor.strftime('%H:%M')})",
++                        "turno_lleno", alerta_reparto,
++                    ))
++                    continue
++
++                operador_asignado = None
++                if candidatos_operador:
++                    for candidato in candidatos_operador:
++                        solapes = [
++                            (ini, fin, maq, tid)
++                            for ini, fin, maq, tid in intervalos_operador.get(candidato, [])
++                            if cursor < fin and hora_fin_tarea > ini
++                        ]
++                        if solapes:
++                            continue
++                        operador_asignado = candidato
++                        break
++
++                    if not operador_asignado:
++                        logger.warning(
++                            "Etiqueta a bolsa por solapamiento operador: etiqueta=%s maquina=%s intervalo=%s-%s candidatos=%s",
++                            eid_e, nombre_maquina, cursor.strftime("%H:%M"), hora_fin_tarea.strftime("%H:%M"),
++                            candidatos_operador,
++                        )
++                        bolsa_sin_asignar.append(_bolsa_entry(
++                            e, f"Operador disponible solapado para {nombre_maquina}", "operador_solapado",
++                        ))
++                        continue
++
++                # Registrar tarea — 1 etiqueta = 1 cajita (D3)
+                 tareas.append({
+-                    "id_tarea":       f"{etiqueta_id}_p{paso_idx+1}",
+-                    "etiqueta_id":    etiqueta_id,
+-                    "codigo_viaje":   etiqueta.get("codigo_viaje", ""),
+-                    "fecha_entrega":  etiqueta.get("fecha_entrega", ""),
+-                    "obra":           etiqueta.get("obra", ""),
++                    "id_tarea":       f"{eid_e}_p{paso_idx+1}",
++                    "etiqueta_id":    eid_e,
++                    "codigo_viaje":   e.get("codigo_viaje", ""),
++                    "fecha_entrega":  e.get("fecha_entrega", ""),
++                    "obra":           e.get("obra", ""),
+                     "paso_secuencia": paso_idx + 1,
+                     "total_pasos":    len(ruta),
+-                    "id_maquina":     maquina_str if _reparto_efectivo else _sobreviviente["recurso_id"],
+-                    "nombre_maquina": nombre_maquina if _reparto_efectivo else _sobreviviente["nombre_maquina"],
++                    "id_maquina":     maquina_str,
++                    "nombre_maquina": nombre_maquina,
+                     "id_forma":       id_forma,
+                     "diametro":       diametro,
+                     "calidad_acero":  calidad,
+-                    "kilos":          kgs if _reparto_efectivo else _sobreviviente["kgs"],
+-                    "nr_piezas":      nr_piezas,
+-                    "fecha_inicio":   reparto_info[0]["fecha_inicio"],
+-                    "fecha_fin":      max(fines_reparto).isoformat(),
+-                    "duracion_min":   round(duracion, 1) if _reparto_efectivo else _sobreviviente["duracion_min"],
+-                    "operador":       reparto_info[0]["operador"],
+-                    "estado":         "programado",
++                    "kilos":          kg_e,
++                    "nr_piezas":      e.get("nr_piezas", 1),
++                    "fecha_inicio":   cursor.isoformat(),
++                    "fecha_fin":      hora_fin_tarea.isoformat(),
++                    "duracion_min":   round(dur_e, 1),
++                    # CRÍTICO: Este campo DEBE ser nombre_completo desde operadores_matriz
++                    # NO usar username. Bug recurrente — no revertir.
++                    "operador":       conocimiento.nombre_por_username.get(
++                                          operador_asignado or '', operador_asignado or ''),
++                    "estado":         (
++                        "programado-semi-operativa"   if nombre_maquina in maquinas_semi
++                        else "programado-no-liberada" if nombre_maquina in maquinas_no_liberadas
++                        else "programado"
++                    ),
+                     "prioridad":      prioridad,
+-                    "dias_atraso":    dias_atraso,
++                    "dias_atraso":    e.get("dias_atraso", 0),
+                     "ruta_completa":  ruta,
+                     "hebras":         conocimiento.hebras_x_maquina.get(
+-                                          (sucursal_nombre,
+-                                           nombre_maquina if _reparto_efectivo else _sobreviviente["nombre_maquina"],
+-                                           diametro), 1),
+-                    "nr_tags":        etiqueta.get("nr_tags", 1),
+-                    "largo_a":        largo_a,
+-                    "tipo":           etiqueta.get("tipo", "normal"),
+-                    "lista_etiqueta_ids": etiqueta.get("lista_etiqueta_ids", [etiqueta_id]),
++                                          (sucursal_nombre, nombre_maquina, diametro), 1),
++                    "nr_tags":        1,
++                    "largo_a":        e.get("largo_a", largo_a),
++                    "tipo":           "normal",
++                    "lista_etiqueta_ids": [eid_e],
++                    "numero_etiqueta": e.get("numero_etiqueta"),
++                    "total_etiquetas": e.get("total_etiquetas"),
+                     "alerta_reparto": alerta_reparto,
+-                    "reparto":        reparto_info if _reparto_efectivo else None,
+                 })
+ 
+-                hora_paso_anterior_fin = max(fines_reparto)
+-                continue
+-
+-            if hora_fin_tarea > hora_fin:
+-                bolsa_sin_asignar.append({
+-                    "etiqueta_id": etiqueta_id,
+-                    "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                    "motivo": f"No cabe en el turno ({nombre_maquina} ocupada hasta {cursor.strftime('%H:%M')})",
+-                    "motivo_key": "turno_lleno",
+-                    "kgs":            etiqueta.get("kgs", 0),
+-                    "diametro":       etiqueta.get("diametro", 0),
+-                    "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                    "id_forma":       etiqueta.get("id_forma"),
+-                    "obra":           etiqueta.get("obra", ""),
+-                    "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                    "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                    "fecha_it":       etiqueta.get("fecha_it"),
+-                    "alerta_reparto": alerta_reparto,
+-                })
+-                tarea_asignada = False
+-                break
++                cursor_maquinas[nombre_maquina] = hora_fin_tarea
++                ultimo_diametro[nombre_maquina] = diametro
++                if operador_asignado:
++                    intervalos_operador[operador_asignado].append((
++                        cursor, hora_fin_tarea, nombre_maquina, f"{eid_e}_p{paso_idx+1}",
++                    ))
++                hora_paso_anterior_fin_por_etiqueta[eid_e] = hora_fin_tarea
++                siguientes_pendientes.append(e)
+ 
+-            if operador_asignado:
+-                operador_sin_solape = None
+-                for candidato in candidatos_operador:
+-                    solapes = [
+-                        (ini, fin, maq, tid)
+-                        for ini, fin, maq, tid in intervalos_operador.get(candidato, [])
+-                        if cursor < fin and hora_fin_tarea > ini
+-                    ]
+-                    if solapes:
+-                        logger.warning(
+-                            "Solapamiento operador: %s ya tiene %s; intento %s en %s %s-%s",
+-                            candidato,
+-                            [
+-                                {
+-                                    "maquina": maq,
+-                                    "id_tarea": tid,
+-                                    "inicio": ini.strftime("%H:%M"),
+-                                    "fin": fin.strftime("%H:%M"),
+-                                }
+-                                for ini, fin, maq, tid in solapes
+-                            ],
+-                            f"{etiqueta_id}_p{paso_idx+1}",
+-                            nombre_maquina,
+-                            cursor.strftime("%H:%M"),
+-                            hora_fin_tarea.strftime("%H:%M"),
+-                        )
+-                        continue
+-                    operador_sin_solape = candidato
+-                    break
+-
+-                if not operador_sin_solape:
+-                    logger.warning(
+-                        "Tarea a bolsa por solapamiento operador: etiqueta=%s maquina=%s intervalo=%s-%s candidatos=%s",
+-                        etiqueta_id,
+-                        nombre_maquina,
+-                        cursor.strftime("%H:%M"),
+-                        hora_fin_tarea.strftime("%H:%M"),
+-                        candidatos_operador,
+-                    )
+-                    bolsa_sin_asignar.append({
+-                        "etiqueta_id": etiqueta_id,
+-                        "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                        "motivo": f"Operador disponible solapado para {nombre_maquina}",
+-                        "motivo_key": "operador_solapado",
+-                        "kgs":            etiqueta.get("kgs", 0),
+-                        "diametro":       etiqueta.get("diametro", 0),
+-                        "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                        "id_forma":       etiqueta.get("id_forma"),
+-                        "obra":           etiqueta.get("obra", ""),
+-                        "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                        "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                        "fecha_it":       etiqueta.get("fecha_it"),
+-                    })
+-                    tarea_asignada = False
+-                    break
+-
+-                if operador_sin_solape != operador_asignado:
+-                    logger.info(
+-                        "Solapamiento resuelto: %s reemplaza a %s en %s %s-%s",
+-                        operador_sin_solape,
+-                        operador_asignado,
+-                        nombre_maquina,
+-                        cursor.strftime("%H:%M"),
+-                        hora_fin_tarea.strftime("%H:%M"),
+-                    )
+-                operador_asignado = operador_sin_solape
+-
+-            restricciones_maquina = conocimiento.restricciones_x_maquina.get((sucursal_id, nombre_maquina), [])
+-            for restriccion in restricciones_maquina:
+-                logger.warning(
+-                    "Restriccion blanda en asignacion: tarea=%s maquina=%s sucursal=%s restriccion=%s",
+-                    f"{etiqueta_id}_p{paso_idx+1}",
+-                    nombre_maquina,
+-                    sucursal_id,
+-                    restriccion,
+-                )
+-
+-            # Registrar tarea
+-            tareas.append({
+-                "id_tarea":       f"{etiqueta_id}_p{paso_idx+1}",
+-                "etiqueta_id":    etiqueta_id,
+-                "codigo_viaje":   etiqueta.get("codigo_viaje", ""),
+-                "fecha_entrega":  etiqueta.get("fecha_entrega", ""),
+-                "obra":           etiqueta.get("obra", ""),
+-                "paso_secuencia": paso_idx + 1,
+-                "total_pasos":    len(ruta),
+-                "id_maquina":     maquina_str,
+-                "nombre_maquina": nombre_maquina,
+-                "id_forma":       id_forma,
+-                "diametro":       diametro,
+-                "calidad_acero":  calidad,
+-                "kilos":          kgs,
+-                "nr_piezas":      nr_piezas,
+-                "fecha_inicio":   cursor.isoformat(),
+-                "fecha_fin":      hora_fin_tarea.isoformat(),
+-                "duracion_min":   round(duracion, 1),
+-                # CRÍTICO: Este campo DEBE ser nombre_completo desde operadores_matriz
+-                # NO usar username. Bug recurrente — no revertir.
+-                "operador":       conocimiento.nombre_por_username.get(
+-                                      operador_asignado or '', operador_asignado or ''),
+-                "estado":         (
+-                    "programado-semi-operativa"   if nombre_maquina in maquinas_semi
+-                    else "programado-no-liberada" if nombre_maquina in maquinas_no_liberadas
+-                    else "programado"
+-                ),
+-                "prioridad":      prioridad,
+-                "dias_atraso":    dias_atraso,
+-                "ruta_completa":  ruta,
+-                "hebras":         conocimiento.hebras_x_maquina.get(
+-                                      (sucursal_nombre, nombre_maquina, diametro), 1),
+-                "nr_tags":        etiqueta.get("nr_tags", 1),
+-                "largo_a":        largo_a,
+-                "tipo":           etiqueta.get("tipo", "normal"),
+-                "lista_etiqueta_ids": etiqueta.get("lista_etiqueta_ids", [etiqueta_id]),
+-                "alerta_reparto": alerta_reparto,
+-            })
+-
+-            # Avanzar cursores
+-            cursor_maquinas[nombre_maquina] = hora_fin_tarea
+-            ultimo_diametro[nombre_maquina] = diametro
+-            if operador_asignado:
+-                intervalos_operador[operador_asignado].append((
+-                    cursor,
+-                    hora_fin_tarea,
+-                    nombre_maquina,
+-                    f"{etiqueta_id}_p{paso_idx+1}",
+-                ))
+-            hora_paso_anterior_fin = hora_fin_tarea
+-
+-        # Detectar grupos que se desvanecieron (todos los pasos saltados silenciosamente)
+-        if tarea_asignada and pasos_saltados and not any(
+-            t["etiqueta_id"] == etiqueta_id for t in tareas
+-        ):
+-            bolsa_sin_asignar.append({
+-                "etiqueta_id": etiqueta_id,
+-                "codigo_viaje": etiqueta.get("codigo_viaje", ""),
+-                "motivo": f"Todos los pasos saltados: {pasos_saltados}",
+-                "motivo_key": "maquina_no_activa",
+-                "kgs":            etiqueta.get("kgs", 0),
+-                "diametro":       etiqueta.get("diametro", 0),
+-                "nr_piezas":      etiqueta.get("nr_piezas", 0),
+-                "id_forma":       etiqueta.get("id_forma"),
+-                "obra":           etiqueta.get("obra", ""),
+-                "calidad_acero":  etiqueta.get("calidad_acero", "A630"),
+-                "fecha_despacho": etiqueta.get("fecha_despacho"),
+-                "fecha_it":       etiqueta.get("fecha_it"),
+-            })
++            pendientes = siguientes_pendientes
+ 
+     # ── Persistir historial en SQLite ──────────────────────────────────────
+     try:
+-- 
+2.54.0.windows.1
+

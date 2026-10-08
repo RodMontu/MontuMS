@@ -1,0 +1,101 @@
+{
+  "id_forma": 3,
+  "diametro": 12,
+  "meses_consultados": 24,
+  "total_registros": 908,
+  "dotacion_detectable": false,
+  "peso_aprox_kg_consultado": null,
+  "nota_metodologica": "Producciones estimadas en base a antecedentes historicos de produccion; rango tipico segun el historial (P25-P75). Es una estimacion referencial: no es un intervalo de confianza ni esta validada a nivel de operario y pedido.",
+  "nota_rutas": "Las maquinas listadas son las que procesaron esta forma y diametro segun el historial; no corresponden al ruteo que calcula el Planificador.",
+  "criterios": {
+    "n_min_tonh": 15,
+    "tonh_max": 50.0,
+    "rango_pct": [
+      0.05,
+      0.95
+    ],
+    "bins_5_min_n": 50,
+    "bins_3_min_n": 30,
+    "ratio_barra_max": 1.5,
+    "metodo": "delta crudo entre registros consecutivos (2-480 min); no validado a nivel operario+pedido (ver B26-B)"
+  },
+  "por_maquina": [
+    {
+      "maquina_id": 101,
+      "maquina_nombre": "COIL 14",
+      "sucursal_id": 1,
+      "n_registros": 279,
+      "avg_largo_mm": 2954.0,
+      "peso_etiqueta_tipico_kg": 74.0,
+      "ton_hora_estimado": 0.039,
+      "ton_hora_p25": 0.01,
+      "ton_hora_p75": 0.14,
+      "n_grupo": 279,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        0.8,
+        6.9
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 104,
+      "maquina_nombre": "Eura 16",
+      "sucursal_id": 1,
+      "n_registros": 419,
+      "avg_largo_mm": 3369.0,
+      "peso_etiqueta_tipico_kg": 67.0,
+      "ton_hora_estimado": 0.118,
+      "ton_hora_p25": 0.025,
+      "ton_hora_p75": 0.366,
+      "n_grupo": 419,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        0.7,
+        9.2
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 105,
+      "maquina_nombre": "COIL 14 M",
+      "sucursal_id": 1,
+      "n_registros": 202,
+      "avg_largo_mm": 3190.0,
+      "peso_etiqueta_tipico_kg": 70.0,
+      "ton_hora_estimado": 0.096,
+      "ton_hora_p25": 0.016,
+      "ton_hora_p75": 0.326,
+      "n_grupo": 202,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        0.8,
+        7.2
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 111,
+      "maquina_nombre": "EURA 20_2",
+      "sucursal_id": 1,
+      "n_registros": 8,
+      "avg_largo_mm": 3029.0,
+      "peso_etiqueta_tipico_kg": 441.0,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 8,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    }
+  ]
+}

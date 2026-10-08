@@ -1,0 +1,239 @@
+From 0fdd28d547986951d4f2be49a52e107f855151a6 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Wed, 23 Sep 2026 22:54:56 -0300
+Subject: [PATCH] feat(gantt): la cajita muestra el numero de etiqueta de
+ fabricacion (Cubigest dp.Etiqueta), no el codigo TAG generico - B42
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/database_cubigest.py                  | 22 ++++++++++++-
+ backend/routers/programacion.py               | 32 +++++++++++++++++-
+ .../components/domain/GestorProgramacion.tsx  | 33 +++++++++++++------
+ 3 files changed, 75 insertions(+), 12 deletions(-)
+
+diff --git a/backend/database_cubigest.py b/backend/database_cubigest.py
+index 1921c0a..3ae1b77 100644
+--- a/backend/database_cubigest.py
++++ b/backend/database_cubigest.py
+@@ -16,6 +16,24 @@ load_dotenv(_ENV_PATH)
+ _cache_estado_maquinas: dict = {}
+ _CACHE_TTL_MAQ = 900  # 15 min
+ 
++import re as _re_etiqueta
++_RE_NUMERO_ETIQUETA = _re_etiqueta.compile(r"Tag\s*#:\s*(\d+)\s*of\s*(\d+)", _re_etiqueta.IGNORECASE)
++
++
++def parse_numero_etiqueta(etiqueta_raw: str | None) -> int | None:
++    """
++    Extrae el numero fisico de etiqueta de fabricacion desde el campo de
++    texto libre dp.Etiqueta de Cubigest (formato observado: "Tag #: N of M").
++    N = numero de etiqueta dentro del TAG/viaje (lo que ve el operario en
++    planta); distinto de dp.id (PK interna, usada hasta ahora como
++    "etiqueta_id" — B42).
++    """
++    if not etiqueta_raw:
++        return None
++    m = _RE_NUMERO_ETIQUETA.search(str(etiqueta_raw))
++    return int(m.group(1)) if m else None
++
++
+ class CubigestDB:
+     _instance = None
+ 
+@@ -171,7 +189,8 @@ class CubigestDB:
+             v.Codigo                       AS codigo_viaje,
+             dp.nropiezas                   AS nro_piezas,
+             ROUND(dp.KgsPaquete, 1)        AS kilos,
+-            p.IdForma                      AS id_forma
++            p.IdForma                      AS id_forma,
++            dp.Etiqueta                    AS etiqueta_raw
+         FROM IT it
+         JOIN Viaje v                    ON v.IdIt = it.Id
+         JOIN detallePaquetesPieza dp    ON dp.IdViaje = v.Id
+@@ -190,6 +209,7 @@ class CubigestDB:
+                 "nro_piezas": row.get("nro_piezas"),
+                 "kilos": float(row.get("kilos") or 0),
+                 "id_forma": row.get("id_forma"),
++                "numero_etiqueta": parse_numero_etiqueta(row.get("etiqueta_raw")),
+             }
+             for row in rows
+         ]
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 819380d..c471b77 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -17,6 +17,15 @@ GEOVICTORIA_URL = os.getenv("GEOVICTORIA_API_URL", "http://192.168.1.111:8002")
+ 
+ logger = logging.getLogger(__name__)
+ 
++# B42: numero fisico de etiqueta de fabricacion (dp.Etiqueta = "Tag #: N of M"
++# en Cubigest), distinto de dp.id (PK interna, historicamente mostrada como
++# "etiqueta_id"/TAG en la cajita). Mapa en memoria etiqueta_id -> numero
++# fisico, poblado cada vez que se consulta Cubigest (_piezas_optisteel_por_viajes);
++# se usa en _tarea_a_evento y en /tags-viaje para no depender de una columna
++# nueva en programacion_detalle. Se pierde al reiniciar el backend (igual que
++# global_eventos/global_recursos); vuelve a poblarse con el siguiente "Generar".
++_mapa_numero_etiqueta: dict = {}
++
+ 
+ def _init_historial_asignaciones():
+     """Crea la tabla historial_asignaciones y sus índices si no existen."""
+@@ -191,6 +200,11 @@ def _tarea_a_evento(t: dict, sucursal_id: int, turno: str = None, fecha: str = N
+         "id_forma":       t.get("id_forma"),
+         "nr_piezas":          t.get("nr_piezas", 0),
+         "lista_etiqueta_ids": t.get("lista_etiqueta_ids", []),
++        # B42: numero fisico de etiqueta (ver _mapa_numero_etiqueta). None si
++        # aun no se poblo el mapa para este etiqueta_id (ej. tras un reinicio
++        # de backend, antes del siguiente "Generar") — el frontend cae a
++        # codigo_viaje en ese caso.
++        "numero_etiqueta": _mapa_numero_etiqueta.get(t.get("etiqueta_id")),
+     }
+ 
+ router = APIRouter(prefix="/api/programacion", tags=["programacion"])
+@@ -432,6 +446,9 @@ def get_tags_viaje(request: Request, sucursal: int, codigo_viaje: str, maquina:
+                         "id_forma": row_d[1],
+                         "nro_piezas": row_d[2],
+                         "kilos": row_d[3],
++                        # B42: puede ser None si el mapa no se ha poblado
++                        # (ver _mapa_numero_etiqueta) — frontend cae a etiqueta_id.
++                        "numero_etiqueta": _mapa_numero_etiqueta.get(eid),
+                     })
+             if tags_det:
+                 return {
+@@ -1242,6 +1259,10 @@ async def generar_programacion(solicitud: SolicitudProgramacion, request: Reques
+             )
+         ]
+         for t in resultado.get("tareas", []):
++            # B42: anotar numero fisico de etiqueta tambien en la tarea cruda
++            # que se devuelve por HTTP (el frontend pinta result.tareas
++            # directo, sin pasar por _tarea_a_evento/GET).
++            t["numero_etiqueta"] = _mapa_numero_etiqueta.get(t.get("etiqueta_id"))
+             global_eventos.append(_tarea_a_evento(t, solicitud.sucursal_id, turno=turno_norm, fecha=solicitud.fecha_produccion))
+     except Exception as e:
+         logger.warning(f"No se pudo persistir programación generada: {e}")
+@@ -1407,7 +1428,8 @@ def _piezas_optisteel_por_viajes(sucursal_id: int, viajes: list[str]) -> list[di
+                 NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
+             ) AS date)                                  AS fecha_despacho_date,
+             CASE WHEN p.diametro <= 16 THEN 'AD' ELSE 'AG' END AS tipo_acero,
+-            ISNULL(av.avance_pct, 0)                    AS avance_pct
++            ISNULL(av.avance_pct, 0)                    AS avance_pct,
++            dp.Etiqueta                                  AS etiqueta_raw
+         FROM IT it
+         JOIN Obras o                    ON o.id = it.IdObra
+         JOIN Viaje v                    ON v.IdIt = it.Id
+@@ -1456,6 +1478,14 @@ def _piezas_optisteel_por_viajes(sucursal_id: int, viajes: list[str]) -> list[di
+         logger.error(f"Error obteniendo piezas OptiSteel para viajes {viajes}: {e}")
+         return []
+ 
++    # B42: poblar mapa etiqueta_id -> numero fisico de etiqueta (dp.Etiqueta)
++    # para que _tarea_a_evento y /tags-viaje lo puedan mostrar en la cajita.
++    from database_cubigest import parse_numero_etiqueta
++    for f in filas:
++        eid = f.get("etiqueta_id")
++        if eid is not None:
++            _mapa_numero_etiqueta[eid] = parse_numero_etiqueta(f.get("etiqueta_raw"))
++
+     # B45: FP-LC (despacho directo) no entra al universo del Motor/Bolsa
+     # (comparte este JOIN _obtener_pids_pendientes_optisteel y
+     # _obtener_pendientes_bolsa_optisteel).
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index e067125..38f1ef1 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -46,6 +46,10 @@ interface Tarea {
+     posicion_manual?: boolean;
+     id_forma?: number;
+     lista_etiqueta_ids?: number[];
++    // B42: numero fisico de etiqueta de fabricacion (Cubigest dp.Etiqueta,
++    // "Tag #: N of M"); distinto de etiqueta_id (PK interna). undefined/null
++    // si aun no se resolvio (fallback a codigo_viaje/etiqueta_id en UI).
++    numero_etiqueta?: number | null;
+     // B2: reparto de trabajo en 2-3 máquinas en paralelo
+     alerta_reparto?: { nivel: 'suave' | 'dura'; pct_jornada: number; maquina_sugerida: string | null };
+     reparto?: { recurso_id: string; nombre_maquina: string; pct_carga: number; kgs: number; duracion_min: number; operador: string; fecha_inicio: string; fecha_fin: string }[];
+@@ -57,6 +61,7 @@ type TagViaje = {
+     nro_piezas?: number;
+     kilos?: number;
+     id_forma?: number;
++    numero_etiqueta?: number | null;
+ };
+ 
+ interface ItDetenida {
+@@ -397,13 +402,15 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+                 fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
+             }}
+         >
+-            {/* Line 1: PID (work identifier) - bold */}
++            {/* Line 1: numero de etiqueta de fabricacion (B42) - bold.
++                Fallback a codigo_viaje/id_tarea si Cubigest aun no resolvio
++                el numero fisico (ver numero_etiqueta en Tarea/backend). */}
+             <span
+                 className="truncate uppercase font-bold"
+                 style={{ color: obraColor.textColor, fontSize: '10px' }}
+-                title={ev.codigo_viaje || ev.id_tarea}
++                title={ev.numero_etiqueta != null ? `Etiqueta ${ev.numero_etiqueta} — Viaje ${ev.codigo_viaje}` : (ev.codigo_viaje || ev.id_tarea)}
+             >
+-                {ev.codigo_viaje || ev.id_tarea}
++                {ev.numero_etiqueta != null ? `Etiq. ${ev.numero_etiqueta}` : (ev.codigo_viaje || ev.id_tarea)}
+             </span>
+ 
+             {/* Line 2: TAG count - slightly smaller */}
+@@ -1068,6 +1075,7 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                     id_forma: t.id_forma,
+                     nr_piezas: t.nr_piezas,
+                     lista_etiqueta_ids: t.lista_etiqueta_ids ?? [],
++                    numero_etiqueta: t.numero_etiqueta ?? null,
+                 }));
+                 const pendientesNormalizados = result.bolsa_sin_asignar.map((p: any) => ({
+                     id_tarea: String(p.etiqueta_id),
+@@ -1687,9 +1695,14 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                             transform: tooltipPos.x > window.innerWidth - 310 ? 'translateX(-100%)' : undefined,
+                         }}
+                     >
+-                        {/* Fila 1: codigo_viaje + badge prioridad */}
++                        {/* Fila 1: numero de etiqueta (B42) + viaje + badge prioridad */}
+                         <div className="flex justify-between items-center px-4 pt-3 pb-2">
+-                            <span className="text-base font-black text-white tracking-tight">{hoveredEvent.codigo_viaje}</span>
++                            <span className="text-base font-black text-white tracking-tight">
++                                {hoveredEvent.numero_etiqueta != null ? `Etiq. ${hoveredEvent.numero_etiqueta}` : hoveredEvent.codigo_viaje}
++                                {hoveredEvent.numero_etiqueta != null && (
++                                    <span className="text-slate-400 font-normal text-xs ml-2">{hoveredEvent.codigo_viaje}</span>
++                                )}
++                            </span>
+                             {hoveredEvent.prioridad !== 'NORMAL' && (
+                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ml-2 ${hoveredEvent.prioridad === 'ATRASADO' ? 'bg-red-500 text-white' : 'bg-amber-500 text-white'}`}>
+                                     ⚠ {hoveredEvent.prioridad}{hoveredEvent.dias_atraso && hoveredEvent.dias_atraso > 0 ? ` (${hoveredEvent.dias_atraso} días)` : ''}
+@@ -1757,8 +1770,8 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                         <p className="text-lg font-black">{selectedTarea.nr_tags ?? 1}</p>
+                                     </div>
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Etiqueta ID</p>
+-                                        <p className="text-lg font-black">{selectedTarea.etiqueta_id ?? '—'}</p>
++                                        <p className="text-[10px] font-bold text-slate-400 uppercase">N° Etiqueta</p>
++                                        <p className="text-lg font-black">{selectedTarea.numero_etiqueta ?? selectedTarea.etiqueta_id ?? '—'}</p>
+                                     </div>
+ 
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+@@ -1800,8 +1813,8 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                                         key={`${tagObj.etiqueta_id}-${idx}`}
+                                                         className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 shadow-sm ${highlightClass}`}
+                                                     >
+-                                                        <span className="font-black text-slate-500 dark:text-slate-400">TAG</span>
+-                                                        <span className="font-bold">#{tagObj.etiqueta_id}</span>
++                                                        <span className="font-black text-slate-500 dark:text-slate-400">Etiq.</span>
++                                                        <span className="font-bold">#{tagObj.numero_etiqueta ?? tagObj.etiqueta_id}</span>
+                                                         {isAsignado && <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 ml-1">(asignado)</span>}
+                                                         <span className="text-slate-300 dark:text-slate-600">—</span>
+                                                         <span>Forma: <span className="font-bold">{tagObj.id_forma ?? '—'}</span></span>
+@@ -1813,7 +1826,7 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                                         key={`${tagObj.etiqueta_id}-${idx}`}
+                                                         className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm ${highlightClass}`}
+                                                     >
+-                                                        <span>{tagObj.etiqueta_id}</span>
++                                                        <span>{tagObj.numero_etiqueta ?? tagObj.etiqueta_id}</span>
+                                                         {isAsignado && <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 ml-1">(asignado)</span>}
+                                                         {tagObj.kilos != null && <span className="font-semibold text-slate-400">({Math.round(tagObj.kilos).toLocaleString('es-CL')} kg)</span>}
+                                                     </span>
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,138 @@
+{
+  "id_forma": 2,
+  "diametro": 22,
+  "meses_consultados": 24,
+  "total_registros": 2029,
+  "dotacion_detectable": false,
+  "peso_aprox_kg_consultado": null,
+  "nota_metodologica": "Producciones estimadas en base a antecedentes historicos de produccion; rango tipico segun el historial (P25-P75). Es una estimacion referencial: no es un intervalo de confianza ni esta validada a nivel de operario y pedido.",
+  "nota_rutas": "Las maquinas listadas son las que procesaron esta forma y diametro segun el historial; no corresponden al ruteo que calcula el Planificador.",
+  "criterios": {
+    "n_min_tonh": 15,
+    "tonh_max": 50.0,
+    "rango_pct": [
+      0.05,
+      0.95
+    ],
+    "bins_5_min_n": 50,
+    "bins_3_min_n": 30,
+    "ratio_barra_max": 1.5,
+    "metodo": "delta crudo entre registros consecutivos (2-480 min); no validado a nivel operario+pedido (ver B26-B)"
+  },
+  "por_maquina": [
+    {
+      "maquina_id": 17,
+      "maquina_nombre": "Robomaster 60",
+      "sucursal_id": 10,
+      "n_registros": 1743,
+      "avg_largo_mm": 6741.0,
+      "peso_etiqueta_tipico_kg": 342.0,
+      "ton_hora_estimado": 0.447,
+      "ton_hora_p25": 0.119,
+      "ton_hora_p75": 1.593,
+      "n_grupo": 1743,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        7.7,
+        36.1
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 21,
+      "maquina_nombre": "Curvadora CER40 1 Schnell",
+      "sucursal_id": 10,
+      "n_registros": 2,
+      "avg_largo_mm": 8016.0,
+      "peso_etiqueta_tipico_kg": 776.5,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 2,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 23,
+      "maquina_nombre": "Robomaster 55",
+      "sucursal_id": 10,
+      "n_registros": 186,
+      "avg_largo_mm": 7220.0,
+      "peso_etiqueta_tipico_kg": 567.0,
+      "ton_hora_estimado": 1.026,
+      "ton_hora_p25": 0.267,
+      "ton_hora_p75": 1.9,
+      "n_grupo": 186,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        9.3,
+        36.1
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 25,
+      "maquina_nombre": "Dobladora Tecmor S40 1",
+      "sucursal_id": 10,
+      "n_registros": 53,
+      "avg_largo_mm": 2595.0,
+      "peso_etiqueta_tipico_kg": 222.0,
+      "ton_hora_estimado": 0.455,
+      "ton_hora_p25": 0.103,
+      "ton_hora_p75": 1.747,
+      "n_grupo": 53,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        3.7,
+        14.4
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 26,
+      "maquina_nombre": "Dobladora Tecmor S40 2",
+      "sucursal_id": 10,
+      "n_registros": 43,
+      "avg_largo_mm": 5092.0,
+      "peso_etiqueta_tipico_kg": 501.2,
+      "ton_hora_estimado": 0.536,
+      "ton_hora_p25": 0.175,
+      "ton_hora_p75": 1.523,
+      "n_grupo": 43,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        4.8,
+        36.1
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 27,
+      "maquina_nombre": "Dobladora Manual 3",
+      "sucursal_id": 10,
+      "n_registros": 2,
+      "avg_largo_mm": 4476.0,
+      "peso_etiqueta_tipico_kg": 425.5,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 2,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    }
+  ]
+}

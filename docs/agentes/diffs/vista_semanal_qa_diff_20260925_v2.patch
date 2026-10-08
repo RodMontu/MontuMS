@@ -1,0 +1,218 @@
+diff --git a/backend/routers/compromisos_semanales.py b/backend/routers/compromisos_semanales.py
+index f626ea8..3151775 100644
+--- a/backend/routers/compromisos_semanales.py
++++ b/backend/routers/compromisos_semanales.py
+@@ -52,8 +52,13 @@ def get_compromisos_semanales(sucursal_id: int = Query(...), semana_offset: int
+     try:
+         todas_etiquetas = _obtener_pids_pendientes(sucursal_id, fecha_str)
+     except Exception as e:
+-        logger.error(f"Error obteniendo pids pendientes: {e}")
+-        todas_etiquetas = []
++        # QA-A-01: antes seguia con [] (Compromisos Futuros mostraba "0 kg"
++        # indistinguible de "sin pendientes reales"); ahora error visible.
++        logger.error(f"[CompromisosFuturos] Cubigest fallo para sucursal={sucursal_id}: {e}")
++        raise HTTPException(
++            status_code=502,
++            detail=f"Cubigest no disponible, no se pudo cargar compromisos: {e}",
++        )
+ 
+     # Filtrar por rango de semana
+     etiquetas_semana = []
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index e1224ab..d3aeffa 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -616,11 +616,22 @@ def obtener_proyeccion_semanal():
+             "1": [],
+             "10": [],
+             "14": [],
+-            "top_viajes": {"1": [], "10": [], "14": []}
++            "top_viajes": {"1": [], "10": [], "14": []},
++            # QA-A-01: "Atrasado <=30d" y "Sin fecha confirmada / muy futura"
++            # (spec UNIVERSO_FECHAS_spec.md secc. 3-4), por sucursal.
++            "resumen_categorias": {"1": None, "10": None, "14": None},
++            # QA-A-01: error visible por sucursal si Cubigest falla, en vez
++            # del [] silencioso anterior (antes indistinguible de "sin datos").
++            "errores": {},
+         }
+ 
+         for sid in [1, 10, 14]:
+-            etiquetas = _obtener_pids_pendientes(sid, hoy)
++            try:
++                etiquetas = _obtener_pids_pendientes(sid, hoy)
++            except Exception as e:
++                logger.error(f"[VistaSemanal] Cubigest fallo para sucursal={sid}: {e}")
++                data["errores"][str(sid)] = str(e)
++                continue
+ 
+             # Agregar por fecha_despacho × bucket diámetro
+             por_fecha: dict = defaultdict(lambda: {"delgado": 0.0, "grueso": 0.0})
+@@ -669,11 +680,36 @@ def obtener_proyeccion_semanal():
+                 for cv, v in top5
+             ]
+ 
++            # QA-A-01: resumen por categoria de fecha (categoria_fecha viene
++            # de _obtener_pids_pendientes, contrato con universo_fechas.py —
++            # ver nota NO VERIFICADO en esa funcion).
++            resumen = {
++                "atrasada_valida": {"n": 0, "kg": 0.0},
++                "muy_futura": {"n": 0, "kg": 0.0},
++            }
++            for et in etiquetas:
++                cat = et.get("categoria_fecha")
++                if cat in resumen:
++                    resumen[cat]["n"] += 1
++                    resumen[cat]["kg"] += float(et.get("kgs") or 0)
++            data["resumen_categorias"][str(sid)] = {
++                "atrasada_valida_n": resumen["atrasada_valida"]["n"],
++                "atrasada_valida_kg": round(resumen["atrasada_valida"]["kg"], 1),
++                "muy_futura_n": resumen["muy_futura"]["n"],
++                "muy_futura_kg": round(resumen["muy_futura"]["kg"], 1),
++            }
++
+         return data
+ 
+     except Exception as e:
+         logger.error(f"Error en proyección semanal: {e}")
+-        return {"1": [], "10": [], "14": [], "top_viajes": {"1": [], "10": [], "14": []}, "error": str(e)}
++        return {
++            "1": [], "10": [], "14": [],
++            "top_viajes": {"1": [], "10": [], "14": []},
++            "resumen_categorias": {"1": None, "10": None, "14": None},
++            "errores": {},
++            "error": str(e),
++        }
+ 
+ @router.post("/reprogramar")
+ def reprogramar_pid(payload: ReprogramarRequest):
+@@ -1421,7 +1457,7 @@ def _obtener_pids_pendientes(sucursal_id: int, fecha: str) -> list[dict]:
+     placeholders = ",".join(["?"] * len(cub_ids))
+ 
+     query = f"""
+-        SELECT TOP 2000
++        SELECT TOP 3000
+             dp.id                                       AS etiqueta_id,
+             v.Codigo                                    AS codigo_viaje,
+             o.nombre                                    AS obra,
+@@ -1505,8 +1541,24 @@ def _obtener_pids_pendientes(sucursal_id: int, fecha: str) -> list[dict]:
+     try:
+         filas = cubigest_db.execute_query(query, tuple(cub_ids))
+     except Exception as e:
+-        logger.error(f"Error obteniendo PIDs pendientes: {e}")
+-        return []
++        # QA-A-01: antes devolvia [] silencioso (indistinguible de "sin
++        # pendientes"). Se propaga para que Vista Semanal y Compromisos
++        # Futuros muestren error visible en vez de "0 kg" enganoso; el
++        # scheduler automatico (main.py) y calendario_futuro.py (query propia,
++        # no afectada) ya envuelven esta funcion en su propio try/except.
++        logger.error(f"Error obteniendo PIDs pendientes (sucursal={sucursal_id}): {e}")
++        raise RuntimeError(f"Cubigest no disponible (sucursal={sucursal_id}): {e}") from e
++
++    # QA-A-01: TOP 3000 (antes 2000, truncaba en Cerrillos con 2.231 filas
++    # reales sobre la misma ventana -30/+21d). Log de alerta si se sigue
++    # tocando el limite -- no hay paginacion completa todavia (ver spec
++    # UNIVERSO_FECHAS_spec.md secc. 5).
++    if len(filas) >= 3000:
++        logger.warning(
++            f"[TOP 3000] sucursal={sucursal_id} devolvio exactamente el limite "
++            f"({len(filas)} filas) -- posible truncamiento silencioso, la cuenta "
++            f"real podria ser mayor. Subir limite o paginar."
++        )
+ 
+     # B42 v2: poblar mapa etiqueta_id -> numero fisico de etiqueta (dp.Etiqueta)
+     # tambien en el camino del scheduler automatico (antes solo lo hacia
+@@ -1531,6 +1583,46 @@ def _obtener_pids_pendientes(sucursal_id: int, fecha: str) -> list[dict]:
+             f"[B45] {len(excluidas)} etiquetas despacho-directo (FP-LC) excluidas de "
+             f"pendientes (sucursal={sucursal_id}), {sum(f.get('kgs', 0) for f in excluidas):.1f} kg"
+         )
++
++    # QA-A-01/02: clasificacion por categoria de fecha (spec
++    # UNIVERSO_FECHAS_spec.md secc. 3), usada por Vista Semanal para la linea
++    # "Atrasado <=30d" y "Sin fecha confirmada / muy futura". CONTRATO con
++    # universo_fechas.py (ventana hermana, creado en paralelo a esta tarea) --
++    # NO VERIFICADO end-to-end porque el modulo todavia no existe en este
++    # worktree; si el import falla, se documenta en el informe.
++    from universo_fechas import clasificar_fecha
++    for f in pendientes:
++        fecha_str = f.get("fecha_despacho") or f.get("fecha_entrega")
++        if not fecha_str or fecha_str == "1900-01-01":
++            # Sin fecha confirmada -> misma linea que "muy futura" (secc. 3-4
++            # del spec: ambos casos son fecha no confiable, no van a demanda).
++            f["categoria_fecha"] = "muy_futura"
++            continue
++        try:
++            d_desp = date.fromisoformat(str(fecha_str)[:10])
++        except Exception as e:
++            # FIX 25-09 (hallazgo QA cruzada): fecha_str llegaba como string y
++            # clasificar_fecha espera date -- TypeError silencioso, tragado
++            # por el except de abajo, dejaba "Atrasado <=30d" en 0 para las
++            # 792 etiquetas revisadas. Se parsea una sola vez y se reutiliza
++            # tanto para horizonte como para clasificar_fecha.
++            logger.warning(f"fecha invalida para etiqueta_id={f.get('etiqueta_id')}: {fecha_str} ({e})")
++            f["categoria_fecha"] = None
++            continue
++        horizonte = None
++        fecha_compromiso_2 = f.get("fecha_compromiso_2")
++        if fecha_compromiso_2:
++            try:
++                d_rep = date.fromisoformat(str(fecha_compromiso_2)[:10])
++                horizonte = (d_desp - d_rep).days
++            except Exception:
++                horizonte = None
++        try:
++            f["categoria_fecha"] = clasificar_fecha(d_desp, horizonte)
++        except Exception as e:
++            logger.warning(f"clasificar_fecha fallo para etiqueta_id={f.get('etiqueta_id')}: {e}")
++            f["categoria_fecha"] = None
++
+     return pendientes
+ 
+ 
+diff --git a/frontend/src/components/domain/VistaSemanal.tsx b/frontend/src/components/domain/VistaSemanal.tsx
+index 4cfcba1..9e89784 100644
+--- a/frontend/src/components/domain/VistaSemanal.tsx
++++ b/frontend/src/components/domain/VistaSemanal.tsx
+@@ -199,6 +199,43 @@ export default function VistaSemanal({ userRol = 'JefePlanta', sucursal = '1' }:
+                             </div>
+                         </div>
+                     </div>
++
++                    {/* QA-A-01: Atrasado <=30d y Sin fecha confirmada / muy futura.
++                        Estas dos lineas NO pasan por getFiltered (no dependen de la
++                        pestana Actual/Proxima/Subsiguiente): el dato ya existe en el
++                        backend (resumen_categorias) pero antes quedaba descartado
++                        porque ninguna de las 3 pestanas incluye fechas <hoy. */}
++                    <div>
++                        <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4 flex items-center gap-2">
++                            <AlertTriangle className="w-4 h-4" /> Fuera de ventana
++                        </h4>
++                        {data?.errores?.[sucId] ? (
++                            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-xs">
++                                ⚠️ No se pudo cargar Cubigest para esta sucursal: {data.errores[sucId]}
++                            </div>
++                        ) : (() => {
++                            const rc = data?.resumen_categorias?.[sucId];
++                            if (!rc) return (
++                                <div className="text-xs text-slate-400 italic">Sin datos de clasificación por fecha.</div>
++                            );
++                            return (
++                                <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700 flex flex-col gap-3">
++                                    <div className="flex justify-between items-center">
++                                        <span className="text-xs font-semibold text-slate-500">Atrasado ≤30 días ({rc.atrasada_valida_n})</span>
++                                        <span className="text-sm font-black text-red-600 dark:text-red-400">{Math.round(rc.atrasada_valida_kg).toLocaleString('es-CL')}</span>
++                                    </div>
++                                    <div className="flex justify-between items-center">
++                                        <span className="text-xs font-semibold text-slate-500">Sin fecha confirmada / muy futura ({rc.muy_futura_n})</span>
++                                        <span className="text-sm font-black text-slate-500 dark:text-slate-400">{Math.round(rc.muy_futura_kg).toLocaleString('es-CL')}</span>
++                                    </div>
++                                    <p className="text-[10px] text-slate-400 leading-snug pt-1 border-t border-slate-100 dark:border-slate-700">
++                                        No considera ITs con fecha de despacho mayor a 60 días ({rc.muy_futura_n} ITs / {Math.round(rc.muy_futura_kg).toLocaleString('es-CL')} kg fuera; ver aparte).
++                                    </p>
++                                </div>
++                            );
++                        })()}
++                    </div>
++
+                     <div className="mt-auto flex flex-col gap-4">
+                         <div className="rounded-xl p-4 text-white" style={{ background: '#111827' }}>
+                             <p className="text-[10px] font-bold uppercase opacity-70 tracking-tighter">Estado de Carga</p>

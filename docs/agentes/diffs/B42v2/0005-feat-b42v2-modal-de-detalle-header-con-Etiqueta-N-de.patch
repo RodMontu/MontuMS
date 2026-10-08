@@ -1,0 +1,233 @@
+From 51475643a7c13559ebfbc57e0038b887a1187448 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 12:42:15 -0300
+Subject: [PATCH 5/6] feat(b42v2): modal de detalle - header con Etiqueta N de
+ M, cuerpo D7 seccion 5, elimina Etiquetas incluidas
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Header: agrega chip ETIQUETA: N de M junto a Calidad/Viaje
+(formato/colores sin cambios).
+
+Cuerpo reordenado segun spec B42_v2 seccion 5: Diametro, Largo
+(nuevo — antes ausente), IdForma, Cantidad, Paquete (=N, antes
+N Etiqueta), Peso. Elimina las tarjetas Operador y Secuencia
+(quedan fuera del detalle — operador ya esta en la fila de la
+maquina) y N Etiquetas (nr_tags siempre 1, sin sentido).
+
+Elimina el bloque Etiquetas incluidas completo y su fetch
+(useEffect a /detalle-maquina + fallback /tags-viaje), el estado
+selectedTareaTags, y selectedTagsParaModal/_tagsKilos/_tagsPiezas/
+_tagsForma — con 1 tarea = 1 etiqueta, selectedTarea.kilos/
+nr_piezas/id_forma ya son los valores reales de esa etiqueta (D3),
+sin necesitar sumar/buscar en una lista de tags. Elimina el tipo
+TagViaje, que queda sin uso.
+
+tsc --noEmit y npm run build limpios (AC9).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ .../components/domain/GestorProgramacion.tsx  | 134 +++---------------
+ 1 file changed, 19 insertions(+), 115 deletions(-)
+
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index 52eeea8..c7d0067 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -63,15 +63,6 @@ interface Tarea {
+     reparto?: { recurso_id: string; nombre_maquina: string; pct_carga: number; kgs: number; duracion_min: number; operador: string; fecha_inicio: string; fecha_fin: string }[];
+ }
+ 
+-type TagViaje = {
+-    etiqueta_id: number | string;
+-    codigo_viaje?: string;
+-    nro_piezas?: number;
+-    kilos?: number;
+-    id_forma?: number;
+-    numero_etiqueta?: number | null;
+-};
+-
+ interface ItDetenida {
+     id: number;
+     codigo_viaje: string;
+@@ -925,7 +916,6 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+     const [ajusteDuracionGuardando, setAjusteDuracionGuardando] = useState(false);
+     const [repartoState, setRepartoState] = useState<{ tarea: Tarea; sugerida: string | null } | null>(null);
+     const abrirReparto = (tarea: Tarea, sugerida?: string | null) => setRepartoState({ tarea, sugerida: sugerida ?? null });
+-    const [selectedTareaTags, setSelectedTareaTags] = useState<Array<TagViaje | number | string>>([]);
+     const [metadata, setMetadata] = useState<any>(null);
+     const [presencia, setPresencia] = useState<{
+         presentes: {username:string;nombre:string;turno?:string | null;turno_inferido:string;hora_entrada?:string;estado?:string}[];
+@@ -1494,35 +1484,6 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+         setEstadosAveriasMaquinas({});
+     }, [sucursal]);
+ 
+-    useEffect(() => {
+-        if (!selectedTarea?.codigo_viaje) {
+-            setSelectedTareaTags([]);
+-            return;
+-        }
+-
+-        let cancelado = false;
+-        setSelectedTareaTags([]);
+-        const urlDetalle = `/api/programacion/detalle-maquina?sucursal=${sucursal}&fecha=${fecha}&turno=${turnoGlobal.toLowerCase()}&nombre_maquina=${encodeURIComponent(selectedTarea.nombre_maquina ?? '')}&codigo_viaje=${encodeURIComponent(selectedTarea.codigo_viaje)}`;
+-        fetch(urlDetalle)
+-            .then(res => res.ok ? res.json() : [])
+-            .then(data => {
+-                if (Array.isArray(data) && data.length > 0) {
+-                    if (!cancelado) setSelectedTareaTags(data);
+-                } else {
+-                    // Fallback a tags-viaje si el detalle por maquina esta vacio
+-                    fetch(`/api/programacion/tags-viaje?sucursal=${sucursal}&codigo_viaje=${encodeURIComponent(selectedTarea.codigo_viaje)}`)
+-                        .then(res => res.ok ? res.json() : { tags: [] })
+-                        .then(json => {
+-                            if (!cancelado) setSelectedTareaTags(Array.isArray(json?.tags) ? json.tags : []);
+-                        });
+-                }
+-            })
+-            .catch(() => {
+-                if (!cancelado) setSelectedTareaTags(selectedTarea.lista_etiqueta_ids ?? []);
+-            });
+-
+-        return () => { cancelado = true; };
+-    }, [selectedTarea?.codigo_viaje, selectedTarea?.lista_etiqueta_ids, sucursal]);
+ 
+     // B44(a): limpiar el input del ajuste de duracion cada vez que se abre
+     // una cajita distinta (no arrastrar el valor de la anterior).
+@@ -1746,19 +1707,11 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+         return 'bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200';
+     };
+ 
+-    const selectedTagsParaModal: Array<TagViaje | number | string> = selectedTarea
+-        ? (selectedTareaTags.length > 0
+-            ? selectedTareaTags
+-            : (selectedTarea.lista_etiqueta_ids?.length ? selectedTarea.lista_etiqueta_ids : (selectedTarea.etiqueta_id ? [selectedTarea.etiqueta_id] : [])))
+-        : [];
+-
+-    // Fallback desde tags cuando el ítem de bolsa no trae kilos/piezas/forma
+-    const _tagsKilos = selectedTagsParaModal.reduce<number>((s, t) => s + (typeof t === 'object' ? ((t as TagViaje).kilos ?? 0) : 0), 0);
+-    const _tagsPiezas = selectedTagsParaModal.reduce<number>((s, t) => s + (typeof t === 'object' ? ((t as TagViaje).nro_piezas ?? 0) : 0), 0);
+-    const _tagsForma = (selectedTagsParaModal.find(t => typeof t === 'object' && (t as TagViaje).id_forma != null) as TagViaje | undefined)?.id_forma ?? null;
+-    const modalKilos = selectedTarea ? (selectedTarea.kilos || _tagsKilos || 0) : 0;
+-    const modalNrPiezas = selectedTarea ? (selectedTarea.nr_piezas ?? (_tagsPiezas > 0 ? _tagsPiezas : null)) : null;
+-    const modalIdForma = selectedTarea ? (selectedTarea.id_forma ?? _tagsForma) : null;
++    // B42 v2: selectedTarea ya es 1 etiqueta (asignada o de bolsa) con sus
++    // propios kilos/nr_piezas/id_forma — sin fallback a fetch de tags.
++    const modalKilos = selectedTarea ? (selectedTarea.kilos || 0) : 0;
++    const modalNrPiezas = selectedTarea ? (selectedTarea.nr_piezas ?? null) : null;
++    const modalIdForma = selectedTarea ? (selectedTarea.id_forma ?? null) : null;
+ 
+     return (
+         <>
+@@ -1847,6 +1800,9 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                     <p className="text-xs font-bold text-white/75">{selectedTarea.obra}</p>
+                                     <div className="mt-2 text-[10px] font-black uppercase tracking-wider text-white/70 bg-black/20 px-2 py-1 rounded inline-block">
+                                         Calidad: {selectedTarea.calidad_acero} | Viaje: {selectedTarea.codigo_viaje}
++                                        {selectedTarea.numero_etiqueta != null && (
++                                            <> | Etiqueta: {selectedTarea.numero_etiqueta}{selectedTarea.total_etiquetas != null ? ` de ${selectedTarea.total_etiquetas}` : ''}</>
++                                        )}
+                                     </div>
+                                 </div>
+                                 <button onClick={() => setSelectedTarea(null)} className="p-2 hover:bg-black/10 rounded-full transition-colors text-white">
+@@ -1881,86 +1837,34 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                         )}
+                                     </div>
+                                 </div>
++                                {/* B42 v2 (D7 §5): diametro, largo, ID forma, cantidad, paquete (=N), peso — sin marca, sin Operador ni Secuencia. */}
+                                 <div className="grid grid-cols-2 gap-3 mb-5">
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Peso</p>
+-                                        <p className="text-lg font-black">{Math.round(modalKilos).toLocaleString('es-CL')} kg</p>
+-                                    </div>
+-                                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">PIEZAS</p>
+-                                        <p className="text-lg font-black">{modalNrPiezas != null ? Math.round(modalNrPiezas) : '-'}</p>
+-                                    </div>
+-                                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">N° Etiquetas</p>
+-                                        <p className="text-lg font-black">{selectedTarea.nr_tags ?? 1}</p>
++                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Diámetro</p>
++                                        <p className="text-lg font-black">{selectedTarea.diametro ? `${selectedTarea.diametro}mm` : '—'}</p>
+                                     </div>
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">N° Etiqueta</p>
+-                                        <p className="text-lg font-black">{selectedTarea.numero_etiqueta ?? selectedTarea.etiqueta_id ?? '—'}</p>
++                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Largo</p>
++                                        <p className="text-lg font-black">{selectedTarea.largo_a != null ? `${selectedTarea.largo_a} m` : '—'}</p>
+                                     </div>
+-
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                         <p className="text-[10px] font-bold text-slate-400 uppercase">IdForma</p>
+                                         <p className="text-lg font-black">{modalIdForma ?? '—'}</p>
+                                     </div>
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Secuencia</p>
+-                                        <p className="text-lg font-black">{selectedTarea.paso_secuencia} / {selectedTarea.total_pasos}</p>
++                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Cantidad</p>
++                                        <p className="text-lg font-black">{modalNrPiezas != null ? Math.round(modalNrPiezas) : '-'}</p>
+                                     </div>
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Operador</p>
+-                                        <p className="text-sm font-black select-all leading-tight">{nombreCorto(operadorMaquinaProgramacion(selectedTarea)) || '—'}</p>
++                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Paquete</p>
++                                        <p className="text-lg font-black">{selectedTarea.numero_etiqueta ?? selectedTarea.etiqueta_id ?? '—'}</p>
+                                     </div>
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Diámetro</p>
+-                                        <p className="text-lg font-black">{selectedTarea.diametro ? `${selectedTarea.diametro}mm` : '—'}</p>
++                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Peso</p>
++                                        <p className="text-lg font-black">{Math.round(modalKilos).toLocaleString('es-CL')} kg</p>
+                                     </div>
+                                 </div>
+ 
+-                                {/* Lista de etiquetas individuales en este bloque */}
+-                                {selectedTagsParaModal.length >= 1 && (
+-                                    <div className="mb-5 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">
+-                                            Etiquetas incluidas ({selectedTagsParaModal.length})
+-                                        </p>
+-                                        <div className="max-h-40 overflow-y-auto custom-scrollbar flex flex-col gap-1">
+-                                            {selectedTagsParaModal.map((tag, idx) => {
+-                                                const tagObj = typeof tag === 'object' ? tag : { etiqueta_id: tag };
+-                                                const isAsignado = Number(tagObj.etiqueta_id) === Number(selectedTarea.etiqueta_id);
+-                                                const hasDetail = tagObj.id_forma != null || tagObj.nro_piezas != null;
+-                                                
+-                                                const highlightClass = isAsignado 
+-                                                    ? "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800" 
+-                                                    : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700";
+-
+-                                                return hasDetail ? (
+-                                                    <div
+-                                                        key={`${tagObj.etiqueta_id}-${idx}`}
+-                                                        className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 shadow-sm ${highlightClass}`}
+-                                                    >
+-                                                        <span className="font-black text-slate-500 dark:text-slate-400">Etiq.</span>
+-                                                        <span className="font-bold">#{tagObj.numero_etiqueta ?? tagObj.etiqueta_id}</span>
+-                                                        {isAsignado && <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 ml-1">(asignado)</span>}
+-                                                        <span className="text-slate-300 dark:text-slate-600">—</span>
+-                                                        <span>Forma: <span className="font-bold">{tagObj.id_forma ?? '—'}</span></span>
+-                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
+-                                                        <span>Piezas: <span className="font-bold">{tagObj.nro_piezas ?? '—'}</span></span>
+-                                                    </div>
+-                                                ) : (
+-                                                    <span
+-                                                        key={`${tagObj.etiqueta_id}-${idx}`}
+-                                                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm ${highlightClass}`}
+-                                                    >
+-                                                        <span>{tagObj.numero_etiqueta ?? tagObj.etiqueta_id}</span>
+-                                                        {isAsignado && <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 ml-1">(asignado)</span>}
+-                                                        {tagObj.kilos != null && <span className="font-semibold text-slate-400">({Math.round(tagObj.kilos).toLocaleString('es-CL')} kg)</span>}
+-                                                    </span>
+-                                                );
+-                                            })}
+-                                        </div>
+-                                    </div>
+-                                )}
+-
+                                 {/* B2: reparto en paralelo — solo si el trabajo ya quedó repartido en 2-3 máquinas */}
+                                 {selectedTarea.reparto && selectedTarea.reparto.length > 0 && (
+                                     <div className="mb-5 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+-- 
+2.54.0.windows.1
+

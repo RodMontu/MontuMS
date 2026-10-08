@@ -1,0 +1,501 @@
+diff --git a/backend/main.py b/backend/main.py
+index 205add4..0aecb28 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -129,6 +129,7 @@ async def lifespan(app: FastAPI):
+         _init_programacion_guardada,
+         _tarea_a_evento,
+         _resolver_ventana_override,
++        _obtener_presencia_capacidad,
+     )
+     from motor_v2 import programar_turno as _programar_turno
+ 
+@@ -141,6 +142,12 @@ async def lifespan(app: FastAPI):
+             operadores = _obtener_operadores_disponibles(sucursal_id, conocimiento, turno_norm)
+             # B35: UNICA fuente de la ventana +-15 (misma funcion que POST /generar y el GET de pantalla)
+             inicio_ov, fin_ov, _fuente_ventana = _resolver_ventana_override(sucursal_id, fecha_str, turno_norm)
++            # B16: mismo helper de presencia que POST /generar (mismos argumentos en ambos).
++            try:
++                presencia_capacidad = _obtener_presencia_capacidad(sucursal_id, fecha_str, turno_norm, conocimiento)
++            except Exception as _e_pc:
++                logger.warning(f"[B16] presencia_capacidad no disponible (scheduler): {_e_pc}")
++                presencia_capacidad = None
+             resultado = _programar_turno(
+                 etiquetas=etiquetas,
+                 sucursal_id=sucursal_id,
+@@ -150,6 +157,7 @@ async def lifespan(app: FastAPI):
+                 conocimiento=conocimiento,
+                 inicio_override=inicio_ov,
+                 fin_override=fin_ov,
++                presencia_capacidad=presencia_capacidad,
+             )
+             _init_programacion_guardada()
+             tareas_json_new = json.dumps(resultado.get("tareas", []))
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index 3bf3d9f..bc7eeef 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -790,6 +790,7 @@ def programar_turno(
+     conocimiento: ConocimientoMotor,
+     inicio_override: str = None,
+     fin_override: str = None,
++    presencia_capacidad: dict = None,
+ ) -> dict:
+     """
+     Input:
+@@ -810,7 +811,16 @@ def programar_turno(
+ 
+     # Construir ventana horaria del turno (incluye break)
+     hora_inicio, hora_fin, brk_ini, brk_fin = _ventana_turno(fecha, config_turno)
+-    minutos_turno = int((hora_fin - hora_inicio).total_seconds() / 60)
++
++    # B16: capacidad de planta (minutos-hombre) — no invasivo, nunca rompe la generación.
++    capacidad_b16 = None
++    try:
++        capacidad_b16 = _calcular_capacidad_mh(
++            fecha, hora_inicio, hora_fin, brk_ini, brk_fin, presencia_capacidad
++        )
++    except Exception as _e_cap:
++        logger.warning(f"[B16] No se pudo calcular capacidad_mh: {_e_cap}")
++        capacidad_b16 = None
+ 
+     # ── Consultar estado real de máquinas: SQLite averias (primario) ──
+     maquinas_detenidas:    set[str] = set()   # DET o ING → excluir del turno
+@@ -1620,6 +1630,29 @@ def programar_turno(
+         logger.warning(f"historial_asignaciones: no se pudo insertar: {_he}")
+     # ────────────────────────────────────────────────────────────────────────
+ 
++    # B16: saldo_mh y toneladas de piezas terminadas — no invasivo (AC8).
++    if capacidad_b16 is not None:
++        try:
++            duracion_asignada_min = 0.0
++            for _t in tareas:
++                _reparto_t = _t.get("reparto")
++                if _reparto_t:
++                    duracion_asignada_min += sum(
++                        _seg.get("duracion_min", 0) or 0 for _seg in _reparto_t
++                    )
++                else:
++                    duracion_asignada_min += _t.get("duracion_min", 0) or 0
++            kgs_terminados = sum(
++                _t.get("kilos", 0) or 0
++                for _t in tareas
++                if _t.get("paso_secuencia") == _t.get("total_pasos")
++            )
++            capacidad_b16["saldo_mh"] = round(capacidad_b16["capacidad_mh"] - duracion_asignada_min, 1)
++            capacidad_b16["toneladas_asignadas"] = round(kgs_terminados / 1000, 2)
++        except Exception as _e_cap2:
++            logger.warning(f"[B16] No se pudo calcular saldo_mh/toneladas_asignadas: {_e_cap2}")
++            capacidad_b16 = None
++
+     return {
+         "status": "success",
+         "metadata": {
+@@ -1640,6 +1673,7 @@ def programar_turno(
+             "maquinas_ingresadas":   sorted(maquinas_ingresadas),
+             "maquinas_semi":         sorted(maquinas_semi),
+             "maquinas_no_liberadas": sorted(maquinas_no_liberadas),
++            "capacidad":         capacidad_b16,
+         },
+         "tareas":             tareas,
+         "bolsa_sin_asignar":  bolsa_sin_asignar,
+@@ -1677,6 +1711,93 @@ def _ventana_turno(fecha: str, config: dict) -> tuple[datetime, datetime, dateti
+     return h_ini, h_fin, brk_ini, brk_fin
+ 
+ 
++UMBRAL_AUSENCIA_PARCIAL_MIN = 30  # B16: desvío ≥ 30 min (entrada tarde o salida temprana) = ventana parcial
++
++
++def _solape_minutos(a_ini: datetime, a_fin: datetime, b_ini: datetime, b_fin: datetime) -> float:
++    """Minutos de solape entre dos intervalos [a_ini,a_fin) y [b_ini,b_fin)."""
++    ini = max(a_ini, b_ini)
++    fin = min(a_fin, b_fin)
++    return max(0.0, (fin - ini).total_seconds() / 60)
++
++
++def _calcular_capacidad_mh(
++    fecha: str,
++    hora_inicio: datetime,
++    hora_fin: datetime,
++    brk_ini: datetime,
++    brk_fin: datetime,
++    presencia_capacidad: dict = None,
++) -> Optional[dict]:
++    """
++    B16 — capacidad de planta por jornada (minutos-hombre).
++    presencia_capacidad: {"fuente": "geovictoria"|"turnos_programados",
++                           "operadores": [{"username", "entrada": "HH:MM"|None, "salida": "HH:MM"|None}]}
++    Retorna None si presencia_capacidad es None (no se pudo determinar presencia).
++    Retorna capacidad_mh=0 si la lista de operadores viene vacía (AC7).
++    """
++    if presencia_capacidad is None:
++        return None
++
++    dur_planta = (hora_fin - hora_inicio).total_seconds() / 60
++    solape_planta = _solape_minutos(hora_inicio, hora_fin, brk_ini, brk_fin)
++    min_utiles_planta = max(0.0, dur_planta - solape_planta)
++
++    base = datetime.strptime(fecha, "%Y-%m-%d")
++
++    def _anclar_persona(hm: str) -> datetime:
++        dt = datetime.strptime(hm, "%H:%M").replace(year=base.year, month=base.month, day=base.day)
++        if dt < hora_inicio - timedelta(hours=12):
++            dt += timedelta(days=1)
++        return dt
++
++    operadores = presencia_capacidad.get("operadores") or []
++    capacidad_mh = 0.0
++    operadores_parciales = []
++    vistos: set[str] = set()
++
++    for persona in operadores:
++        username = persona.get("username")
++        if not username or username in vistos:
++            continue  # AR-009: un operador cuenta una sola vez
++        vistos.add(username)
++
++        entrada_s = persona.get("entrada")
++        salida_s = persona.get("salida")
++        min_utiles = min_utiles_planta
++
++        if entrada_s and salida_s:
++            try:
++                ini_p = _anclar_persona(entrada_s)
++                fin_p = _anclar_persona(salida_s)
++                if fin_p <= ini_p:
++                    fin_p += timedelta(days=1)
++                desvio_entrada = max(0.0, (ini_p - hora_inicio).total_seconds() / 60)
++                desvio_salida = max(0.0, (hora_fin - fin_p).total_seconds() / 60)
++                if desvio_entrada >= UMBRAL_AUSENCIA_PARCIAL_MIN or desvio_salida >= UMBRAL_AUSENCIA_PARCIAL_MIN:
++                    ini_ef = max(ini_p, hora_inicio)
++                    fin_ef = min(fin_p, hora_fin)
++                    dur = max(0.0, (fin_ef - ini_ef).total_seconds() / 60)
++                    solape = _solape_minutos(ini_ef, fin_ef, brk_ini, brk_fin)
++                    min_utiles = max(0.0, dur - solape)
++                    operadores_parciales.append({
++                        "username": username,
++                        "min_utiles": round(min_utiles, 1),
++                    })
++            except ValueError:
++                min_utiles = min_utiles_planta
++
++        capacidad_mh += min_utiles
++
++    return {
++        "capacidad_mh": round(capacidad_mh, 1),
++        "operadores_contados": len(vistos),
++        "min_utiles_planta": round(min_utiles_planta, 1),
++        "operadores_parciales": operadores_parciales,
++        "fuente_presencia": presencia_capacidad.get("fuente"),
++    }
++
++
+ def _saltar_break(cursor: datetime, brk_ini: datetime, brk_fin: datetime) -> datetime:
+     """Si cursor cae dentro del break, avanzarlo al fin del break."""
+     if brk_ini <= cursor < brk_fin:
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 6db1487..e687f24 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -1,6 +1,6 @@
+ from fastapi import APIRouter, HTTPException, Request
+ from typing import Optional
+-from datetime import datetime, timedelta
++from datetime import datetime, timedelta, date
+ from pydantic import BaseModel
+ import os
+ import sqlite3
+@@ -370,6 +370,21 @@ def obtener_programacion(sucursal: int, turno: str, fecha: str):
+         logger.error(f"[B35] No se pudo resolver el turno (suc={sucursal} turno={turno_norm_get} fecha={fecha}): {e}")
+         metadata_turno = None
+ 
++    # B16: capacidad ya calculada por el Motor en la última generación se
++    # persiste junto a metadata_json — se lee de ahí (mismo portador que B35).
++    # No invasivo: si falta o falla, metadata_turno queda igual que antes de B16.
++    if metadata_turno is not None:
++        try:
++            with sqlite3.connect(DB_PATH, timeout=5) as _cn_cap:
++                _row_cap = _cn_cap.execute(
++                    "SELECT metadata_json FROM programacion_guardada WHERE sucursal_id=? AND turno=? AND fecha=?",
++                    (sucursal, turno_norm_get, fecha)
++                ).fetchone()
++            if _row_cap and _row_cap[0]:
++                metadata_turno["capacidad"] = json.loads(_row_cap[0]).get("capacidad")
++        except Exception as _e_cap_get:
++            logger.warning(f"[B16] No se pudo leer capacidad persistida: {_e_cap_get}")
++
+     return {
+         "recursos": recursos,
+         "eventos": eventos,
+@@ -1049,6 +1064,16 @@ async def generar_programacion(solicitud: SolicitudProgramacion, request: Reques
+         solicitud.sucursal_id, solicitud.fecha_produccion, turno_norm
+     )
+ 
++    # B16: presencia para capacidad_mh — helper compartido con el scheduler (main.py).
++    # Nunca lanza; None si no se pudo determinar (capacidad queda ausente, AC8).
++    try:
++        presencia_capacidad = _obtener_presencia_capacidad(
++            solicitud.sucursal_id, solicitud.fecha_produccion, turno_norm, conocimiento
++        )
++    except Exception as _e_pc:
++        logger.warning(f"[B16] presencia_capacidad no disponible: {_e_pc}")
++        presencia_capacidad = None
++
+     resultado = programar_turno(
+         etiquetas=etiquetas,
+         sucursal_id=solicitud.sucursal_id,
+@@ -1058,6 +1083,7 @@ async def generar_programacion(solicitud: SolicitudProgramacion, request: Reques
+         conocimiento=conocimiento,
+         inicio_override=inicio_ov,
+         fin_override=fin_ov,
++        presencia_capacidad=presencia_capacidad,
+     )
+ 
+     # ── L1: Aplicar operador asignado manualmente por jornada ─────────────────
+@@ -1771,6 +1797,114 @@ def _obtener_operadores_disponibles(sucursal_id: int, conocimiento: Conocimiento
+         return list(todos)
+ 
+ 
++def _obtener_presencia_capacidad(
++    sucursal_id: int, fecha: str, turno_norm: str, conocimiento: ConocimientoMotor
++) -> dict | None:
++    """
++    B16 — helper COMPARTIDO entre POST /generar y el scheduler automático
++    (main.py::_ejecutar_generacion), mismos argumentos en ambos.
++    Retorna {"fuente": "geovictoria"|"turnos_programados",
++             "operadores": [{"username", "entrada": "HH:MM"|None, "salida": "HH:MM"|None}]}
++    o None si no se pudo determinar (nunca lanza — try/except interno, no invasivo AC8).
++    """
++    try:
++        from motor_v2 import SUCURSALES
++        sucursal_nombre = SUCURSALES.get(sucursal_id, "")
++
++        # Pool de operadores reales (matriz de competencias) — excluye ayudantes
++        # porque estos no tienen fila en operadores_matriz/operadores_x_maquina (R3).
++        todos: set[str] = set()
++        for (suc, _maq), ops in conocimiento.operadores_x_maquina.items():
++            if suc.lower() == sucursal_nombre.lower():
++                todos.update(ops)
++        if not todos:
++            return {"fuente": "turnos_programados" if fecha > date.today().isoformat() else "geovictoria",
++                    "operadores": []}
++
++        if fecha > date.today().isoformat():
++            # Día futuro: dotación planificada desde turnos_programados (R2: estado='PRESENTE').
++            with sqlite3.connect(DB_PATH, timeout=5) as _cn:
++                rows = _cn.execute(
++                    "SELECT nombre, hora_inicio_turno, hora_fin_turno, estado "
++                    "FROM turnos_programados WHERE sucursal_id=? AND fecha=?",
++                    (sucursal_id, fecha),
++                ).fetchall()
++            if turno_norm == "dia":
++                rows = [r for r in rows if (r[1] or "") < "18:00"]
++            else:
++                rows = [r for r in rows if (r[1] or "") >= "18:00"]
++
++            with sqlite3.connect(DB_PATH, timeout=5) as _cn2:
++                _cn2.row_factory = sqlite3.Row
++                nombre_a_username = {
++                    (r["Nombre"] or "").strip().lower(): r["Operador"]
++                    for r in _cn2.execute(
++                        'SELECT "Operador", "Nombre" FROM operadores_matriz WHERE sucursal_id=?',
++                        (sucursal_id,),
++                    )
++                    if r["Nombre"]
++                }
++
++            operadores_out = []
++            for nombre, h_ini, h_fin, estado in rows:
++                if estado != "PRESENTE":
++                    continue  # FALTA/VACACIONES/LICENCIA → 0, no entra (R2)
++                username = nombre_a_username.get((nombre or "").strip().lower())
++                if not username or username not in todos:
++                    continue  # no está en la matriz de operadores → no cuenta (R3)
++                operadores_out.append({"username": username, "entrada": h_ini, "salida": h_fin})
++            return {"fuente": "turnos_programados", "operadores": operadores_out}
++
++        # Hoy/pasado: marcas reales desde Geovictoria (mismo endpoint que
++        # _obtener_operadores_disponibles; ya filtrado por cargo Operador — R3).
++        r = httpx.get(
++            f"{GEOVICTORIA_URL}/asistencia/operadores_presentes/{sucursal_id}",
++            timeout=5.0,
++        )
++        if r.status_code != 200:
++            return None
++        presentes = r.json()
++        if not presentes:
++            return {"fuente": "geovictoria", "operadores": []}
++
++        _fecha_hoy = date.today().isoformat()
++        _fecha_gv = presentes[0].get("fecha_referencia") if presentes else None
++        if _fecha_gv and _fecha_gv != _fecha_hoy:
++            return None  # scraper no corrió aún — no inventar presencia (mismo criterio que B35)
++
++        presentes = [p for p in presentes if p.get("turno_inferido") in (turno_norm, None, "")]
++
++        import unicodedata
++
++        def _sin_acento(s: str) -> str:
++            return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
++
++        def _username_desde_nombre(nombre_completo: str) -> str:
++            partes = nombre_completo.strip().split()
++            if len(partes) < 2:
++                return ""
++            return _sin_acento(partes[0][0]).lower() + _sin_acento(partes[-2]).lower()
++
++        operadores_out = []
++        for p in presentes:
++            nombre = p.get("nombre")
++            if not nombre:
++                continue
++            username = _username_desde_nombre(nombre)
++            if not username or username not in {op.lower() for op in todos}:
++                continue
++            operadores_out.append({
++                "username": username,
++                "entrada": p.get("hora_inicio_turno"),
++                "salida": p.get("hora_fin_turno"),
++            })
++        return {"fuente": "geovictoria", "operadores": operadores_out}
++
++    except Exception as e:
++        logger.warning(f"[B16] _obtener_presencia_capacidad: {e}")
++        return None
++
++
+ @router.get("/historial")
+ def get_historial(sucursal_id: int, fecha: str, turno: str = ""):
+     """
+diff --git a/backend/test_b16_capacidad.py b/backend/test_b16_capacidad.py
+new file mode 100644
+index 0000000..2589c69
+--- /dev/null
++++ b/backend/test_b16_capacidad.py
+@@ -0,0 +1,126 @@
++"""
++B16 — Capacidad de planta por jornada (minutos-hombre). Pruebas AC1-AC9.
++
++Ejecutar: python -m unittest test_b16_capacidad -v
++
++AC8 (no invasivo) no se cubre acá: requiere un diff de eventos de /generar
++antes/después de B16 con datos reales, corrido en el arnes del contenedor
++(ver CCa5_b16_implementacion_20260923.md).
++"""
++import unittest
++from motor_v2 import _calcular_capacidad_mh, _ventana_turno, _get_config_turno
++
++
++def _ventana_cerrillos_dia(fecha="2026-09-21"):  # lunes, no viernes
++    config = _get_config_turno("dia", fecha, sucursal_id=None)
++    return (fecha,) + _ventana_turno(fecha, config)
++
++
++def _ventana_noche(fecha="2026-09-21"):
++    config = _get_config_turno("noche", fecha, sucursal_id=None)
++    return (fecha,) + _ventana_turno(fecha, config)
++
++
++def _presencia(operadores, fuente="geovictoria"):
++    return {"fuente": fuente, "operadores": operadores}
++
++
++def _full(n, prefix="op"):
++    return [{"username": f"{prefix}{i}", "entrada": None, "salida": None} for i in range(n)]
++
++
++class TestB16Capacidad(unittest.TestCase):
++
++    def test_ac1_propiedad_misma_ventana_mismos_operadores(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia("2026-09-21")
++        cap_a = _calcular_capacidad_mh(fecha, h_ini, h_fin, b_ini, b_fin, _presencia(_full(8)))
++        fecha2, h_ini2, h_fin2, b_ini2, b_fin2 = _ventana_cerrillos_dia("2026-09-14")  # otro lunes
++        cap_b = _calcular_capacidad_mh(fecha2, h_ini2, h_fin2, b_ini2, b_fin2, _presencia(_full(8)))
++        self.assertEqual(cap_a["capacidad_mh"], cap_b["capacidad_mh"])
++
++    def test_ac2_cerrillos_dia_8_operadores_completos(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia()
++        self.assertEqual(h_ini.strftime("%H:%M"), "08:15")
++        self.assertEqual(h_fin.strftime("%H:%M"), "17:45")
++        cap = _calcular_capacidad_mh(fecha, h_ini, h_fin, b_ini, b_fin, _presencia(_full(8)))
++        self.assertEqual(cap["min_utiles_planta"], 510.0)
++        self.assertEqual(cap["capacidad_mh"], 4080.0)
++        self.assertEqual(cap["operadores_contados"], 8)
++        self.assertEqual(cap["operadores_parciales"], [])
++
++    def test_ac3_ausencia_parcial_umbral_30min(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia()
++
++        # Entrada 10:30 (salida en hora normal) -> ventana 10:30-17:45 = 435 - 60 colacion = 375
++        cap = _calcular_capacidad_mh(
++            fecha, h_ini, h_fin, b_ini, b_fin,
++            _presencia([{"username": "op1", "entrada": "10:30", "salida": "17:45"}]),
++        )
++        self.assertEqual(cap["capacidad_mh"], 375.0)
++        self.assertEqual(cap["operadores_parciales"], [{"username": "op1", "min_utiles": 375.0}])
++
++        # Entrada 08:40 (25 min, < 30) -> ventana completa 510
++        cap = _calcular_capacidad_mh(
++            fecha, h_ini, h_fin, b_ini, b_fin,
++            _presencia([{"username": "op1", "entrada": "08:40", "salida": "17:45"}]),
++        )
++        self.assertEqual(cap["capacidad_mh"], 510.0)
++        self.assertEqual(cap["operadores_parciales"], [])
++
++        # Entrada 08:45 (30 min, >= 30) -> parcial: 480
++        cap = _calcular_capacidad_mh(
++            fecha, h_ini, h_fin, b_ini, b_fin,
++            _presencia([{"username": "op1", "entrada": "08:45", "salida": "17:45"}]),
++        )
++        self.assertEqual(cap["capacidad_mh"], 480.0)
++
++    def test_ac4_colacion_no_se_descuenta_si_no_intersecta(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia()
++        # Salida 12:30 (entrada en hora normal) -> 08:15-12:30 = 255 min, sin descuento de colacion (13-14)
++        cap = _calcular_capacidad_mh(
++            fecha, h_ini, h_fin, b_ini, b_fin,
++            _presencia([{"username": "op1", "entrada": "08:15", "salida": "12:30"}]),
++        )
++        self.assertEqual(cap["capacidad_mh"], 255.0)
++
++    def test_ac5_turno_noche_cruza_medianoche(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_noche()
++        self.assertEqual(h_ini.strftime("%H:%M"), "20:15")
++        self.assertEqual(h_fin.strftime("%H:%M"), "05:45")
++        cap = _calcular_capacidad_mh(fecha, h_ini, h_fin, b_ini, b_fin, _presencia(_full(1)))
++        self.assertEqual(cap["capacidad_mh"], 510.0)
++
++    def test_ac6_ar009_operador_en_2_o_mas_maquinas_cuenta_una_vez(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia()
++        # Mismo username repetido (simula que califica para 3 maquinas)
++        cap = _calcular_capacidad_mh(
++            fecha, h_ini, h_fin, b_ini, b_fin,
++            _presencia([
++                {"username": "op1", "entrada": None, "salida": None},
++                {"username": "op1", "entrada": None, "salida": None},
++                {"username": "op1", "entrada": None, "salida": None},
++            ]),
++        )
++        self.assertEqual(cap["operadores_contados"], 1)
++        self.assertEqual(cap["capacidad_mh"], 510.0)
++
++    def test_ac7_dia_sin_turno_ni_marcas(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia()
++        cap = _calcular_capacidad_mh(fecha, h_ini, h_fin, b_ini, b_fin, _presencia([]))
++        self.assertEqual(cap["capacidad_mh"], 0.0)
++        self.assertEqual(cap["operadores_contados"], 0)
++
++    def test_ac7b_presencia_none_no_hay_excepcion(self):
++        fecha, h_ini, h_fin, b_ini, b_fin = _ventana_cerrillos_dia()
++        cap = _calcular_capacidad_mh(fecha, h_ini, h_fin, b_ini, b_fin, None)
++        self.assertIsNone(cap)
++
++    def test_ac9_saldo_admite_negativo(self):
++        capacidad_mh = 480.0
++        duracion_asignada_min = 900.0  # sobreasignacion
++        saldo = round(capacidad_mh - duracion_asignada_min, 1)
++        self.assertEqual(saldo, -420.0)
++
++
++if __name__ == "__main__":
++    unittest.main()

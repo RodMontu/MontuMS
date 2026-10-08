@@ -1,0 +1,145 @@
+From 9fd96ed2bc427ae6d8a85fce849fa7cc76a4700b Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 08:16:12 -0300
+Subject: [PATCH] fix(gantt): B43 adelantada usa senal real del Cuadro
+ OptiSteel, no dias_atraso<0 - B43fix
+
+La condicion anterior (dias_atraso<0, fecha real de despacho posterior a
+hoy) marcaba ~83% de las cajitas de Cerrillos: mezclaba "despacho futuro"
+con "origen futuro", que son cosas distintas.
+
+Definicion de negocio (Montu): adelantada = orden traida de un dia futuro
+del Cuadro de Programacion OptiSteel para producirse en el turno actual
+(B18/B34: la Bolsa de Trabajo solo arma con dias > hoy ya presentes en el
+Cuadro).
+
+Se agrega el campo viene_de_futuro:
+- _obtener_pendientes_bolsa_optisteel ya filtra fecha > fecha_hoy contra
+  cuadro_programacion_optisteel -> todo item que devuelve es por
+  definicion adelantado; se marca explicito en cada item.
+- ReprogramarRequest (models.py) suma viene_de_futuro opcional para que,
+  al arrastrar una cajita desde la Bolsa a una maquina, la senal
+  sobreviva la reconstruccion del evento (mismo patron que obra/
+  codigo_viaje/kilos, FIX 22-09).
+- _tarea_a_evento propaga viene_de_futuro al evento del Gantt.
+- Frontend: vieneDeFuturo ahora lee ev.viene_de_futuro en vez de
+  dias_atraso<0; se preserva el estilo visual (ribete punteado celeste +
+  leyenda) ya hecho en 2508cb2.
+
+Verificacion: py_compile y tsc --noEmit limpios. El backend de :8001 esta
+detras de Docker sirviendo el checkout principal (no este worktree) y
+docker build/up/restart esta prohibido en este encargo, asi que no hubo
+prueba end-to-end contra el servidor vivo; se verifico con SQL de solo
+lectura contra cuadro_programacion_optisteel (conteos de dias futuros por
+sucursal, minoria plausible frente al total del Cuadro) y con trazado
+manual del flujo de codigo (bolsa -> payload -> evento).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/models.py                             |  5 ++++
+ backend/routers/programacion.py               | 10 ++++++++
+ .../components/domain/GestorProgramacion.tsx  | 23 ++++++++++++-------
+ 3 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/backend/models.py b/backend/models.py
+index 1278d5e..cfbc88f 100644
+--- a/backend/models.py
++++ b/backend/models.py
+@@ -32,6 +32,11 @@ class ReprogramarRequest(BaseModel):
+     calidad_acero: Optional[str] = None
+     id_forma: Optional[int] = None
+     nr_piezas: Optional[int] = None
++    # B43 (fix): true si el frontend arrastro esta cajita desde la Bolsa de
++    # Trabajo en vivo (_obtener_pendientes_bolsa_optisteel = SOLO dias > hoy
++    # ya en el Cuadro OptiSteel, B18). Se propaga al evento reconstruido para
++    # que el indicador visual de "adelantada" sea la senal real, no un proxy.
++    viene_de_futuro: Optional[bool] = None
+ 
+ class NormalizarRequest(BaseModel):
+     sintoma_crudo: str
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 40c63f7..3a63271 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -213,6 +213,10 @@ def _tarea_a_evento(t: dict, sucursal_id: int, turno: str = None, fecha: str = N
+         "fecha_entrega":  t.get("fecha_entrega"),
+         "fecha_despacho": t.get("fecha_despacho"),
+         "posicion_manual": t.get("posicion_manual", False),
++        # B43 (fix): senal real de "adelantada" = vino de la Bolsa en vivo
++        # (dias > hoy ya en el Cuadro OptiSteel), no un proxy contra la fecha
++        # de despacho. Ver _obtener_pendientes_bolsa_optisteel y reprogramar_pid.
++        "viene_de_futuro": bool(t.get("viene_de_futuro", False)),
+         "id_forma":       t.get("id_forma"),
+         "nr_piezas":          t.get("nr_piezas", 0),
+         "lista_etiqueta_ids": t.get("lista_etiqueta_ids", []),
+@@ -814,6 +818,7 @@ def reprogramar_pid(payload: ReprogramarRequest):
+                 "estado":        "programado",
+                 "id_forma":      payload.id_forma,
+                 "nr_piezas":     payload.nr_piezas or 0,
++                "viene_de_futuro": bool(payload.viene_de_futuro),
+             }
+             global_eventos.append(
+                 _tarea_a_evento(_tarea_nueva, payload.sucursal_id, turno=_turno_evt, fecha=payload.fecha)
+@@ -1727,6 +1732,11 @@ def _obtener_pendientes_bolsa_optisteel(sucursal_id: int, fecha_hoy: str) -> lis
+             "fecha_despacho": pieza.get("fecha_despacho") or pieza.get("fecha_entrega"),
+             "diametro_principal": 0,
+             "sucursal_id": str(sucursal_id),
++            # B43 (fix): todo item de esta funcion viene del WHERE fecha > fecha_hoy
++            # de arriba -> por definicion de negocio (B18/B34) es "adelantada".
++            # Se marca explicito (no implicito) para que el frontend no tenga que
++            # re-derivarlo y para que sobreviva la asignacion (ver reprogramar_pid).
++            "viene_de_futuro": True,
+             "tags": [],
+         })
+         item["peso_kg"] += pieza.get("kgs") or 0
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index 427e06c..da4826e 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -52,6 +52,10 @@ interface Tarea {
+     numero_etiqueta?: number | null;
+     // B44(a): true si esta cajita tiene un ajuste manual de duracion vigente.
+     ajuste_manual?: boolean;
++    // B43 (fix): senal real de "adelantada" - true si esta cajita viene de la
++    // Bolsa de Trabajo en vivo (dias futuros ya en el Cuadro OptiSteel, B18).
++    // Reemplaza el proxy dias_atraso<0 (marcaba despacho futuro, no origen).
++    viene_de_futuro?: boolean;
+     // B2: reparto de trabajo en 2-3 máquinas en paralelo
+     alerta_reparto?: { nivel: 'suave' | 'dura'; pct_jornada: number; maquina_sugerida: string | null };
+     reparto?: { recurso_id: string; nombre_maquina: string; pct_carga: number; kgs: number; duracion_min: number; operador: string; fecha_inicio: string; fecha_fin: string }[];
+@@ -351,13 +355,13 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+     const isUrgente   = !isCompletado && ev.prioridad === 'URGENTE';
+     const isNoLiberada = ev.estado === 'programado-no-liberada';
+     const isSemi      = ev.estado === 'programado-semi-operativa';
+-    // B43: "viene del futuro" — el Cuadro OptiSteel programo esta etiqueta
+-    // para hoy pero su fecha real de despacho/entrega (Cubigest) es
+-    // posterior (dias_atraso negativo). SUPUESTO: se usa dias_atraso tal
+-    // cual ya lo calcula el backend contra la fecha real de hoy (sin
+-    // umbral extra) — Montu marco la forma final del indicador como
+-    // "provisional, por definir".
+-    const vieneDeFuturo = !isCompletado && (ev.dias_atraso ?? 0) < 0;
++    // B43 (fix): "adelantada" = orden traida de un dia futuro del Cuadro de
++    // Programacion OptiSteel (B18/B34: la Bolsa solo trae dias > hoy ya
++    // presentes en el Cuadro). Senal real: viene_de_futuro, marcada por el
++    // backend en _obtener_pendientes_bolsa_optisteel y propagada al asignar
++    // desde la Bolsa (reprogramar_pid). Ya NO es un proxy contra la fecha de
++    // despacho (dias_atraso<0 marcaba ~83% de las cajitas — no confiable).
++    const vieneDeFuturo = !isCompletado && ev.viene_de_futuro === true;
+     const baseStyle   = getEventStyle(ev.fecha_inicio, ev.fecha_fin);
+ 
+     // P1 — Color por obra; excepción: borde ámbar si calidad != A630
+@@ -1378,7 +1382,10 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                     diametro: tarea.diametro ?? tarea.diametro_principal ?? null,
+                     calidad_acero: tarea.calidad_acero ?? null,
+                     id_forma: tarea.id_forma ?? null,
+-                    nr_piezas: tarea.nr_piezas ?? null
++                    nr_piezas: tarea.nr_piezas ?? null,
++                    // B43 (fix): se propaga la senal real de "adelantada" (la
++                    // cajita venia de la Bolsa en vivo = dias futuros del Cuadro).
++                    viene_de_futuro: tarea.viene_de_futuro ?? false
+                 })
+             });
+ 
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,135 @@
+{
+  "id_forma": 1,
+  "diametro": 12,
+  "meses_consultados": 24,
+  "total_registros": 267,
+  "dotacion_detectable": false,
+  "peso_aprox_kg_consultado": null,
+  "nota_metodologica": "Producciones estimadas en base a antecedentes historicos de produccion; rango tipico segun el historial (P25-P75). Es una estimacion referencial: no es un intervalo de confianza ni esta validada a nivel de operario y pedido.",
+  "nota_rutas": "Las maquinas listadas son las que procesaron esta forma y diametro segun el historial; no corresponden al ruteo que calcula el Planificador.",
+  "criterios": {
+    "n_min_tonh": 15,
+    "tonh_max": 50.0,
+    "rango_pct": [
+      0.05,
+      0.95
+    ],
+    "bins_5_min_n": 50,
+    "bins_3_min_n": 30,
+    "ratio_barra_max": 1.5,
+    "metodo": "delta crudo entre registros consecutivos (2-480 min); no validado a nivel operario+pedido (ver B26-B)"
+  },
+  "por_maquina": [
+    {
+      "maquina_id": 101,
+      "maquina_nombre": "COIL 14",
+      "sucursal_id": 1,
+      "n_registros": 72,
+      "avg_largo_mm": 4738.0,
+      "peso_etiqueta_tipico_kg": 52.0,
+      "ton_hora_estimado": 0.029,
+      "ton_hora_p25": 0.007,
+      "ton_hora_p75": 0.108,
+      "n_grupo": 72,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        0.6,
+        10.8
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 102,
+      "maquina_nombre": "Carro de Corte",
+      "sucursal_id": 1,
+      "n_registros": 50,
+      "avg_largo_mm": 11188.0,
+      "peso_etiqueta_tipico_kg": 882.6,
+      "ton_hora_estimado": 0.821,
+      "ton_hora_p25": 0.148,
+      "ton_hora_p75": 5.188,
+      "n_grupo": 50,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 104,
+      "maquina_nombre": "Eura 16",
+      "sucursal_id": 1,
+      "n_registros": 70,
+      "avg_largo_mm": 4770.0,
+      "peso_etiqueta_tipico_kg": 69.0,
+      "ton_hora_estimado": 0.079,
+      "ton_hora_p25": 0.018,
+      "ton_hora_p75": 0.358,
+      "n_grupo": 70,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        0.4,
+        10.8
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 105,
+      "maquina_nombre": "COIL 14 M",
+      "sucursal_id": 1,
+      "n_registros": 70,
+      "avg_largo_mm": 4398.0,
+      "peso_etiqueta_tipico_kg": 22.0,
+      "ton_hora_estimado": 0.021,
+      "ton_hora_p25": 0.007,
+      "ton_hora_p75": 0.052,
+      "n_grupo": 70,
+      "datos_suficientes": true,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": [
+        0.8,
+        9.2
+      ],
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 108,
+      "maquina_nombre": "Cortadora Manual",
+      "sucursal_id": 1,
+      "n_registros": 3,
+      "avg_largo_mm": 12000.0,
+      "peso_etiqueta_tipico_kg": 538.0,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 3,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    },
+    {
+      "maquina_id": 111,
+      "maquina_nombre": "EURA 20_2",
+      "sucursal_id": 1,
+      "n_registros": 2,
+      "avg_largo_mm": 5730.0,
+      "peso_etiqueta_tipico_kg": 1034.5,
+      "ton_hora_estimado": null,
+      "ton_hora_p25": null,
+      "ton_hora_p75": null,
+      "n_grupo": 2,
+      "datos_suficientes": false,
+      "estado_rango": "sin_largo",
+      "rango_barra_kg": null,
+      "ajuste_por_largo": false,
+      "peso_referencia_kg": null
+    }
+  ]
+}

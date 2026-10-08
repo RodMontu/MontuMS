@@ -1,0 +1,150 @@
+From 64b7de748aba1ec387527c811c651f5746019708 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rivera.melgarejo@gmail.com>
+Date: Thu, 24 Sep 2026 08:13:18 -0300
+Subject: [PATCH] fix(utils): decodificar_material lee largo decimal (coma o
+ punto) tras la X
+
+Codigos como 1B63T32X6.9 y 1B63T25X9,9 asumian largo entero de 2 digitos
+(codigo[8:10]) y fallaban silenciosamente a largo=0 ("32mm x 0m"). Ahora
+se lee el resto del codigo tras la X, se normaliza coma/punto y se
+parsea como float con 2 decimales; los enteros de 2 digitos (X12) siguen
+dando exactamente el mismo resultado (int) que antes. Si el parseo falla
+no se devuelve 0 silencioso: largo_m=None y descripcion "largo invalido".
+
+Verificado contra /api/materias_primas?sucursal=10 real (Cerrillos, 91
+codigos): las 2 materias afectadas (1B63T25X9,9 y 1B63T32X6.9, 916 kg)
+corrigen su descripcion; 0 regresiones, 0 "x 0m" restantes.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/test_decodificar_material.py | 47 ++++++++++++++++++++++++++++
+ backend/utils.py                     | 38 +++++++++++++---------
+ 2 files changed, 70 insertions(+), 15 deletions(-)
+ create mode 100644 backend/test_decodificar_material.py
+
+diff --git a/backend/test_decodificar_material.py b/backend/test_decodificar_material.py
+new file mode 100644
+index 0000000..816b4a3
+--- /dev/null
++++ b/backend/test_decodificar_material.py
+@@ -0,0 +1,47 @@
++"""
++Fix decodificar_material — largo decimal mal leido ("32 x 0 mm").
++
++Ejecutar: python -m unittest test_decodificar_material -v
++"""
++import unittest
++from utils import decodificar_material
++
++
++class TestDecodificarMaterialLargoDecimal(unittest.TestCase):
++
++    def test_decimal_punto_un_digito(self):
++        info = decodificar_material("1B63T32X6.9")
++        self.assertEqual(info["largo_m"], 6.9)
++        self.assertIn("6.9m", info["descripcion"])
++
++    def test_decimal_coma_un_digito_9_9(self):
++        info = decodificar_material("1B63T25X9,9")
++        self.assertEqual(info["largo_m"], 9.9)
++
++    def test_decimal_coma_un_digito_6_5(self):
++        info = decodificar_material("1B63N36X6,5")
++        self.assertEqual(info["largo_m"], 6.5)
++
++    def test_entero_dos_digitos_no_cambia(self):
++        # Comportamiento historico: entero de 2 digitos sigue igual (int, no float)
++        info = decodificar_material("1B63N32X12")
++        self.assertEqual(info["largo_m"], 12)
++        self.assertIsInstance(info["largo_m"], int)
++        self.assertIn("x 12m", info["descripcion"])
++
++    def test_decimal_coma_dos_digitos_10_8(self):
++        info = decodificar_material("1B63N32X10,8")
++        self.assertEqual(info["largo_m"], 10.8)
++
++    def test_decimal_coma_dos_digitos_11_9(self):
++        info = decodificar_material("1B63N32X11,9")
++        self.assertEqual(info["largo_m"], 11.9)
++
++    def test_largo_invalido_no_es_cero_silencioso(self):
++        info = decodificar_material("1B63N32XABC")
++        self.assertIsNone(info["largo_m"])
++        self.assertIn("largo invalido", info["descripcion"])
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/backend/utils.py b/backend/utils.py
+index d7ddffe..64d01ee 100644
+--- a/backend/utils.py
++++ b/backend/utils.py
+@@ -45,42 +45,50 @@ def decodificar_material(codigo: str) -> dict:
+     pres_char_check = codigo[1] if len(codigo) > 1 else ''
+     if pres_char_check == 'B' and len(codigo) < 10:
+         return _unknown
+-    
++
+     sucursal_map = {'1': 'Cerrillos', '2': 'Calama', '3': 'Coronel'}
+     suc_id = codigo[0]
+     sucursal_nombre = sucursal_map.get(suc_id, "Desconocida")
+-    
++
+     pres_map = {'B': 'Barra', 'R': 'Rollo'}
+     pres_char = codigo[1]
+     presentacion = pres_map.get(pres_char, "Desconocida")
+-    
++
+     calidad_num = codigo[2:4]
+     tipo_char = codigo[4] # N=Normal, S=Soldable
+-    
++
+     # Determinamos calidad base (A440, A630, G80)
+     base_calidad = f"A{calidad_num}0" if calidad_num in ['44', '50', '63'] else "G80" if calidad_num == '80' else f"Desconocida ({calidad_num})"
+-    
++
+     # Si es A630 y es Soldable (S), debe ser A630S
+     calidad = f"{base_calidad}S" if base_calidad == "A630" and tipo_char == 'S' else base_calidad
+-    
++
+     tipo_map = {'N': 'Normal', 'S': 'Soldable', 'T': 'Turco', 'P': 'Peruano'}
+     tipo_char = codigo[4]
+     tipo_acero = tipo_map.get(tipo_char, "Desconocido")
+-    
++
+     try:
+         diametro = int(codigo[5:7])
+     except ValueError:
+         diametro = 0
+-        
+-    try:
+-        largo = int(codigo[8:10])
+-    except ValueError:
+-        largo = 0
+-        
++
++    # Largo: entero de 2 digitos (formato historico "X12") o decimal con
++    # separador "," o "." (formato nuevo "X6.9" / "X9,9"). El separador
++    # decimal no es consistente en Cubigest (conviven "," y "." para el
++    # mismo largo fisico), por eso se normaliza antes de parsear.
++    largo_str = codigo[8:]
++    largo = None
++    if largo_str:
++        largo_norm = largo_str.replace(',', '.')
++        try:
++            largo = round(float(largo_norm), 2) if '.' in largo_norm else int(largo_norm)
++        except ValueError:
++            largo = None
++
+     descripcion = f"{presentacion} {calidad} {diametro}mm"
+     if presentacion == "Barra":
+-        descripcion += f" x {largo}m"
+-        
++        descripcion += f" x {largo}m" if largo is not None else " x largo invalido"
++
+     return {
+         "sucursal_id": suc_id,
+         "sucursal_nombre": sucursal_nombre,
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,59 @@
+import sqlite3, unicodedata, csv, io, sys, json, subprocess
+def sa(s): return "".join(c for c in unicodedata.normalize("NFD", s or "") if unicodedata.category(c) != "Mn")
+def norm(s): return " ".join(sa(s).strip().lower().split())
+def user(n):
+    p = (n or "").strip().split()
+    return (sa(p[0][0]).lower() + sa(p[-2]).lower()) if len(p) >= 2 else ""
+def es_ayudante(c):
+    if not c or ":" in c: return False
+    c = sa(c).lower(); return "ayte" in c or "ayudante" in c
+def es_operador(c):
+    if not c or ":" in c: return False
+    c = sa(c).lower(); return "operador" in c and "ayte" not in c and "ayudante" not in c
+
+gv = sqlite3.connect("file:/tmp/gv_qa5.db?mode=ro", uri=True)
+cols = [r[1] for r in gv.execute("PRAGMA table_info(asistencia_colaboradores)")]
+print("cols GV:", cols, file=sys.stderr)
+fcol = "fecha" if "fecha" in cols else cols[0]
+rows = gv.execute(f"SELECT sucursal_id, nombre, cargo, MAX({fcol}), COUNT(*) FROM asistencia_colaboradores WHERE {fcol} >= date('now','-30 day') GROUP BY sucursal_id, nombre, cargo").fetchall()
+roster = {}
+for s, n, c, last, k in rows:
+    roster.setdefault(str(s), []).append({"nombre": n, "cargo": c, "ultimo": last, "dias": k, "norm": norm(n), "user": user(n)})
+
+db = sqlite3.connect("file:/c/Users/OptiFierro/Desktop/optifierro/backend/optifierro_v2.db?mode=ro", uri=True)
+db.row_factory = sqlite3.Row
+mat = [dict(r) for r in db.execute('SELECT sucursal_id, "Operador" AS usr, "Nombre" AS nom, "turno" AS turno FROM operadores_matriz')]
+hab = {}
+for r in db.execute("SELECT sucursal_id, maquina, Operador_Habitual, Operador_Habitual_Noche FROM maquinas_info"):
+    for v in (r["Operador_Habitual"], r["Operador_Habitual_Noche"]):
+        if v and v not in ("Sin datos", "Sin Operador Asignado", "nan", "None"):
+            hab.setdefault((str(r["sucursal_id"]), v), []).append(r["maquina"])
+
+out = []
+for m in mat:
+    s = str(m["sucursal_id"])
+    if s not in ("1", "10", "14"): continue
+    gvs = roster.get(s, [])
+    por_nombre = [g for g in gvs if g["norm"] == norm(m["nom"])]
+    por_user = [g for g in gvs if g["user"] == (m["usr"] or "").lower()]
+    if por_nombre:
+        g = por_nombre[0]; estado = "OK_NOMBRE"; cargo = g["cargo"]; ult = g["ultimo"]
+    elif por_user:
+        g = por_user[0]; estado = "AMBIGUO_MISMO_USUARIO_OTRA_PERSONA"; cargo = g["cargo"]; ult = g["ultimo"]
+    else:
+        estado = "SIN_MATCH_30D_CANDIDATO_BAJA"; cargo = ""; ult = ""
+    clase = "operador" if es_operador(cargo) else ("ayudante" if es_ayudante(cargo) else ("" if not cargo else "otro_cargo"))
+    habituales = sorted({mq for (ss, nm), mqs in hab.items() if ss == s and norm(nm) == norm(m["nom"]) for mq in mqs})
+    out.append([s, m["usr"], m["nom"], estado, g["nombre"] if estado != "SIN_MATCH_30D_CANDIDATO_BAJA" else "", cargo, clase, ult, ";".join(habituales)])
+
+w = io.StringIO(); cw = csv.writer(w)
+cw.writerow(["sucursal_id", "usuario_matriz", "nombre_matriz", "resultado_match", "nombre_geovictoria", "cargo_geovictoria", "clase_por_cargo", "ultima_asistencia_30d", "habitual_de_maquinas"])
+cw.writerows(out)
+print("=====CSV"); print(w.getvalue()); print("=====FIN")
+
+# resumen por planta: presentes hoy por cargo desde el roster 30d (ultimo dia)
+for s in ("1", "10", "14"):
+    ops = [o for o in out if o[0] == s]
+    c = {}
+    for o in ops: c[o[3]] = c.get(o[3], 0) + 1
+    print(f"RESUMEN suc {s}: matriz={len(ops)}", c, file=sys.stderr)

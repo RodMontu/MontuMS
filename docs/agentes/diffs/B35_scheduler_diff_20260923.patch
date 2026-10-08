@@ -1,0 +1,33 @@
+diff --git a/backend/main.py b/backend/main.py
+index 3599300..68532e3 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -128,6 +128,8 @@ async def lifespan(app: FastAPI):
+         _obtener_operadores_disponibles,
+         _init_programacion_guardada,
+         _tarea_a_evento,
++        _ventana_desde_turnos_programados,
++        _ventana_desde_geovictoria,
+     )
+     from motor_v2 import programar_turno as _programar_turno
+ 
+@@ -138,6 +140,10 @@ async def lifespan(app: FastAPI):
+         try:
+             etiquetas = _obtener_pids_pendientes(sucursal_id, fecha_str)
+             operadores = _obtener_operadores_disponibles(sucursal_id, conocimiento, turno_norm)
++            # Misma resolución de ventana que POST /generar (routers/programacion.py:999-1002)
++            inicio_ov, fin_ov = _ventana_desde_turnos_programados(sucursal_id, fecha_str, turno_norm)
++            if not inicio_ov:
++                inicio_ov, fin_ov = _ventana_desde_geovictoria(sucursal_id, turno_norm)
+             resultado = _programar_turno(
+                 etiquetas=etiquetas,
+                 sucursal_id=sucursal_id,
+@@ -145,6 +151,8 @@ async def lifespan(app: FastAPI):
+                 turno=turno_norm,
+                 operadores_disponibles=operadores,
+                 conocimiento=conocimiento,
++                inicio_override=inicio_ov,
++                fin_override=fin_ov,
+             )
+             _init_programacion_guardada()
+             tareas_json_new = json.dumps(resultado.get("tareas", []))

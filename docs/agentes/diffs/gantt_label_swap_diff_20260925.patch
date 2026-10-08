@@ -1,0 +1,35 @@
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index ee53523..94cd599 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -416,8 +416,9 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+             }}
+         >
+             {/* B42 v2: una cajita = una etiqueta. Prioridad de lectura cuando la
+-                cajita es angosta (spec B42_v2 §10/§12, decision Montu 24-09):
+-                Diametro > Etiqueta N de M > Peso > Viaje. Cada linea trunca con
++                cajita es angosta (spec B42_v2 §10/§12, decision Montu 24-09,
++                orden invertido 25-09 a pedido de Montu):
++                Viaje > Etiqueta N de M > Diametro > Peso. Cada linea trunca con
+                 ellipsis (CSS puro, sin min-width ni JS) — lo que no entra se
+                 omite visualmente y queda disponible en el tooltip on-hover.
+                 Fallback a lo que se mostraba hoy (viaje/id_tarea) si el plan
+@@ -430,7 +431,7 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+                         style={{ color: obraColor.textColor, fontSize: '10px' }}
+                         title={`Ø${ev.diametro} — Etiqueta ${ev.numero_etiqueta}${ev.total_etiquetas != null ? ` de ${ev.total_etiquetas}` : ''} — Viaje ${ev.codigo_viaje}`}
+                     >
+-                        {`Ø${ev.diametro} · ${ev.numero_etiqueta}${ev.total_etiquetas != null ? ` de ${ev.total_etiquetas}` : ''}`}
++                        {`${ev.codigo_viaje} · ${ev.numero_etiqueta}${ev.total_etiquetas != null ? ` de ${ev.total_etiquetas}` : ''}`}
+                     </span>
+                     <span
+                         className="truncate opacity-90"
+@@ -438,8 +439,8 @@ function DraggableTimelineEvent({ ev, setHoveredEvent, setTooltipPos, getEventSt
+                         title={`${ev.kilos != null ? Math.round(ev.kilos).toLocaleString('es-CL') + ' kg' : ''} — ${ev.codigo_viaje}`}
+                     >
+                         {[
++                            `Ø${ev.diametro}`,
+                             ev.kilos != null ? `${Math.round(ev.kilos).toLocaleString('es-CL')} kg` : null,
+-                            ev.codigo_viaje,
+                         ].filter(Boolean).join(' · ')}
+                     </span>
+                 </>

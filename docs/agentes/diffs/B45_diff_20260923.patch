@@ -1,0 +1,183 @@
+diff --git a/backend/main.py b/backend/main.py
+index 205add4..a725fec 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+ 
+ from models import global_recursos, global_eventos, global_pendientes
+ from routers import maquinas, operadores, programacion, materias_primas, piezas, averias, sucursales, auth, admin, it_detenida, jornada, calendario_futuro, compromisos_semanales, tiempos_maquina
+-from motor_v2 import ConocimientoMotor
++from motor_v2 import ConocimientoMotor, MAQUINAS_FICTICIAS
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -51,6 +51,10 @@ async def lifespan(app: FastAPI):
+ 
+             recursos_cargados = []
+             for row in rows:
++                # B45: FP-LC (despacho directo) no es una máquina real, no
++                # se expone en Gestor de Máquinas ni en columnas del Gantt.
++                if str(row["maquina"]) in MAQUINAS_FICTICIAS:
++                    continue
+                 op = str(row["Operador_Habitual"] or "")
+                 if op.lower() in ("nan", "none", ""):
+                     op = "Sin Operador Asignado"
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index 3bf3d9f..5745725 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -135,7 +135,7 @@ MAQUINAS_ACTIVAS = {
+     "Cerrillos": {
+         "Curvadora CER40 1 Schnell", "Dobladora Tecmor S40 1",
+         "Dobladora Tecmor S40 2", "EURA 16", "EURA 20_1", "EURA 20_3",
+-        "FP-LC", "LINEA DE CORTE", "PRIMA 3D", "Robomaster 55", "Robomaster 60"
++        "LINEA DE CORTE", "PRIMA 3D", "Robomaster 55", "Robomaster 60"
+     },
+     "Calama": {
+         "Carro de Corte", "COIL 14", "COIL 14 M", "Cortadora Manual",
+@@ -173,6 +173,28 @@ DOBLADORA_DEFAULT = {
+ FPLC_LARGO_MIN = 6000
+ FPLC_LARGO_MAX = 12000
+ 
++# Máquinas ficticias del SPP (B45): no son máquinas reales, no deben
++# programarse, ocupar capacidad/operadores ni aparecer en Gantt/Bolsa/
++# Gestor de Máquinas. FP-LC (Fierro en Punta - Largo Comercial) va de
++# Bodega directo al camión, sin pasar por ninguna máquina.
++MAQUINAS_FICTICIAS = {"FP-LC"}
++
++
++def es_despacho_directo(id_forma: int, largo_mm: Optional[float], diametro: int) -> bool:
++    """
++    True si la pieza es FP-LC (despacho directo, no pasa por máquina):
++    IdForma=1, largo 6-12m, diámetro AD. Única definición de la regla de
++    negocio — resolver_ruta la usa para su caso especial, y las funciones
++    que arman el universo de pendientes la usan para excluir estas
++    etiquetas antes de que entren al Motor/Bolsa.
++    """
++    return (
++        id_forma == 1
++        and largo_mm is not None
++        and FPLC_LARGO_MIN <= largo_mm <= FPLC_LARGO_MAX
++        and diametro <= DIAMETRO_AD_MAX
++    )
++
+ # Restricciones de largo por máquina (mm) — del Excel "Restricciones de maquinas"
+ RESTRICCIONES_LARGO = {
+     ("Cerrillos", "PRIMA 3D"):          {"max_cota_a": 2000},
+@@ -461,10 +483,7 @@ def resolver_ruta(
+     # ── Caso especial: FP-LC ──────────────────────────────────────────
+     # IdForma=1, largo entre 6000–12000mm, cualquier diámetro AD
+     # (para AG no hay rollo, no aplica FP-LC)
+-    if (id_forma == 1
+-            and largo_a is not None
+-            and FPLC_LARGO_MIN <= largo_a <= FPLC_LARGO_MAX
+-            and diametro <= DIAMETRO_AD_MAX):
++    if es_despacho_directo(id_forma, largo_a, diametro):
+         return ["FP-LC"], False
+ 
+     # ── Consultar matriz histórica ────────────────────────────────────
+diff --git a/backend/routers/maquinas.py b/backend/routers/maquinas.py
+index df6db11..0436355 100644
+--- a/backend/routers/maquinas.py
++++ b/backend/routers/maquinas.py
+@@ -4,6 +4,7 @@ from pydantic import BaseModel
+ import os
+ import sqlite3
+ from models import global_recursos, RecursoResponse
++from motor_v2 import MAQUINAS_FICTICIAS
+ 
+ 
+ class OperadorUpdate(BaseModel):
+@@ -173,7 +174,8 @@ def obtener_matriz_diametros(sucursal: Optional[str] = None):
+             else:
+                 cursor.execute("SELECT * FROM diametros")
+             rows = cursor.fetchall()
+-        return [dict(row) for row in rows]
++        # B45: FP-LC no es una máquina real, no se expone en Gestor de Máquinas.
++        return [dict(row) for row in rows if row["maquina"] not in MAQUINAS_FICTICIAS]
+     except Exception as e:
+         raise HTTPException(status_code=500, detail=str(e))
+ 
+@@ -191,7 +193,8 @@ def obtener_matriz_hebras(sucursal: Optional[str] = None):
+             else:
+                 cursor.execute("SELECT * FROM hebras")
+             rows = cursor.fetchall()
+-        return [dict(row) for row in rows]
++        # B45: FP-LC no es una máquina real, no se expone en Gestor de Máquinas.
++        return [dict(row) for row in rows if row["maquina"] not in MAQUINAS_FICTICIAS]
+     except Exception as e:
+         raise HTTPException(status_code=500, detail=str(e))
+ 
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index 6db1487..1d1b8d8 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -11,7 +11,7 @@ from models import (
+     global_recursos, global_eventos, global_pendientes,
+     ReprogramarRequest
+ )
+-from motor_v2 import programar_turno, ConocimientoMotor, _get_config_turno, _ventana_turno
++from motor_v2 import programar_turno, ConocimientoMotor, _get_config_turno, _ventana_turno, es_despacho_directo, MAQUINAS_FICTICIAS
+ 
+ GEOVICTORIA_URL = os.getenv("GEOVICTORIA_API_URL", "http://192.168.1.111:8002")
+ 
+@@ -370,6 +370,9 @@ def obtener_programacion(sucursal: int, turno: str, fecha: str):
+         logger.error(f"[B35] No se pudo resolver el turno (suc={sucursal} turno={turno_norm_get} fecha={fecha}): {e}")
+         metadata_turno = None
+ 
++    # B45: planes ya guardados con tareas FP-LC no muestran esos eventos.
++    eventos = [e for e in eventos if e.get("recurso_id") not in MAQUINAS_FICTICIAS]
++
+     return {
+         "recursos": recursos,
+         "eventos": eventos,
+@@ -1313,11 +1316,22 @@ def _obtener_pids_pendientes(sucursal_id: int, fecha: str) -> list[dict]:
+     """
+ 
+     try:
+-        return cubigest_db.execute_query(query, tuple(cub_ids))
++        filas = cubigest_db.execute_query(query, tuple(cub_ids))
+     except Exception as e:
+         logger.error(f"Error obteniendo PIDs pendientes: {e}")
+         return []
+ 
++    # B45: FP-LC (despacho directo) no entra al universo del Motor/Bolsa.
++    pendientes, excluidas = [], []
++    for f in filas:
++        (excluidas if es_despacho_directo(f.get("id_forma"), f.get("largo_a"), f.get("diametro")) else pendientes).append(f)
++    if excluidas:
++        logger.info(
++            f"[B45] {len(excluidas)} etiquetas despacho-directo (FP-LC) excluidas de "
++            f"pendientes (sucursal={sucursal_id}), {sum(f.get('kgs', 0) for f in excluidas):.1f} kg"
++        )
++    return pendientes
++
+ 
+ def _piezas_optisteel_por_viajes(sucursal_id: int, viajes: list[str]) -> list[dict]:
+     """
+@@ -1411,11 +1425,24 @@ def _piezas_optisteel_por_viajes(sucursal_id: int, viajes: list[str]) -> list[di
+     """
+ 
+     try:
+-        return cubigest_db.execute_query(query, tuple(cub_ids) + tuple(viajes))
++        filas = cubigest_db.execute_query(query, tuple(cub_ids) + tuple(viajes))
+     except Exception as e:
+         logger.error(f"Error obteniendo piezas OptiSteel para viajes {viajes}: {e}")
+         return []
+ 
++    # B45: FP-LC (despacho directo) no entra al universo del Motor/Bolsa
++    # (comparte este JOIN _obtener_pids_pendientes_optisteel y
++    # _obtener_pendientes_bolsa_optisteel).
++    piezas, excluidas = [], []
++    for f in filas:
++        (excluidas if es_despacho_directo(f.get("id_forma"), f.get("largo_a"), f.get("diametro")) else piezas).append(f)
++    if excluidas:
++        logger.info(
++            f"[B45] {len(excluidas)} etiquetas despacho-directo (FP-LC) excluidas de "
++            f"OptiSteel (sucursal={sucursal_id}), {sum(f.get('kgs', 0) for f in excluidas):.1f} kg"
++        )
++    return piezas
++
+ 
+ def _obtener_pids_pendientes_optisteel(sucursal_id: int, fecha: str) -> list[dict]:
+     """

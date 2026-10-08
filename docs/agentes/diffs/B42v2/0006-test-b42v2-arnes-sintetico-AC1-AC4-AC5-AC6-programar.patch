@@ -1,0 +1,295 @@
+From fe5f7b16725c94cf390afb2abdc4ad216938480e Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Thu, 24 Sep 2026 12:48:04 -0300
+Subject: [PATCH 6/6] test(b42v2): arnes sintetico AC1/AC4/AC5/AC6 -
+ programar_turno con matriz_rutas/Excel maestro reales
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Instancia ConocimientoMotor real (matriz_rutas.json, deltat CSV,
+Maestro operadores/maquinas, mapa MAQ_NRO->nombre desde
+optifierro_v2.db) y corre programar_turno con etiquetas sinteticas
+-- sin tocar Cubigest ni la DB real. 5 casos:
+
+- AC1/AC5: serie homogenea de N etiquetas -> N tareas (nr_tags=1,
+  lista_etiqueta_ids=[eid]), conservando etiquetas y kg totales.
+- AC4: dos series reales (IdForma 2 y 4, Ø10mm Cerrillos, ambas con
+  ruta historica hacia PRIMA 3D) quedan consecutivas en la maquina,
+  sin intercalarse -- verificado con fecha_inicio/fecha_fin reales.
+- AC5 (float): largo 8.699999809265137 vs 8.7 (evidencia real
+  CCa12 6c) se agrupan en la MISMA serie via largo_mm=round(*1000).
+- AC5 (duracion): suma de duracion_min de la serie == duracion
+  que estimar_duracion_min calcularia para el grupo completo.
+- AC6: replica el sesgo real CCa12 2c/6b -- mismo viaje/diametro,
+  distinto IdForma -> ruta historica real distinta (IdForma=2
+  Ø10mm -> PRIMA 3D, IdForma=3 Ø10mm -> EURA 16 en Cerrillos),
+  cada serie resuelve SU PROPIA maquina.
+
+Ejecutado dentro de optifierro-backend (mismo Python/deps que
+produccion) via MOTOR_BASE_DIR=/app, motor_v2.py importado desde
+copia en /tmp (no se toco el modulo que sirve produccion). 5/5 OK.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/test_b42v2_etiquetas.py | 248 ++++++++++++++++++++++++++++++++
+ 1 file changed, 248 insertions(+)
+ create mode 100644 backend/test_b42v2_etiquetas.py
+
+diff --git a/backend/test_b42v2_etiquetas.py b/backend/test_b42v2_etiquetas.py
+new file mode 100644
+index 0000000..8d0ee48
+--- /dev/null
++++ b/backend/test_b42v2_etiquetas.py
+@@ -0,0 +1,248 @@
++"""
++B42 v2 - Fase 1: pruebas sintéticas de "una cajita = una etiqueta".
++
++Cubre AC1 (N cajitas = N etiquetas), AC4 (series consecutivas en 1 maquina,
++sin intercalar), AC5 (conservacion de etiquetas y kg), AC6 (elegibilidad de
++maquina correcta por serie) con datos sinteticos (no toca Cubigest ni la
++DB real). Se ejecuta dentro del contenedor optifierro-backend (mismo
++Python/deps que produccion), solo lectura de matriz_rutas.json/deltat CSV/
++Maestro Excel (config estatica versionada, no datos de negocio).
++"""
++import os
++import sys
++import unittest
++
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++
++from motor_v2 import ConocimientoMotor, programar_turno, SUCURSALES  # noqa: E402
++
++SUCURSAL_ID = 4  # Cerrillos (Cubigest)
++SUCURSAL_NOMBRE = SUCURSALES[SUCURSAL_ID]
++
++_conocimiento = None
++
++
++# Copiado de main.py (lifespan de FastAPI) — mapa (Cubigest MAQ_NRO) ->
++# SQLite maquina_id, para poder resolver nombre real de maquina igual que en
++# produccion. Solo lectura de optifierro_v2.db (master local, no Cubigest).
++_CUB_MAQ_MAP = {
++    (1, 101): 17, (1, 102): 16, (1, 104): 105, (1, 105): 101, (1, 106): 104,
++    (1, 107): 107, (1, 108): 102, (1, 111): 106,
++    (4, 10): 13, (4, 11): 16, (4, 13): 14, (4, 16): 18, (4, 17): 23, (4, 18): 17,
++    (4, 21): 7, (4, 22): 21, (4, 23): 22, (4, 25): 10, (4, 26): 11,
++    (14, 405): 404, (14, 406): 401, (14, 407): 402, (14, 411): 405,
++    (14, 412): 407, (14, 413): 406, (14, 414): 411, (14, 416): 412, (14, 417): 16,
++}
++_CUB_TO_SQL_SUC = {1: 1, 4: 10, 14: 14}
++
++
++def _cargar_conocimiento() -> ConocimientoMotor:
++    global _conocimiento
++    if _conocimiento is None:
++        # MOTOR_BASE_DIR: permite correr este test cargando la config estatica
++        # real (matriz_rutas.json/deltat CSV/Maestro Excel) desde /app dentro
++        # del contenedor, mientras el CODIGO de motor_v2.py se importa desde
++        # una copia aparte en /tmp (no se toca el modulo que sirve produccion).
++        base_dir = os.environ.get("MOTOR_BASE_DIR") or os.path.dirname(os.path.abspath(__file__))
++        c = ConocimientoMotor(base_dir)
++        c.cargar()
++
++        import sqlite3
++        db_path = os.path.join(base_dir, "optifierro_v2.db")
++        with sqlite3.connect(db_path) as conn:
++            conn.row_factory = sqlite3.Row
++            sql_nombre = {
++                (r["sucursal_id"], r["maquina_id"]): r["maquina"]
++                for r in conn.execute("SELECT sucursal_id, maquina_id, maquina FROM maquinas_info")
++            }
++        mapa = {}
++        for (cub_suc, maq_nro), sql_maq_id in _CUB_MAQ_MAP.items():
++            sql_suc = _CUB_TO_SQL_SUC[cub_suc]
++            nombre = sql_nombre.get((sql_suc, sql_maq_id))
++            if nombre:
++                mapa[(sql_suc, maq_nro)] = nombre
++        c.cargar_mapa_maquinas(mapa)
++
++        _conocimiento = c
++    return _conocimiento
++
++
++def _etiqueta(eid, kgs, id_forma=2, diametro=10, largo_a=2.0, calidad="A630",
++              codigo_viaje="V-TEST/1", obra="Obra Test", n=None, m=None,
++              dias_atraso=0, nr_piezas=1, avance_pct=0):
++    return {
++        "etiqueta_id": eid,
++        "id_viaje": 1,
++        "obra": obra,
++        "codigo_viaje": codigo_viaje,
++        "id_forma": id_forma,
++        "diametro": diametro,
++        "calidad_acero": calidad,
++        "calidad_acero_real": calidad,
++        "largo_a": largo_a,
++        "nr_piezas": nr_piezas,
++        "kgs": kgs,
++        "fecha_despacho": "2026-09-24",
++        "fecha_entrega": "2026-09-24",
++        "dias_atraso": dias_atraso,
++        "avance_pct": avance_pct,
++        "numero_etiqueta": n,
++        "total_etiquetas": m,
++    }
++
++
++def _todos_los_operadores_cerrillos(conocimiento: ConocimientoMotor) -> list:
++    ops = set()
++    for (suc, _maq), lista in conocimiento.operadores_x_maquina.items():
++        if suc == SUCURSAL_NOMBRE:
++            ops.update(lista)
++    return sorted(ops)
++
++
++def _run(etiquetas):
++    conocimiento = _cargar_conocimiento()
++    # Se marcan TODOS los operadores reales de Cerrillos como "presentes" —
++    # el foco de estos tests es la agrupacion/emision por serie (D1-D3), no
++    # la disponibilidad de personal (ya cubierta por pruebas existentes).
++    operadores_disponibles = _todos_los_operadores_cerrillos(conocimiento)
++    return programar_turno(
++        etiquetas=etiquetas,
++        sucursal_id=SUCURSAL_ID,
++        fecha="2026-09-24",
++        turno="dia",
++        operadores_disponibles=operadores_disponibles,
++        conocimiento=conocimiento,
++    )
++
++
++class TestB42v2Series(unittest.TestCase):
++
++    def test_ac1_ac5_serie_de_n_etiquetas_genera_n_tareas(self):
++        """AC1+AC5: una serie de N etiquetas homogeneas -> N tareas (o N en bolsa
++        si no hay operador disponible), conservando etiquetas y kg totales."""
++        etiquetas = [
++            _etiqueta(eid=1000 + i, kgs=50.0 + i, n=i + 1, m=5)
++            for i in range(5)
++        ]
++        resultado = _run(etiquetas)
++        tareas = resultado["tareas"]
++        bolsa = resultado["bolsa_sin_asignar"]
++
++        ids_tareas = {t["etiqueta_id"] for t in tareas}
++        ids_bolsa = {b["etiqueta_id"] for b in bolsa}
++        ids_entrada = {e["etiqueta_id"] for e in etiquetas}
++
++        # AC5: conservacion — cada etiqueta de entrada aparece en tareas O en bolsa, sin perdidas ni duplicados.
++        self.assertEqual(ids_entrada, ids_tareas | ids_bolsa, "etiquetas perdidas o no contabilizadas")
++        self.assertEqual(len(ids_tareas) + len(ids_bolsa), len(etiquetas), "hay etiquetas duplicadas entre tareas y bolsa")
++
++        if tareas:
++            # AC1: nr_tags siempre 1, lista_etiqueta_ids con 1 solo elemento.
++            for t in tareas:
++                self.assertEqual(t["nr_tags"], 1)
++                self.assertEqual(t["lista_etiqueta_ids"], [t["etiqueta_id"]])
++
++            kg_entrada = sum(e["kgs"] for e in etiquetas if e["etiqueta_id"] in ids_tareas)
++            kg_tareas = sum(t["kilos"] for t in tareas)
++            self.assertAlmostEqual(kg_entrada, kg_tareas, places=1, msg="kg no se conservan entre entrada y tareas")
++
++    def test_ac4_series_consecutivas_sin_intercalar(self):
++        """AC4: dos series distintas (mismo viaje/diametro, distinta forma,
++        ambas con ruta historica real hacia la MISMA maquina — IdForma 2 y 4
++        Ø10mm -> PRIMA 3D en Cerrillos) no deben intercalarse — cada serie
++        ocupa un bloque contiguo de tiempo en la maquina."""
++        serie_a = [_etiqueta(eid=2000 + i, kgs=40.0, id_forma=2, diametro=10, n=i + 1, m=3) for i in range(3)]
++        serie_b = [_etiqueta(eid=2100 + i, kgs=40.0, id_forma=4, diametro=10, n=i + 1, m=3) for i in range(3)]
++        resultado = _run(serie_a + serie_b)
++        tareas = resultado["tareas"]
++
++        por_maquina: dict = {}
++        for t in tareas:
++            por_maquina.setdefault(t["nombre_maquina"], []).append(t)
++
++        for maquina, ts in por_maquina.items():
++            ts_ordenadas = sorted(ts, key=lambda t: t["fecha_inicio"])
++            series_vistas = []
++            for t in ts_ordenadas:
++                serie_key = t["id_forma"]
++                if not series_vistas or series_vistas[-1] != serie_key:
++                    series_vistas.append(serie_key)
++            # Si una serie estuviera intercalada con otra, su id_forma
++            # reaparecería no-consecutivamente en la secuencia ordenada.
++            self.assertEqual(
++                len(series_vistas), len(set(series_vistas)),
++                f"series intercaladas en maquina {maquina}: {[ (t['id_forma'], t['fecha_inicio']) for t in ts_ordenadas ]}",
++            )
++
++    def test_ac5_largo_flotante_8_7_vs_8_699999_misma_serie(self):
++        """D1: largo_mm=round(largo_a*1000) — 8.699999809265137 y 8.7 deben
++        agruparse en la MISMA serie (evidencia real CCa12 §6c)."""
++        etiquetas = [
++            _etiqueta(eid=3000, kgs=995.0, id_forma=2, diametro=22, largo_a=8.699999809265137, n=1, m=2),
++            _etiqueta(eid=3001, kgs=995.0, id_forma=2, diametro=22, largo_a=8.7, n=2, m=2),
++        ]
++        resultado = _run(etiquetas)
++        tareas = resultado["tareas"]
++        bolsa = resultado["bolsa_sin_asignar"]
++
++        # Ambas deben terminar en el mismo "destino" (las 2 en tareas, o las 2 en bolsa
++        # con el mismo motivo) — si estuvieran en series distintas podrian recibir
++        # rutas/maquinas distintas y quedar en estados distintos de forma inconsistente.
++        if tareas:
++            maquinas = {t["nombre_maquina"] for t in tareas if t["etiqueta_id"] in (3000, 3001)}
++            ids_en_tareas = {t["etiqueta_id"] for t in tareas if t["etiqueta_id"] in (3000, 3001)}
++            if len(ids_en_tareas) == 2:
++                self.assertEqual(len(maquinas), 1, "el largo con ruido de punto flotante partio la serie en 2 maquinas distintas")
++
++        ids_entrada = {3000, 3001}
++        ids_tareas = {t["etiqueta_id"] for t in tareas if t["etiqueta_id"] in ids_entrada}
++        ids_bolsa = {b["etiqueta_id"] for b in bolsa if b["etiqueta_id"] in ids_entrada}
++        self.assertEqual(ids_entrada, ids_tareas | ids_bolsa)
++
++    def test_ac6_elegibilidad_maquina_por_serie_no_por_representante_ajeno(self):
++        """AC6: replica el sesgo real documentado en CCa12 §2c/§6b — mismo
++        viaje/diametro, id_forma distinto -> ruta historica distinta
++        (verificado contra matriz_rutas.json real de Cerrillos: IdForma=2
++        Ø10mm -> PRIMA 3D, IdForma=3 Ø10mm -> EURA 16). Con la clave v1
++        (viaje,diametro) ambas caian en el MISMO grupo y la maquina se
++        decidia solo con el representante; con D1 cada serie es homogenea
++        y debe resolver SU PROPIA maquina, no la de la otra serie."""
++        serie_forma2 = [_etiqueta(eid=4000 + i, kgs=30.0, id_forma=2, diametro=10, n=i + 1, m=2) for i in range(2)]
++        serie_forma3 = [_etiqueta(eid=4100 + i, kgs=30.0, id_forma=3, diametro=10, n=i + 1, m=2) for i in range(2)]
++        resultado = _run(serie_forma2 + serie_forma3)
++        tareas = resultado["tareas"]
++
++        maquinas_forma2 = {t["nombre_maquina"] for t in tareas if t["etiqueta_id"] in {4000, 4001}}
++        maquinas_forma3 = {t["nombre_maquina"] for t in tareas if t["etiqueta_id"] in {4100, 4101}}
++
++        self.assertTrue(maquinas_forma2, "serie IdForma=2 Ø10mm no genero ninguna tarea")
++        self.assertTrue(maquinas_forma3, "serie IdForma=3 Ø10mm no genero ninguna tarea")
++        self.assertEqual(maquinas_forma2, {"PRIMA 3D"}, f"IdForma=2 Ø10mm debia ir a PRIMA 3D, fue a {maquinas_forma2}")
++        self.assertEqual(maquinas_forma3, {"EURA 16"}, f"IdForma=3 Ø10mm debia ir a EURA 16, fue a {maquinas_forma3}")
++
++    def test_ac5_suma_duraciones_serie_igual_a_duracion_grupo(self):
++        """D2: la suma de duracion_min de las tareas de una serie debe ser
++        (aprox) igual a la duracion que el motor calcularia para el grupo
++        completo con estimar_duracion_min (mismos kg totales)."""
++        from motor_v2 import estimar_duracion_min
++
++        etiquetas = [_etiqueta(eid=5000 + i, kgs=20.0 + i * 5, id_forma=2, diametro=10, n=i + 1, m=4) for i in range(4)]
++        resultado = _run(etiquetas)
++        tareas = [t for t in resultado["tareas"] if t["etiqueta_id"] in {5000, 5001, 5002, 5003}]
++        if not tareas:
++            self.skipTest("serie completa fue a bolsa (sin operador/maquina en este entorno sintetico)")
++
++        conocimiento = _cargar_conocimiento()
++        kgs_totales = sum(e["kgs"] for e in etiquetas)
++        maquina = tareas[0]["nombre_maquina"]
++        duracion_esperada = estimar_duracion_min(SUCURSAL_NOMBRE, 2, 10, maquina, kgs_totales, conocimiento)
++
++        suma_duraciones = sum(t["duracion_min"] for t in tareas)
++        # Tolerancia: si no todas las etiquetas entraron (turno_lleno parcial),
++        # la suma sera menor -- solo se exige igualdad cuando las 4 entraron.
++        if len(tareas) == len(etiquetas):
++            self.assertAlmostEqual(suma_duraciones, duracion_esperada, delta=0.5)
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)
+-- 
+2.54.0.windows.1
+

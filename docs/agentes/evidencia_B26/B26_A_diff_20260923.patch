@@ -1,0 +1,598 @@
+diff --git a/backend/routers/tiempos_maquina.py b/backend/routers/tiempos_maquina.py
+index ab9a557..45489c2 100644
+--- a/backend/routers/tiempos_maquina.py
++++ b/backend/routers/tiempos_maquina.py
+@@ -1,17 +1,35 @@
+ """
+-Router: Tiempos por Máquina
+-Historial de tiempos de procesamiento por (IdForma, Diámetro) desde Cubigest.
+-
+-DeltaT calculado en vivo:
+-  - Ordenar por (PIE_MAQUINA, IdSucursal, PIE_FECHA_PRODUCCION)
+-  - Delta = diferencia al registro siguiente dentro del mismo grupo máquina+sucursal
+-  - Filtros: descartar delta < 2 min (ruido intra-lote) y > 480 min (gap entre turnos)
++Router: Tiempos por Máquina — version A (interina, honesta)
++
++Metodo: delta crudo entre registros consecutivos de PIEZA_PRODUCCION por
++maquina+sucursal (filtro 2-480 min). NO es el metodo validado de FASE3
++(operario+maquina+pedido, colapso de rachas, descuento de break, exclusiones).
++
++Por cada intervalo valido (delta dentro de rango):
++  - peso_etq = KgsPaquete del registro que abre el intervalo (descarta si es
++    None o <= 0: el peso por etiqueta reemplaza a p.TotalKgs, que es el peso
++    TOTAL de la linea de pieza, no el de la etiqueta — error de origen).
++  - tonh_i = (peso_etq/1000) / (delta_min/60); descarta si tonh_i > _TONH_MAX.
++  - kg_barra_i = KgsPaquete/NroPiezas (si NroPiezas > 0); en lineas de corte
++    NroPiezas no representa barras, por eso se valida con ratio_i antes de
++    usar kg_barra_i para agrupar por largo.
++  - ratio_i = kg_barra_i / ((diametro^2/162) * Largo_m); una maquina es
++    "evaluable" para agrupar por largo solo si el P90 de sus ratio_i esta
++    dentro de un rango razonable (_RATIO_BARRA_MAX) y hay N minimo.
++
++Fuera de rango: kg/barra pedido bajo P5*(1-margen) o sobre P95*(1+margen) del historial
++de la maquina (margen 10 %, decision Montu 23-09).
++
++Sin ajuste por distribucion (bimodalidad real, ver FASE3_ESTADISTICA):
++se reporta mediana + rango empirico P25-P75, nunca un intervalo de confianza.
+ 
+ Dotación: no detectable (ratio 1:1 confirmado en historial completo).
+-  → escenarios_estimados con ratios fijos: solo=1.0, con_1=0.75, con_2=0.55
+ 
+ Cubigest READ-ONLY absoluto.
+ FP-006: Cerrillos SQLite=10, Cubigest=4.
++
++Pendiente B26-B: portar el metodo validado FASE3 a este endpoint
++(ver docs/B26_B_pendiente_metodo_validado.md).
+ """
+ import logging
+ import statistics
+@@ -32,14 +50,27 @@ _ALL_CUBIGEST  = [1, 4, 14]
+ _DELTA_MIN_MIN = 2.0    # descartar ruido intra-lote
+ _DELTA_MAX_MIN = 480.0  # descartar gaps entre turnos/días
+ 
+-_RATIOS = {"solo": 1.0, "con_1_ayud": 0.75, "con_2_ayud": 0.55}
++# Criterios version A (23-09-2026, decision de Montu)
++_N_MIN_TONH      = 15
++_TONH_MAX        = 50.0
++_RANGO_PCT_INF   = 0.05
++_RANGO_PCT_SUP   = 0.95
++_RANGO_MARGEN    = 0.10   # tolerancia sobre P5/P95 (decision Montu 23-09: 12 m en diam.16 es el largo comercial mas comun y caia justo en el borde)
++_BINS_5_MIN_N    = 50
++_BINS_3_MIN_N    = 30
++_RATIO_BARRA_MAX = 1.5
+ 
+ NOTA_METODOLOGICA = (
+-    "Estimacion basada en mediana historica, sin intervalo estadistico "
+-    "riguroso (limitacion de origen de datos). El peso/largo por pieza "
+-    "correlaciona con la tasa de produccion (Spearman, no lineal), por eso "
+-    "el ton/hora se ajusta agrupando el historico por rangos de peso, no "
+-    "con una formula fija."
++    "Producciones estimadas en base a antecedentes historicos de produccion; "
++    "rango tipico segun el historial (P25-P75). Es una estimacion "
++    "referencial: no es un intervalo de confianza ni esta validada a nivel "
++    "de operario y pedido."
++)
++
++NOTA_RUTAS = (
++    "Las maquinas listadas son las que procesaron esta forma y diametro "
++    "segun el historial; no corresponden al ruteo que calcula el "
++    "Planificador."
+ )
+ 
+ 
+@@ -49,68 +80,19 @@ def _peso_estimado_kg(diametro_mm: float, largo_aprox_mm: float) -> float:
+     return kg_por_metro * (largo_aprox_mm / 1000)
+ 
+ 
+-def _estimar_ton_hora(pares_peso_delta: list[tuple[float, float]], peso_input: Optional[float]):
+-    """Empirical bin-based ton/hora estimate.
+-
+-    Pairs (peso_pieza_kg, delta_min) observed historicamente para la misma
+-    (maquina, sucursal, forma, diametro) se agrupan por rango de peso
+-    (quintiles si hay suficiente n) y se reporta la mediana ton/hora del
+-    grupo mas cercano al peso consultado. No es una regresion: la relacion
+-    es monotonica, no lineal (ver FASE3_PESO_POR_PIEZA_20260921.md).
+-    """
+-    if not pares_peso_delta:
+-        return None, None
+-
+-    pares_ordenados = sorted(pares_peso_delta, key=lambda x: x[0])
+-    n = len(pares_ordenados)
+-
+-    if peso_input is None:
+-        pesos_ref = [p for p, _ in pares_ordenados]
+-        deltas_ref = [d for _, d in pares_ordenados]
+-        peso_mediano = statistics.median(pesos_ref)
+-        delta_mediano = statistics.median(deltas_ref)
+-        if delta_mediano <= 0:
+-            return None, None
+-        return round((peso_mediano / 1000) / (delta_mediano / 60), 3), round(peso_mediano, 2)
+-
+-    if n >= 15:
+-        n_bins = 5
+-    elif n >= 9:
+-        n_bins = 3
+-    else:
+-        n_bins = 1
+-
+-    bin_size = max(1, n // n_bins)
+-    bins = [pares_ordenados[i * bin_size:(i + 1) * bin_size] for i in range(n_bins)]
+-    bins[-1] = pares_ordenados[(n_bins - 1) * bin_size:]  # el ultimo bin absorbe el resto
+-
+-    bin_elegido = None
+-    for b in bins:
+-        if not b:
+-            continue
+-        pesos_b = [p for p, _ in b]
+-        if min(pesos_b) <= peso_input <= max(pesos_b):
+-            bin_elegido = b
+-            break
+-
+-    if bin_elegido is None:
+-        mejor_dist = None
+-        for b in bins:
+-            if not b:
+-                continue
+-            med = statistics.median([p for p, _ in b])
+-            dist = abs(med - peso_input)
+-            if mejor_dist is None or dist < mejor_dist:
+-                mejor_dist = dist
+-                bin_elegido = b
+-
+-    pesos_b = [p for p, _ in bin_elegido]
+-    deltas_b = [d for _, d in bin_elegido]
+-    peso_mediano = statistics.median(pesos_b)
+-    delta_mediano = statistics.median(deltas_b)
+-    if delta_mediano <= 0:
+-        return None, None
+-    return round((peso_mediano / 1000) / (delta_mediano / 60), 3), round(peso_mediano, 2)
++def _percentil(valores: list[float], p: float) -> Optional[float]:
++    """Percentil por interpolacion lineal (p en [0, 1])."""
++    if not valores:
++        return None
++    ordenados = sorted(valores)
++    n = len(ordenados)
++    if n == 1:
++        return ordenados[0]
++    idx = p * (n - 1)
++    lo = int(idx)
++    hi = min(lo + 1, n - 1)
++    frac = idx - lo
++    return ordenados[lo] + (ordenados[hi] - ordenados[lo]) * frac
+ 
+ 
+ def _cubigest_conn():
+@@ -138,6 +120,20 @@ def get_tiempos_maquina(
+         description="Largo aproximado por pieza (mm), para derivar el peso y ajustar el estimado de ton/hora"
+     ),
+ ):
++    criterios = {
++        "n_min_tonh":      _N_MIN_TONH,
++        "tonh_max":        _TONH_MAX,
++        "rango_pct":       [_RANGO_PCT_INF, _RANGO_PCT_SUP],
++        "rango_margen":    _RANGO_MARGEN,
++        "bins_5_min_n":    _BINS_5_MIN_N,
++        "bins_3_min_n":    _BINS_3_MIN_N,
++        "ratio_barra_max": _RATIO_BARRA_MAX,
++        "metodo": (
++            "delta crudo entre registros consecutivos (2-480 min); "
++            "no validado a nivel operario+pedido (ver B26-B)"
++        ),
++    }
++
+     peso_aprox_kg = (
+         _peso_estimado_kg(diametro, largo_aprox_mm) if largo_aprox_mm is not None else None
+     )
+@@ -163,7 +159,8 @@ def get_tiempos_maquina(
+             pp.PIE_FECHA_PRODUCCION AS FechaProd,
+             pp.PIE_ETIQUETA_PIEZA   AS EtiquetaPieza,
+             p.Largo                 AS Largo,
+-            p.TotalKgs              AS TotalKgs
++            dp.KgsPaquete            AS KgsPaquete,
++            dp.NroPiezas             AS NroPiezas
+         FROM PIEZA_PRODUCCION pp
+         JOIN detallePaquetesPieza dp
+           ON pp.PIE_ETIQUETA_PIEZA = dp.id
+@@ -206,22 +203,26 @@ def get_tiempos_maquina(
+             "dotacion_detectable": False,
+             "peso_aprox_kg_consultado": peso_aprox_kg,
+             "nota_metodologica":   NOTA_METODOLOGICA,
++            "nota_rutas":          NOTA_RUTAS,
++            "criterios":           criterios,
+             "por_maquina":         [],
+         }
+ 
+     # Agrupar por (MaquinaId, IdSucursal) — MAQ_NRO puede solapar entre sucursales
+     grupos_rows: dict[tuple, list] = defaultdict(list)
+     grupos_largos: dict[tuple, list] = defaultdict(list)
+-    grupos_pesos: dict[tuple, list] = defaultdict(list)
+     maq_meta: dict[tuple, dict] = {}
+ 
+     for r in rows:
+         key = (r["MaquinaId"], r["IdSucursal"])
+-        grupos_rows[key].append({"fecha": r["FechaProd"], "peso": r["TotalKgs"]})
++        grupos_rows[key].append({
++            "fecha":      r["FechaProd"],
++            "kgspaquete": r["KgsPaquete"],
++            "nropiezas":  r["NroPiezas"],
++            "largo":      r["Largo"],
++        })
+         if r["Largo"] is not None:
+             grupos_largos[key].append(float(r["Largo"]))
+-        if r["TotalKgs"] is not None:
+-            grupos_pesos[key].append(float(r["TotalKgs"]))
+         if key not in maq_meta:
+             maq_meta[key] = {
+                 "maquina_nombre": (r["MaquinaNombre"] or f"Máquina {r['MaquinaId']}").strip(),
+@@ -235,11 +236,7 @@ def get_tiempos_maquina(
+         maq_id, cub_suc = key
+         items = grupos_rows[key]   # ya ordenados por la query
+ 
+-        # Calcular deltas entre registros consecutivos (shift -1), y su
+-        # peso asociado (peso de la pieza que abre el intervalo) para el
+-        # ajuste de ton/hora por rango de peso.
+-        deltas_validos = []
+-        pares_peso_delta = []
++        intervalos = []  # cada uno: {"tonh": float, "kg_barra": Optional[float], "ratio": Optional[float]}
+         for i in range(len(items) - 1):
+             t0, t1 = items[i]["fecha"], items[i + 1]["fecha"]
+             if t0 is None or t1 is None:
+@@ -247,50 +244,145 @@ def get_tiempos_maquina(
+             diff_min = (t1 - t0).total_seconds() / 60.0
+             if not (_DELTA_MIN_MIN <= diff_min <= _DELTA_MAX_MIN):
+                 continue
+-            deltas_validos.append(diff_min)
+-            peso_i = items[i]["peso"]
+-            if peso_i is not None:
+-                pares_peso_delta.append((float(peso_i), diff_min))
+ 
+-        if not deltas_validos:
+-            continue
++            peso_etq = items[i]["kgspaquete"]
++            if peso_etq is None or peso_etq <= 0:
++                continue
++            peso_etq = float(peso_etq)
+ 
+-        n   = len(deltas_validos)
+-        avg = round(sum(deltas_validos) / n, 1)
+-        t_min = round(min(deltas_validos), 1)
+-        t_max = round(max(deltas_validos), 1)
++            tonh_i = (peso_etq / 1000) / (diff_min / 60)
++            if tonh_i > _TONH_MAX:
++                continue
+ 
+-        mediana = round(statistics.median(deltas_validos), 1)
++            nro_piezas = items[i]["nropiezas"]
++            kg_barra_i = (peso_etq / nro_piezas) if nro_piezas and nro_piezas > 0 else None
+ 
+-        escenarios = {
+-            "solo":       {"tiempo": round(mediana * _RATIOS["solo"],       1)},
+-            "con_1_ayud": {"tiempo": round(mediana * _RATIOS["con_1_ayud"], 1), "ratio": _RATIOS["con_1_ayud"]},
+-            "con_2_ayud": {"tiempo": round(mediana * _RATIOS["con_2_ayud"], 1), "ratio": _RATIOS["con_2_ayud"]},
+-        }
++            largo_m = items[i]["largo"]
++            ratio_i = None
++            if kg_barra_i is not None and largo_m is not None and largo_m > 0:
++                peso_teorico = (diametro ** 2 / 162) * float(largo_m)
++                if peso_teorico > 0:
++                    ratio_i = kg_barra_i / peso_teorico
++
++            intervalos.append({"tonh": tonh_i, "kg_barra": kg_barra_i, "ratio": ratio_i, "peso_etq": peso_etq})
++
++        n = len(intervalos)
++        if n == 0:
++            continue
++
++        ratios_validos = [x["ratio"] for x in intervalos if x["ratio"] is not None]
++        rango_evaluable = (
++            len(ratios_validos) >= _N_MIN_TONH
++            and _percentil(ratios_validos, 0.90) <= _RATIO_BARRA_MAX
++        )
++
++        kg_barras_validos = [x["kg_barra"] for x in intervalos if x["kg_barra"] is not None]
++        rango_barra_kg = None
++        if rango_evaluable and kg_barras_validos:
++            p5 = _percentil(kg_barras_validos, _RANGO_PCT_INF)
++            p95 = _percentil(kg_barras_validos, _RANGO_PCT_SUP)
++            rango_barra_kg = [round(p5, 1), round(p95, 1)]
++
++        datos_suficientes = n >= _N_MIN_TONH
++
++        # Agrupacion por largo (solo si hay peso objetivo, maquina evaluable y kg_barra disponible)
++        ajuste_por_largo = False
++        if peso_aprox_kg is not None and rango_evaluable and kg_barras_validos:
++            con_kg_barra = sorted(
++                [x for x in intervalos if x["kg_barra"] is not None],
++                key=lambda x: x["kg_barra"],
++            )
++            n_bins_pool = len(con_kg_barra)
++            if n_bins_pool >= _BINS_5_MIN_N:
++                n_bins = 5
++            elif n_bins_pool >= _BINS_3_MIN_N:
++                n_bins = 3
++            else:
++                n_bins = 1
++
++            bin_size = max(1, n_bins_pool // n_bins)
++            bins = [con_kg_barra[i * bin_size:(i + 1) * bin_size] for i in range(n_bins)]
++            bins[-1] = con_kg_barra[(n_bins - 1) * bin_size:]
++
++            bin_elegido = None
++            for b in bins:
++                if not b:
++                    continue
++                kgs_b = [x["kg_barra"] for x in b]
++                if min(kgs_b) <= peso_aprox_kg <= max(kgs_b):
++                    bin_elegido = b
++                    break
++            if bin_elegido is None:
++                mejor_dist = None
++                for b in bins:
++                    if not b:
++                        continue
++                    med = statistics.median([x["kg_barra"] for x in b])
++                    dist = abs(med - peso_aprox_kg)
++                    if mejor_dist is None or dist < mejor_dist:
++                        mejor_dist = dist
++                        bin_elegido = b
++
++            grupo = bin_elegido
++            ajuste_por_largo = n_bins > 1
++        else:
++            grupo = intervalos
++
++        n_grupo = len(grupo)
++        tonh_grupo = [x["tonh"] for x in grupo]
++
++        if datos_suficientes and tonh_grupo:
++            ton_hora_estimado = round(statistics.median(tonh_grupo), 3)
++            if len(tonh_grupo) >= 2:
++                ton_hora_p25 = round(_percentil(tonh_grupo, 0.25), 3)
++                ton_hora_p75 = round(_percentil(tonh_grupo, 0.75), 3)
++            else:
++                ton_hora_p25 = None
++                ton_hora_p75 = None
++        else:
++            ton_hora_estimado = None
++            ton_hora_p25 = None
++            ton_hora_p75 = None
++
++        peso_referencia_kg = None
++        if ajuste_por_largo:
++            kgs_grupo = [x["kg_barra"] for x in grupo if x["kg_barra"] is not None]
++            if kgs_grupo:
++                peso_referencia_kg = round(statistics.median(kgs_grupo), 2)
++
++        if largo_aprox_mm is None:
++            estado_rango = "sin_largo"
++        elif not datos_suficientes or not rango_evaluable:
++            estado_rango = "no_evaluable"
++        elif rango_barra_kg is not None and (peso_aprox_kg < rango_barra_kg[0] * (1 - _RANGO_MARGEN) or peso_aprox_kg > rango_barra_kg[1] * (1 + _RANGO_MARGEN)):
++            estado_rango = "fuera_de_rango"
++        else:
++            estado_rango = "ok"
+ 
+         largos = grupos_largos.get(key, [])
+-        pesos  = grupos_pesos.get(key, [])
+         # p.Largo viene de Cubigest en METROS, no mm -> convertir antes de promediar (B28)
+         avg_largo = round(sum(largos) / len(largos) * 1000, 0) if largos else None
+-        avg_peso  = round(sum(pesos)  / len(pesos),  2) if pesos  else None
+ 
+-        ton_hora_estimado, peso_referencia_kg = _estimar_ton_hora(pares_peso_delta, peso_aprox_kg)
++        pesos_etq = [x["peso_etq"] for x in intervalos]
++        peso_etiqueta_tipico_kg = round(statistics.median(pesos_etq), 1) if pesos_etq else None
+ 
+         meta = maq_meta[key]
+         por_maquina.append({
+-            "maquina_id":          maq_id,
+-            "maquina_nombre":      meta["maquina_nombre"],
+-            "sucursal_id":         meta["sucursal_sqlite"],
+-            "n_registros":         n,
+-            "tiempo_min":          t_min,
+-            "tiempo_max":          t_max,
+-            "tiempo_avg":          avg,
+-            "tiempo_mediana":      mediana,
+-            "avg_largo_mm":        avg_largo,
+-            "avg_peso_kg":         avg_peso,
+-            "escenarios_estimados": escenarios,
+-            "ton_hora_estimado":   ton_hora_estimado,
+-            "peso_referencia_kg":  peso_referencia_kg,
++            "maquina_id":               maq_id,
++            "maquina_nombre":           meta["maquina_nombre"],
++            "sucursal_id":              meta["sucursal_sqlite"],
++            "n_registros":              n,
++            "avg_largo_mm":             avg_largo,
++            "peso_etiqueta_tipico_kg":  peso_etiqueta_tipico_kg,
++            "ton_hora_estimado":        ton_hora_estimado,
++            "ton_hora_p25":             ton_hora_p25,
++            "ton_hora_p75":             ton_hora_p75,
++            "n_grupo":                  n_grupo,
++            "datos_suficientes":        datos_suficientes,
++            "estado_rango":             estado_rango,
++            "rango_barra_kg":           rango_barra_kg,
++            "ajuste_por_largo":         ajuste_por_largo,
++            "peso_referencia_kg":       peso_referencia_kg,
+         })
+         total_registros += n
+ 
+@@ -302,5 +394,7 @@ def get_tiempos_maquina(
+         "dotacion_detectable": False,
+         "peso_aprox_kg_consultado": peso_aprox_kg,
+         "nota_metodologica":   NOTA_METODOLOGICA,
++        "nota_rutas":          NOTA_RUTAS,
++        "criterios":           criterios,
+         "por_maquina":         por_maquina,
+     }
+diff --git a/frontend/src/components/domain/TiemposPorMaquina.tsx b/frontend/src/components/domain/TiemposPorMaquina.tsx
+index 32b0087..be948f5 100644
+--- a/frontend/src/components/domain/TiemposPorMaquina.tsx
++++ b/frontend/src/components/domain/TiemposPorMaquina.tsx
+@@ -1,25 +1,34 @@
+ import { useState } from 'react';
+ import { Timer, Search, AlertCircle, Loader2 } from 'lucide-react';
+ 
+-interface EscenariosEstimados {
+-  solo: { tiempo: number };
+-  con_1_ayud: { tiempo: number; ratio: number };
+-  con_2_ayud: { tiempo: number; ratio: number };
++interface Criterios {
++  n_min_tonh: number;
++  tonh_max: number;
++  rango_pct: [number, number];
++  rango_margen: number;
++  bins_5_min_n: number;
++  bins_3_min_n: number;
++  ratio_barra_max: number;
++  metodo: string;
+ }
+ 
++type EstadoRango = 'sin_largo' | 'no_evaluable' | 'fuera_de_rango' | 'ok';
++
+ interface MaquinaData {
+   maquina_id: number;
+   maquina_nombre: string;
+   sucursal_id: number;
+   n_registros: number;
+-  tiempo_min: number;
+-  tiempo_max: number;
+-  tiempo_avg: number;
+-  tiempo_mediana: number;
+   avg_largo_mm: number | null;
+-  avg_peso_kg: number | null;
+-  escenarios_estimados: EscenariosEstimados;
++  peso_etiqueta_tipico_kg: number | null;
+   ton_hora_estimado: number | null;
++  ton_hora_p25: number | null;
++  ton_hora_p75: number | null;
++  n_grupo: number;
++  datos_suficientes: boolean;
++  estado_rango: EstadoRango;
++  rango_barra_kg: [number, number] | null;
++  ajuste_por_largo: boolean;
+   peso_referencia_kg: number | null;
+ }
+ 
+@@ -31,6 +40,8 @@ interface TiemposResponse {
+   dotacion_detectable: boolean;
+   peso_aprox_kg_consultado: number | null;
+   nota_metodologica: string;
++  nota_rutas: string;
++  criterios: Criterios;
+   por_maquina: MaquinaData[];
+ }
+ 
+@@ -47,6 +58,8 @@ const SUCURSAL_BADGE: Record<number, string> = {
+   14: 'Coronel',
+ };
+ 
++const fmtCL = (n: number) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
++
+ export default function TiemposPorMaquina() {
+   const [idForma, setIdForma]       = useState('');
+   const [diametro, setDiametro]     = useState('');
+@@ -246,16 +259,17 @@ export default function TiemposPorMaquina() {
+         return (
+           <div className="flex flex-col gap-4">
+ 
+-            {/* Nota metodológica honesta — sin inventar intervalos de confianza */}
+-            <div className="rounded-xl px-4 py-2.5" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
++            {/* Notas metodológicas honestas — sin inventar intervalos de confianza */}
++            <div className="rounded-xl px-4 py-2.5 flex flex-col gap-1" style={{ background: '#fffbeb', border: '1px solid #fde68a' }}>
+               <p className="text-xs" style={{ color: '#92400e' }}>{data.nota_metodologica}</p>
++              <p className="text-xs" style={{ color: '#92400e' }}>{data.nota_rutas}</p>
+             </div>
+ 
+-            {/* CAMBIO 1 — Tabla principal: 6 columnas, sin Avg ni Solo */}
++            {/* Tabla principal */}
+             <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid #e5e7eb' }}>
+               <div className="px-4 py-3" style={{ background: '#f9fafb', borderBottom: '1px solid #e5e7eb' }}>
+                 <p className="text-sm font-semibold" style={{ color: '#111827' }}>
+-                  Tiempos por máquina — Forma {data.id_forma} · Ø{data.diametro} mm
++                  Producción por máquina — Forma {data.id_forma} · Ø{data.diametro} mm
+                 </p>
+               </div>
+               <div className="overflow-x-auto">
+@@ -264,18 +278,15 @@ export default function TiemposPorMaquina() {
+                     <tr style={{ background: '#f3f4f6' }}>
+                       <th className="text-left px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Máquina</th>
+                       <th className="text-left px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Sucursal</th>
+-                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>N registros</th>
+-                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Mín (min)</th>
+-                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Mediana (min)</th>
+-                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Máx (min)</th>
++                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>N</th>
+                       <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Largo típ. (mm)</th>
+-                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Peso típ. (kg)</th>
+-                      <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Ton/hora (estimado)</th>
++                      <th className="text-right px-3 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Peso típ. etiqueta (kg)</th>
++                      <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Ton/hora (mediana)</th>
++                      <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide" style={{ color: '#6b7280' }}>Rango típico P25–P75</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {data.por_maquina.map((m) => {
+-                      // CAMBIO 3 — resaltar fila con mayor N registros
+                       const esMayor = m.n_registros === maxN;
+                       return (
+                         <tr key={`${m.maquina_id}-${m.sucursal_id}`}
+@@ -297,19 +308,51 @@ export default function TiemposPorMaquina() {
+                               {SUCURSAL_BADGE[m.sucursal_id] ?? m.sucursal_id}
+                             </span>
+                           </td>
+-                          <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>{m.n_registros}</td>
+-                          <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>{m.tiempo_min}</td>
+-                          <td className="px-3 py-3 text-right tabular-nums font-semibold" style={{ color: '#111827' }}>{m.tiempo_mediana}</td>
+-                          <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>{m.tiempo_max}</td>
++                          <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>
++                            {m.n_grupo}
++                            {m.n_grupo !== m.n_registros && (
++                              <span className="block text-xs font-normal" style={{ color: '#9ca3af' }}>
++                                de {m.n_registros}
++                              </span>
++                            )}
++                          </td>
+                           <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>{m.avg_largo_mm ?? '—'}</td>
+-                          <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>{m.avg_peso_kg ?? '—'}</td>
++                          <td className="px-3 py-3 text-right tabular-nums" style={{ color: '#374151' }}>{m.peso_etiqueta_tipico_kg ?? '—'}</td>
+                           <td className="px-4 py-3 text-right tabular-nums font-semibold" style={{ color: '#111827' }}>
+-                            {m.ton_hora_estimado ?? '—'}
+-                            {m.peso_referencia_kg != null && (
+-                              <span className="block text-xs font-normal" style={{ color: '#9ca3af' }}>
+-                                @ {m.peso_referencia_kg} kg/pieza
++                            {m.datos_suficientes ? (
++                              <>
++                                {m.ton_hora_estimado ?? '—'}
++                                {m.peso_referencia_kg != null && (
++                                  <span className="block text-xs font-normal" style={{ color: '#9ca3af' }}>
++                                    @ {m.peso_referencia_kg} kg/barra
++                                  </span>
++                                )}
++                              </>
++                            ) : (
++                              <span className="text-xs font-normal" style={{ color: '#9ca3af' }}>
++                                Datos insuficientes (N &lt; {data.criterios.n_min_tonh})
+                               </span>
+                             )}
++                            {m.estado_rango === 'fuera_de_rango' && m.rango_barra_kg && (
++                              <span className="block text-xs font-normal mt-1" style={{ color: '#b45309' }}>
++                                Fuera del rango histórico de esta máquina ({fmtCL(m.rango_barra_kg[0])}–{fmtCL(m.rango_barra_kg[1])} kg/barra, tolerancia ±{Math.round(data.criterios.rango_margen * 100)} %)
++                              </span>
++                            )}
++                            {m.estado_rango === 'no_evaluable' && (
++                              <span className="block text-xs font-normal mt-1" style={{ color: '#9ca3af' }}>
++                                Rango no evaluable en esta máquina
++                              </span>
++                            )}
++                            {m.estado_rango !== 'no_evaluable' && data.peso_aprox_kg_consultado != null && !m.ajuste_por_largo && (
++                              <span className="block text-xs font-normal mt-1" style={{ color: '#9ca3af' }}>
++                                Sin ajuste por largo (pocos datos)
++                              </span>
++                            )}
++                          </td>
++                          <td className="px-4 py-3 text-right tabular-nums" style={{ color: '#374151' }}>
++                            {m.datos_suficientes && m.ton_hora_p25 != null && m.ton_hora_p75 != null
++                              ? `${fmtCL(m.ton_hora_p25)} – ${fmtCL(m.ton_hora_p75)}`
++                              : '—'}
+                           </td>
+                         </tr>
+                       );

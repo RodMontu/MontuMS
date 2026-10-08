@@ -1,0 +1,71 @@
+sucursal_id,usuario_matriz,nombre_matriz,resultado_match,nombre_geovictoria,cargo_geovictoria,clase_por_cargo,ultima_asistencia_30d,habitual_de_maquinas
+1,dlopez,Devis Antonio Lopez Ayabire,OK_NOMBRE,Devis Antonio Lopez Ayabire,Operador Junior,operador,2026-10-05,
+1,oramirez,Omar Ramirez,AMBIGUO_MISMO_USUARIO_OTRA_PERSONA,Omar Ramirez Corino,Operador Senior,operador,2026-10-05,EURA 20_2
+1,eurquizu,Erick Urquizu Flores,OK_NOMBRE,Erick Urquizu Flores,Ayte del Operador,ayudante,2026-10-05,
+1,rcolumba,Rafael Columba Mavrich,OK_NOMBRE,Rafael Columba Mavrich,Ayte del Operador,ayudante,2026-10-05,
+1,BPACO,Basilio Paco Suri,OK_NOMBRE,Basilio Paco Suri,Operador Senior,operador,2026-10-05,
+1,TQUISPE,Teofilo Quispe Villazante,OK_NOMBRE,Teofilo Quispe Villazante,Operador Senior,operador,2026-10-05,Carro de Corte;Cortadora Manual
+14,curra,Cristian Daniel Urra Astete,OK_NOMBRE,Cristian Daniel Urra Astete,Ayte del Operador,ayudante,2026-10-05,
+14,murra,Mat�as Ignacio Urra Astete,OK_NOMBRE,Mat�as Ignacio Urra Astete,Ayte del Operador,ayudante,2026-10-05,ESTRIBADORA TJK 1
+14,kgallegos,Kurt Carlos Franklin Gallegos Lara,OK_NOMBRE,Kurt Carlos Franklin Gallegos Lara,Operador Junior,operador,2026-10-05,Cortadora Manual
+14,agarcia,Anibal Luis Alberto Garcia Aguayo,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,
+14,hacuna,Hector Manuel Acu�a Sanhueza,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,Dobladora 3;Linea Corte Coronel
+14,gacuna,Giovanni Mauricio Acu�a Sanhueza,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,Dobladora 4
+10,jgarboza,Jose Manuel Garboza Veliz,OK_NOMBRE,Jose Manuel Garboza Veliz,Operador Junior,operador,2026-10-05,LINEA DE CORTE
+10,imena,Ismael Ramon Mena Guerrero,OK_NOMBRE,Ismael Ramon Mena Guerrero,Operador Junior Practica,operador,2026-10-05,LINEA DE CORTE
+10,ealvarez,Edgard Alberto Alvarez Guerra,OK_NOMBRE,Edgard Alberto Alvarez Guerra,Operador Junior Practica,operador,2026-10-05,Robomaster 60
+10,ldonoso,Luis Damian Donoso Jorquera,OK_NOMBRE,Luis Damian Donoso Jorquera,Operador Senior,operador,2026-10-05,Robomaster 60
+10,ctrujillo,Carlos Alexis Rogers Trujillo,OK_NOMBRE,Carlos Alexis Rogers Trujillo,Operador Junior,operador,2026-10-05,EURA 20_3
+10,mrodriguez,Marino De Jes�s Rodriguez Urena,OK_NOMBRE,Marino De Jes�s Rodriguez Urena,Operador Senior,operador,2026-10-05,EURA 20_3
+10,aantillanca,Aaron Israel Antillanca Huaiquin,OK_NOMBRE,Aaron Israel Antillanca Huaiquin,Operador Junior Practica,operador,2026-10-05,EURA 20_1
+10,lcaamano,Luciano Andres Caama�o Cuevas,OK_NOMBRE,Luciano Andres Caama�o Cuevas,Operador Junior Practica,operador,2026-10-05,EURA 20_1
+10,rcisterna,Ricardo Andres Cisterna Cisterna,OK_NOMBRE,Ricardo Andres Cisterna Cisterna,Operador Senior,operador,2026-10-05,Dobladora Tecmor S40 1
+10,fruiz,Francisco Javier Ruiz Vergara,OK_NOMBRE,Francisco Javier Ruiz Vergara,Operador Junior Practica,operador,2026-10-05,PRIMA 3D
+10,lmillan,Luis Jesus Millan Mardones,OK_NOMBRE,Luis Jesus Millan Mardones,Operador Junior,operador,2026-10-05,EURA 16
+10,bmillan,Bastian Isaias Millan Mardones,OK_NOMBRE,Bastian Isaias Millan Mardones,Operador Junior,operador,2026-10-05,EURA 16;PRIMA 3D
+10,rramirez,Roberto R�mulo Ramirez Melgarejo,OK_NOMBRE,Roberto R�mulo Ramirez Melgarejo,Operador Junior,operador,2026-10-05,Curvadora CER40 1 Schnell
+10,jvitallos,Jorge Andr�s Vitallos Nu�ez,OK_NOMBRE,Jorge Andr�s Vitallos Nu�ez,Operador Senior,operador,2026-10-05,FORMULA 12
+10,asaravia,Andres Adrian Saravia Retamal,OK_NOMBRE,Andres Adrian Saravia Retamal,Operador Senior,operador,2026-10-05,Curvadora CER40 1 Schnell;FORMULA 12
+1,oochoa,Oscar Danilo Ochoa Urquieta,OK_NOMBRE,Oscar Danilo Ochoa Urquieta,Operador Senior,operador,2026-10-05,
+1,layabire,Luis Alberto Ayabire Molina,OK_NOMBRE,Luis Alberto Ayabire Molina,Ayte del Operador,ayudante,2026-10-05,
+10,aarbelaez,Andrey Felipe Arbelaez Cardona,OK_NOMBRE,Andrey Felipe Arbelaez Cardona,Operador Puente Gr�a,operador,2026-10-05,
+10,bmartinez,Basti�n Rodrigo Martinez Pe�a,OK_NOMBRE,Basti�n Rodrigo Martinez Pe�a,Sin Cargo,otro_cargo,2026-10-05,
+10,bvasquez,Bryan Ignacio V�squez Castro,OK_NOMBRE,Bryan Ignacio V�squez Castro,Ayte del Operador,ayudante,2026-09-30,
+10,clagos,Cesar Rodrigo Lagos Garrido,OK_NOMBRE,Cesar Rodrigo Lagos Garrido,Operador Puente Gr�a,operador,2026-10-05,
+10,cbustamante,Cristian Bairon Bustamante Santis,OK_NOMBRE,Cristian Bairon Bustamante Santis,Ayte del Operador,ayudante,2026-10-05,
+10,curra,Cristofer Andr�s Urra Salgado,OK_NOMBRE,Cristofer Andr�s Urra Salgado,Ayte del Operador,ayudante,2026-10-05,
+10,despinoza,Dagoberto Alejandro Espinoza Suazo,OK_NOMBRE,Dagoberto Alejandro Espinoza Suazo,Ayte del Operador,ayudante,2026-10-05,
+10,eespinoza,Emerson Salvador Espinoza Gonzalez,OK_NOMBRE,Emerson Salvador Espinoza Gonzalez,Ayte del Operador,ayudante,2026-10-05,
+10,fquezada,Fabian Eduardo Quezada Gonzalez,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,
+10,fflorent,Florent Edoize,OK_NOMBRE,Florent Edoize,Mecanico Junior,otro_cargo,2026-10-05,
+10,gbarboza,Gellys Beatriz Barboza Izquierdo,OK_NOMBRE,Gellys Beatriz Barboza Izquierdo,Administrativo de Despacho,otro_cargo,2026-10-05,
+10,hguerrero,Hector Alejandro Guerrero Espinoza,OK_NOMBRE,Hector Alejandro Guerrero Espinoza,Mecanico Junior,otro_cargo,2026-10-05,
+10,jmedina,Jofran Orlando Medina Meza,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,
+10,jsanchez,Jose Rolando Sanchez Morales,OK_NOMBRE,Jose Rolando Sanchez Morales,Asistente Logistica,otro_cargo,2026-10-05,
+10,jtrivino,Juan Carlos Trivi�o �anco,OK_NOMBRE,Juan Carlos Trivi�o �anco,Supervisor,otro_cargo,2026-10-05,
+10,lluckman,Luckman Desius,OK_NOMBRE,Luckman Desius,Ayte del Operador,ayudante,2026-10-05,
+10,lparedes,Luis Patricio Paredes Hederra,OK_NOMBRE,Luis Patricio Paredes Hederra,Supervisor,otro_cargo,2026-10-05,
+10,mlescano,Manuel Moises Lescano Guerra,OK_NOMBRE,Manuel Moises Lescano Guerra,Ayte del Operador,ayudante,2026-10-05,Dobladora Tecmor S40 1
+10,mcaris,Marcelo Enrique Caris Diaz,OK_NOMBRE,Marcelo Enrique Caris Diaz,Operador Puente Gr�a,operador,2026-10-05,
+10,mvergara,Mario Enrique Vergara Valenzuela,OK_NOMBRE,Mario Enrique Vergara Valenzuela,Ayte del Operador,ayudante,2026-10-05,
+10,mgaray,Matias Benjamin Garay Mart�nez,OK_NOMBRE,Matias Benjamin Garay Mart�nez,Mec�nico Senior,otro_cargo,2026-10-05,
+10,mgutierrez,Miguel Alonso Guti�rrez Consuegra,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,
+10,mgajardo,Miguel Angel Gajardo Caro,OK_NOMBRE,Miguel Angel Gajardo Caro,Prevencionista de Riesgo,otro_cargo,2026-09-17,
+10,rllacas,Randolphd Arturo Llacas Torres,OK_NOMBRE,Randolphd Arturo Llacas Torres,Operador Puente Gr�a,operador,2026-10-05,
+10,gsepulveda,Gabriel Antonio Sepulveda Alarcon,SIN_MATCH_30D_CANDIDATO_BAJA,,,,,
+10,mherrera,Miguel Angel Herrera Nu�ez,OK_NOMBRE,Miguel Angel Herrera Nu�ez,Ayte del Operador,ayudante,2026-09-30,
+1,jrodriguez,Jhomar Andres Rodriguez Inca,OK_NOMBRE,Jhomar Andres Rodriguez Inca,Mec�nico Senior,otro_cargo,2026-10-05,
+1,jcastillo,Joan Ignacio Castillo Valderrama,OK_NOMBRE,Joan Ignacio Castillo Valderrama,Ayte del Operador,ayudante,2026-10-05,
+1,jcastillo,Joan Manuel Castillo Cisternas,OK_NOMBRE,Joan Manuel Castillo Cisternas,Supervisor,otro_cargo,2026-10-05,
+1,jherrera,Juan Carlos Herrera Guerra,OK_NOMBRE,Juan Carlos Herrera Guerra,Supervisor,otro_cargo,2026-10-05,
+1,mlupa,Miguel Angel Lupa Colque,OK_NOMBRE,Miguel Angel Lupa Colque,Sin Cargo,otro_cargo,2026-10-05,
+1,mcolumba,Miguel Junior Columba Rodriguez,OK_NOMBRE,Miguel Junior Columba Rodriguez,Sin Cargo,otro_cargo,2026-09-05,
+1,rtakana,Ronaldo Takana Amaza,OK_NOMBRE,Ronaldo Takana Amaza,Ayte del Operador,ayudante,2026-10-05,
+14,cescalona,Cristian Aaron Escalona Matamoro,OK_NOMBRE,Cristian Aaron Escalona Matamoro,Mecanico Junior,otro_cargo,2026-10-05,
+14,ddiaz,Dilan Alexander Diaz Montecinos,OK_NOMBRE,Dilan Alexander Diaz Montecinos,Ayte del Operador,ayudante,2026-10-05,
+14,elara,Enzo Isaac Lara Pe�a,OK_NOMBRE,Enzo Isaac Lara Pe�a,Operador Junior,operador,2026-10-05,
+10,crogers,Carlos Alexis Rogers Trujillo,OK_NOMBRE,Carlos Alexis Rogers Trujillo,Operador Junior,operador,2026-10-05,EURA 20_3
+14,rneira,Rafael Alonso Neira Sanhueza,OK_NOMBRE,Rafael Alonso Neira Sanhueza,Operador Senior,operador,2026-10-05,
+14,squezada,Sebastian Leonardo Quezada Leal,OK_NOMBRE,Sebastian Leonardo Quezada Leal,Operador Junior,operador,2026-09-21,
+14,dneira,Damian Alonso Neira Vitallos,OK_NOMBRE,Damian Alonso Neira Vitallos,Operador Junior Practica,operador,2026-10-05,
+14,mparra,Marco Antonio Parra Silva,OK_NOMBRE,Marco Antonio Parra Silva,Ayte del Operador,ayudante,2026-09-30,

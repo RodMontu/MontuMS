@@ -1,0 +1,81 @@
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index ca43831..3bf3d9f 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -279,13 +279,18 @@ class ConocimientoMotor:
+         df_heb = xl.parse("Hebras por maquina", header=None, skiprows=2)
+         df_heb.columns = ["Sucursal", "Maquina", 8, 10, 12, 16, 18, 22, 25, 28, 32, 36]
+         for _, row in df_heb.iterrows():
+-            if pd.isna(row["Sucursal"]):
+-                continue
++            if pd.isna(row["Sucursal"]) or str(row["Sucursal"]).strip().lower() == "sucursal":
++                continue  # fila vacia o fila de encabezado (sus valores 8,10,12... no son hebras)
+             suc = str(row["Sucursal"]).strip().title()
+             maq = str(row["Maquina"]).strip()
+             for d in [8,10,12,16,18,22,25,28,32,36]:
+-                if pd.notna(row[d]) and row[d] in (1, 2):
+-                    self.hebras_x_maquina[(suc, maq, d)] = int(row[d])
++                if pd.notna(row[d]):
++                    try:
++                        val = int(row[d])
++                    except (TypeError, ValueError):
++                        continue
++                    if val >= 1:
++                        self.hebras_x_maquina[(suc, maq, d)] = val
+ 
+         logger.info("Excel maestro cargado: operadores, diámetros, hebras.")
+ 
+@@ -296,8 +301,8 @@ class ConocimientoMotor:
+ 
+     def cargar_desde_sqlite(self, db_path: str):
+         """
+-        Sobreescribe diametros_x_maquina y operadores_x_maquina con datos reales
+-        desde SQLite (fuente de verdad, actualizada por seed_cubigest_data.py).
++        Sobreescribe diametros_x_maquina, operadores_x_maquina y hebras_x_maquina con
++        datos reales desde SQLite (fuente de verdad; hebras = Gestor de Maquinas).
+         El Excel queda como carga inicial; SQLite la sobreescribe completamente.
+         """
+         import sqlite3 as _sq
+@@ -393,6 +398,42 @@ class ConocimientoMotor:
+             except Exception as _e:
+                 logger.warning(f"restricciones no disponible: {_e}")
+ 
++            # E) Hebras por maquina (multiplicidad por diametro). SQLite es la fuente de
++            # verdad (Gestor de Maquinas -> Hebras). Maquina con fila en SQLite: SQLite
++            # reemplaza al Excel; valor NULL/0/no numerico = sin dato para ese diametro
++            # (cae al default 1 de estimar_duracion_min). Maquina sin fila: se conserva Excel.
++            try:
++                nuevas_hebras: dict = {}
++                maquinas_con_fila: set = set()
++                for row in conn.execute(
++                    'SELECT sucursal_id, maquina, "8mm","10mm","12mm","16mm","18mm",'
++                    '"22mm","25mm","28mm","32mm","36mm" FROM hebras'
++                ):
++                    suc = _SUC.get(row["sucursal_id"])
++                    maq = row["maquina"]
++                    if not suc or not maq:
++                        continue
++                    maquinas_con_fila.add((suc, maq))
++                    for d in _DIAMS:
++                        try:
++                            val = int(row[f"{d}mm"])
++                        except (TypeError, ValueError):
++                            continue
++                        if val >= 1:
++                            nuevas_hebras[(suc, maq, d)] = val
++                hebras_final = {
++                    k: v for k, v in self.hebras_x_maquina.items()
++                    if (k[0], k[1]) not in maquinas_con_fila
++                }
++                hebras_final.update(nuevas_hebras)
++                self.hebras_x_maquina = hebras_final
++                logger.info(
++                    f"SQLite hebras: {len(nuevas_hebras)} combinaciones "
++                    f"(sucursal,maquina,diametro) en {len(maquinas_con_fila)} maquinas."
++                )
++            except Exception as _e:
++                logger.warning(f"hebras no disponible en SQLite — se mantiene Excel: {_e}")
++
+             conn.close()
+         except Exception as e:
+             logger.warning(f"cargar_desde_sqlite falló — se mantienen datos del Excel: {e}")

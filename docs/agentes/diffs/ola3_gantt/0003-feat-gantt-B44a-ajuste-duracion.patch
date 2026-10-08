@@ -1,0 +1,292 @@
+From 88964aca75c44993fe77aad211fa541ba4e177c2 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Wed, 23 Sep 2026 23:03:44 -0300
+Subject: [PATCH] feat(gantt): campo "Ajustar duracion del trabajo (en
+ minutos)" en modal, efecto inmediato + persistencia (tabla ajustes_duracion)
+ - B44a
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/routers/programacion.py               | 126 ++++++++++++++++++
+ .../components/domain/GestorProgramacion.tsx  |  77 +++++++++++
+ 2 files changed, 203 insertions(+)
+
+diff --git a/backend/routers/programacion.py b/backend/routers/programacion.py
+index c471b77..40c63f7 100644
+--- a/backend/routers/programacion.py
++++ b/backend/routers/programacion.py
+@@ -156,6 +156,22 @@ def _init_programacion_guardada():
+         pg_cols = [r[1] for r in conn.execute("PRAGMA table_info(programacion_guardada)").fetchall()]
+         if "bolsa_json" not in pg_cols:
+             conn.execute("ALTER TABLE programacion_guardada ADD COLUMN bolsa_json TEXT DEFAULT NULL")
++        # B44(a): ajuste manual de duracion por cajita (modal Programacion).
++        # Clave = sucursal/fecha/turno/id_tarea (misma tarea si se regenera con
++        # la misma etiqueta+paso). Alcance: solo esta cajita cambia su fin
++        # (fecha_inicio no se toca) — ver _aplicar_ajustes_duracion.
++        conn.execute("""
++            CREATE TABLE IF NOT EXISTS ajustes_duracion (
++                sucursal_id  INTEGER NOT NULL,
++                fecha        TEXT    NOT NULL,
++                turno        TEXT    NOT NULL,
++                id_tarea     TEXT    NOT NULL,
++                minutos      INTEGER NOT NULL,
++                usuario      TEXT,
++                creado_en    TEXT    NOT NULL DEFAULT (datetime('now')),
++                PRIMARY KEY (sucursal_id, fecha, turno, id_tarea)
++            )
++        """)
+ 
+ 
+ _debug_obra_count = 0
+@@ -205,8 +221,50 @@ def _tarea_a_evento(t: dict, sucursal_id: int, turno: str = None, fecha: str = N
+         # de backend, antes del siguiente "Generar") — el frontend cae a
+         # codigo_viaje en ese caso.
+         "numero_etiqueta": _mapa_numero_etiqueta.get(t.get("etiqueta_id")),
++        "ajuste_manual": t.get("ajuste_manual", False),
+     }
+ 
++
++def _obtener_ajustes_duracion(sucursal_id: int, fecha: str, turno: str) -> dict:
++    """B44(a): mapa id_tarea -> minutos ajustados manualmente para (sucursal,fecha,turno)."""
++    turno_norm = str(turno).lower().replace("í", "i").replace("ó", "o")
++    try:
++        _init_programacion_guardada()
++        with sqlite3.connect(DB_PATH, timeout=5) as conn:
++            filas = conn.execute(
++                "SELECT id_tarea, minutos FROM ajustes_duracion WHERE sucursal_id=? AND fecha=? AND turno=?",
++                (sucursal_id, fecha, turno_norm),
++            ).fetchall()
++        return {f[0]: f[1] for f in filas}
++    except Exception as e:
++        logger.warning(f"[B44a] No se pudieron leer ajustes de duracion: {e}")
++        return {}
++
++
++def _aplicar_ajustes_duracion(items: list, sucursal_id: int, fecha: str, turno: str) -> None:
++    """
++    B44(a): sobreescribe fecha_fin/duracion_min de las tareas con ajuste manual
++    guardado. Solo afecta la cajita ajustada — fecha_inicio no se toca, por lo
++    que las cajitas siguientes de la misma maquina NO se recorren (supuesto
++    documentado en el informe: el hueco liberado queda vacio hasta el proximo
++    "Generar").
++    """
++    ajustes = _obtener_ajustes_duracion(sucursal_id, fecha, turno)
++    if not ajustes:
++        return
++    for it in items:
++        minutos = ajustes.get(it.get("id_tarea"))
++        if minutos is None or not it.get("fecha_inicio"):
++            continue
++        try:
++            inicio = datetime.fromisoformat(it["fecha_inicio"])
++            it["fecha_fin"] = (inicio + timedelta(minutes=minutos)).isoformat()
++            it["duracion_min"] = minutos
++            it["ajuste_manual"] = True
++        except Exception as e:
++            logger.warning(f"[B44a] No se pudo aplicar ajuste a {it.get('id_tarea')}: {e}")
++
++
+ router = APIRouter(prefix="/api/programacion", tags=["programacion"])
+ DB_PATH = "optifierro_v2.db"
+ 
+@@ -402,6 +460,9 @@ def obtener_programacion(sucursal: int, turno: str, fecha: str):
+     # B45: planes ya guardados con tareas FP-LC no muestran esos eventos.
+     eventos = [e for e in eventos if e.get("recurso_id") not in MAQUINAS_FICTICIAS]
+ 
++    # B44(a): reaplicar ajustes manuales de duracion (sobreviven a un reload).
++    _aplicar_ajustes_duracion(eventos, sucursal, fecha, turno)
++
+     return {
+         "recursos": recursos,
+         "eventos": eventos,
+@@ -773,6 +834,64 @@ class MaquinaRepartoIn(BaseModel):
+     nombre_maquina: str
+ 
+ 
++class AjusteDuracionRequest(BaseModel):
++    sucursal_id: int
++    turno: str
++    fecha: str
++    id_tarea: str
++    minutos: int
++    usuario: str = "desconocido"
++
++
++@router.post("/ajuste-duracion")
++def guardar_ajuste_duracion(payload: AjusteDuracionRequest):
++    """
++    B44(a): "Ajustar duracion del trabajo (en minutos)" del modal de detalle.
++    Fuera de alcance (ver ticket): auto-aprendizaje / retroalimentar al Motor
++    / cambiar estimar_duracion_min o la asignacion — esto SOLO cambia el fin
++    mostrado de la cajita ajustada. Persistencia en ajustes_duracion; efecto
++    inmediato se logra tambien actualizando global_eventos en memoria aqui
++    mismo, sin esperar el proximo GET/Generar.
++    """
++    if payload.minutos <= 0:
++        raise HTTPException(status_code=400, detail="minutos debe ser mayor a 0")
++
++    turno_norm = payload.turno.lower().replace("í", "i").replace("ó", "o")
++    try:
++        _init_programacion_guardada()
++        with sqlite3.connect(DB_PATH, timeout=10) as conn:
++            conn.execute(
++                """
++                INSERT INTO ajustes_duracion (sucursal_id, fecha, turno, id_tarea, minutos, usuario, creado_en)
++                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
++                ON CONFLICT (sucursal_id, fecha, turno, id_tarea)
++                DO UPDATE SET minutos=excluded.minutos, usuario=excluded.usuario, creado_en=excluded.creado_en
++                """,
++                (payload.sucursal_id, payload.fecha, turno_norm, payload.id_tarea, payload.minutos, payload.usuario),
++            )
++    except Exception as e:
++        logger.error(f"[B44a] No se pudo guardar ajuste de duracion: {e}")
++        raise HTTPException(status_code=500, detail="No se pudo guardar el ajuste")
++
++    # Efecto inmediato en memoria (sin esperar el próximo Generar/reload).
++    fecha_fin_nueva = None
++    for ev in global_eventos:
++        if (
++            ev.get("id_tarea") == payload.id_tarea
++            and str(ev.get("sucursal_id")) == str(payload.sucursal_id)
++            and str(ev.get("turno", "")).lower().replace("í", "i").replace("ó", "o") == turno_norm
++            and str(ev.get("fecha", "")) == str(payload.fecha)
++            and ev.get("fecha_inicio")
++        ):
++            inicio = datetime.fromisoformat(ev["fecha_inicio"])
++            fecha_fin_nueva = (inicio + timedelta(minutes=payload.minutos)).isoformat()
++            ev["fecha_fin"] = fecha_fin_nueva
++            ev["duracion_min"] = payload.minutos
++            ev["ajuste_manual"] = True
++
++    return {"status": "ok", "id_tarea": payload.id_tarea, "minutos": payload.minutos, "fecha_fin": fecha_fin_nueva}
++
++
+ class AplicarRepartoRequest(BaseModel):
+     sucursal_id: int
+     turno: str
+@@ -1258,6 +1377,13 @@ async def generar_programacion(solicitud: SolicitudProgramacion, request: Reques
+                 and str(e.get("fecha", "")) == str(solicitud.fecha_produccion)
+             )
+         ]
++        # B44(a): reaplicar ajustes manuales de duracion existentes para este
++        # dia/turno — "Generar" no debe borrar el ajuste de una tarea que se
++        # mantiene (misma etiqueta_id + paso_secuencia => mismo id_tarea).
++        # Si la tarea cambia de maquina/orden en la nueva corrida igual se
++        # reaplica porque la clave es id_tarea, no la posicion en el Gantt.
++        _aplicar_ajustes_duracion(resultado.get("tareas", []), solicitud.sucursal_id, solicitud.fecha_produccion, turno_norm)
++
+         for t in resultado.get("tareas", []):
+             # B42: anotar numero fisico de etiqueta tambien en la tarea cruda
+             # que se devuelve por HTTP (el frontend pinta result.tareas
+diff --git a/frontend/src/components/domain/GestorProgramacion.tsx b/frontend/src/components/domain/GestorProgramacion.tsx
+index 12cd5e5..427e06c 100644
+--- a/frontend/src/components/domain/GestorProgramacion.tsx
++++ b/frontend/src/components/domain/GestorProgramacion.tsx
+@@ -50,6 +50,8 @@ interface Tarea {
+     // "Tag #: N of M"); distinto de etiqueta_id (PK interna). undefined/null
+     // si aun no se resolvio (fallback a codigo_viaje/etiqueta_id en UI).
+     numero_etiqueta?: number | null;
++    // B44(a): true si esta cajita tiene un ajuste manual de duracion vigente.
++    ajuste_manual?: boolean;
+     // B2: reparto de trabajo en 2-3 máquinas en paralelo
+     alerta_reparto?: { nivel: 'suave' | 'dura'; pct_jornada: number; maquina_sugerida: string | null };
+     reparto?: { recurso_id: string; nombre_maquina: string; pct_carga: number; kgs: number; duracion_min: number; operador: string; fecha_inicio: string; fecha_fin: string }[];
+@@ -893,6 +895,9 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+     const [hoveredEvent, setHoveredEvent] = useState<Tarea | null>(null);
+     const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+     const [selectedTarea, setSelectedTarea] = useState<Tarea | null>(null);
++    // B44(a): input del campo "Ajustar duración del trabajo (en minutos)".
++    const [ajusteDuracionInput, setAjusteDuracionInput] = useState('');
++    const [ajusteDuracionGuardando, setAjusteDuracionGuardando] = useState(false);
+     const [repartoState, setRepartoState] = useState<{ tarea: Tarea; sugerida: string | null } | null>(null);
+     const abrirReparto = (tarea: Tarea, sugerida?: string | null) => setRepartoState({ tarea, sugerida: sugerida ?? null });
+     const [selectedTareaTags, setSelectedTareaTags] = useState<Array<TagViaje | number | string>>([]);
+@@ -1490,6 +1495,51 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+         return () => { cancelado = true; };
+     }, [selectedTarea?.codigo_viaje, selectedTarea?.lista_etiqueta_ids, sucursal]);
+ 
++    // B44(a): limpiar el input del ajuste de duracion cada vez que se abre
++    // una cajita distinta (no arrastrar el valor de la anterior).
++    useEffect(() => {
++        setAjusteDuracionInput('');
++    }, [selectedTarea?.id_tarea]);
++
++    const handleGuardarAjusteDuracion = async () => {
++        const minutos = parseInt(ajusteDuracionInput, 10);
++        if (!selectedTarea?.id_tarea || !Number.isFinite(minutos) || minutos <= 0) return;
++        let usuario = 'desconocido';
++        try {
++            const stored = localStorage.getItem('auth_user');
++            if (stored) usuario = JSON.parse(stored)?.nombre || JSON.parse(stored)?.email || usuario;
++        } catch { /* usuario queda 'desconocido' */ }
++
++        setAjusteDuracionGuardando(true);
++        try {
++            const res = await fetch('/api/programacion/ajuste-duracion', {
++                method: 'POST',
++                headers: { 'Content-Type': 'application/json' },
++                body: JSON.stringify({
++                    sucursal_id: Number(sucursal),
++                    turno: turnoGlobal,
++                    fecha,
++                    id_tarea: selectedTarea.id_tarea,
++                    minutos,
++                    usuario,
++                }),
++            });
++            const json = await res.json();
++            if (res.ok && json.fecha_fin) {
++                const idTarea = selectedTarea.id_tarea;
++                setSelectedTarea(prev => prev ? { ...prev, fecha_fin: json.fecha_fin, duracion_min: minutos } : prev);
++                setData(prev => ({
++                    ...prev,
++                    eventos: prev.eventos.map((e: any) => e.id_tarea === idTarea ? { ...e, fecha_fin: json.fecha_fin, duracion_min: minutos } : e),
++                }));
++            }
++        } catch (e) {
++            console.error('[B44a] Error guardando ajuste de duracion:', e);
++        } finally {
++            setAjusteDuracionGuardando(false);
++        }
++    };
++
+     const fetchEstadosAveriasMaquinas = useCallback(() => {
+         const cargarEstados = (url: string) => fetch(url).then(r => r.ok ? r.json() : Promise.reject(new Error('estado-maquinas no disponible')));
+         cargarEstados(`/api/averias/estado-maquinas?sucursal_id=${sucursal}`)
+@@ -1769,6 +1819,33 @@ export default function GestorProgramacion({ sucursal, turnoGlobal = 'Día', ave
+                                 </button>
+                             </div>
+                             <div className="p-6">
++                                {/* B44(a): campo de ajuste manual, entre los primeros/mas visibles del modal */}
++                                <div className="mb-5 p-3 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40">
++                                    <label className="text-[10px] font-bold text-indigo-500 dark:text-indigo-300 uppercase block mb-1.5">
++                                        Ajustar duración del trabajo (en minutos)
++                                    </label>
++                                    <div className="flex items-center gap-2">
++                                        <input
++                                            type="number"
++                                            min={1}
++                                            step={1}
++                                            value={ajusteDuracionInput}
++                                            onChange={(e) => setAjusteDuracionInput(e.target.value)}
++                                            placeholder="ej. 90"
++                                            className="w-28 px-2 py-1.5 text-sm rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
++                                        />
++                                        <button
++                                            onClick={handleGuardarAjusteDuracion}
++                                            disabled={ajusteDuracionGuardando || !ajusteDuracionInput}
++                                            className="px-3 py-1.5 text-xs font-bold rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white transition-colors"
++                                        >
++                                            {ajusteDuracionGuardando ? 'Guardando…' : 'Aplicar'}
++                                        </button>
++                                        {selectedTarea.ajuste_manual && (
++                                            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-300">Ajustada manualmente</span>
++                                        )}
++                                    </div>
++                                </div>
+                                 <div className="grid grid-cols-2 gap-3 mb-5">
+                                     <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                         <p className="text-[10px] font-bold text-slate-400 uppercase">Peso</p>
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,151 @@
+diff --git a/backend/database_cubigest.py b/backend/database_cubigest.py
+index 7c01858..9e6370c 100644
+--- a/backend/database_cubigest.py
++++ b/backend/database_cubigest.py
+@@ -358,7 +358,27 @@ class CubigestDB:
+         Reemplaza el path DPI→PINET que no tiene datos para ITs actuales.
+         Retorna: {codigo_base: kg} donde codigo_base = prefijo+pres+calidad+N+diam
+         (sin largo de barra). El matching en materias_primas.py usa norm sin X-sufijo.
++
++        QA-A-03 (24-09): antes sumaba TODO Piezas.TotalKgs sin mirar avance de
++        fabricacion (sobreestimaba demanda hasta 3.4x en Coronel, +39% en
++        Cerrillos). Ahora:
++        - Filtra avance<100 via detallePaquetesPieza + PIEZA_PRODUCCION (mismo
++          patron que _obtener_pids_pendientes en programacion.py:1459). Piezas
++          sin ningun paquete generado (dpp inexistente) se tratan como
++          avance=0 (aun pendientes) via OUTER APPLY + ISNULL.
++        - Clasifica cada IT con universo_fechas.clasificar_fecha (contrato
++          acordado 24-09, seccion 3 de UNIVERSO_FECHAS_spec.md) y solo suma
++          kg de categorias 'atrasada_valida' + 'proxima' + 'lejana_normal'.
++          Excluye 'atrasada_suciedad' y 'muy_futura' (estas ultimas deberian
++          mostrarse aparte como "sin fecha confirmada" en la UI — pendiente
++          de implementar en materias_primas.py, ver informe QA-A-03).
++        Verificado con SELECT real 24-09 (avance+fecha): Cerrillos 939k→684k,
++        Coronel 115k→32k, cercano a lo esperado en el spec (673k / 34k).
++        NO VERIFICADO end-to-end: universo_fechas.py todavia no existe en
++        este worktree (lo esta creando otra ventana en paralelo).
+         """
++        from universo_fechas import clasificar_fecha
++
+         cub_suc_ids = self.get_cubigest_sucursal_ids(sucursal_id)
+         placeholders = ",".join(["?"] * len(cub_suc_ids))
+ 
+@@ -379,22 +399,42 @@ class CubigestDB:
+                 ELSE '63'
+             END as calidad_num,
+             p.Diametro as diametro,
+-            SUM(p.TotalKgs) as kg_comprometido
++            p.TotalKgs as kg_comprometido,
++            CAST(ISNULL(
++                NULLIF(CAST(it.FechaDespacho AS DATE), '19000101'),
++                NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
++            ) AS date) as fecha_efectiva,
++            DATEDIFF(day, rep.UltimaReprogramacion, ISNULL(
++                NULLIF(CAST(it.FechaDespacho AS DATE), '19000101'),
++                NULLIF(CAST(it.FechaEntrega  AS DATE), '19000101')
++            )) as horizonte_reprog
+         FROM IT it
+         JOIN Piezas p ON p.Id_It = it.Id
++        OUTER APPLY (
++            SELECT MAX(pz.PIE_AVANCE) AS avance_pct
++            FROM detallePaquetesPieza dpp
++            JOIN PIEZA_PRODUCCION pz ON pz.PIE_ETIQUETA_PIEZA = dpp.id
++            WHERE dpp.idpieza = p.Id
++        ) av
++        LEFT JOIN (
++            SELECT IdIT, MAX(FechaMod) AS UltimaReprogramacion
++            FROM Reprogramar_IT
++            GROUP BY IdIT
++        ) rep ON rep.IdIT = it.Id
+         WHERE it.Estado IN ('APR','PEN','IET','IVI','ING')
+           AND it.IdSucursal IN ({placeholders})
+-          AND ISNULL(it.FechaDespacho, it.FechaEntrega)
+-              BETWEEN DATEADD(day, -30, GETDATE()) AND DATEADD(day, 21, GETDATE())
+           AND p.TotalKgs > 0
+           AND p.Diametro > 0
+-        GROUP BY it.IdSucursal, it.TipoAcero, p.Diametro
++          AND ISNULL(av.avance_pct, 0) < 100
+         """
+ 
+         raw_data = self.execute_query(query, tuple(cub_suc_ids))
+ 
+         resultado = {}
+         for row in raw_data:
++            categoria = clasificar_fecha(row['fecha_efectiva'], row['horizonte_reprog'])
++            if categoria not in ('atrasada_valida', 'proxima', 'lejana_normal'):
++                continue
+             diam = str(int(row['diametro'])).zfill(2) if row['diametro'] else '00'
+             codigo_base = f"{row['prefijo']}{row['tipo_mp']}{row['calidad_num']}N{diam}"
+             kg = float(row['kg_comprometido'] or 0)
+diff --git a/backend/routers/materias_primas.py b/backend/routers/materias_primas.py
+index 9532354..1b63076 100644
+--- a/backend/routers/materias_primas.py
++++ b/backend/routers/materias_primas.py
+@@ -190,9 +190,17 @@ def comprometido_detalle(sucursal: int = Query(...), codigo: str = Query(...)):
+     """
+     Retorna el detalle de ITs que comprometen un código de MP en una sucursal.
+     Usa ruta IT→Piezas (TipoAcero + Diametro) — reemplaza DPI→PINET que no tenía datos.
++
++    QA-A-03 (24-09): alineado con obtener_comprometido_por_codigo
++    (database_cubigest.py) — filtro de avance<100 y clasificación de fecha
++    via universo_fechas.clasificar_fecha, para que el detalle no muestre
++    ITs que ya no cuentan en el total de "comprometido".
++    NO VERIFICADO end-to-end: universo_fechas.py todavia no existe en este
++    worktree (lo crea otra ventana en paralelo).
+     """
+     try:
+         from database_cubigest import cubigest_db
++        from universo_fechas import clasificar_fecha
+ 
+         cub_suc_ids = cubigest_db.get_cubigest_sucursal_ids(sucursal)
+         placeholders = ",".join(["?"] * len(cub_suc_ids))
+@@ -227,19 +235,37 @@ def comprometido_detalle(sucursal: int = Query(...), codigo: str = Query(...)):
+                     (NULLIF(CAST(i.FechaEntrega  AS DATE), '19000101'))
+                 ) AS t(v)
+             ), 23)                                              AS fecha_despacho,
++            CAST(ISNULL(
++                NULLIF(CAST(i.FechaDespacho AS DATE), '19000101'),
++                NULLIF(CAST(i.FechaEntrega  AS DATE), '19000101')
++            ) AS date)                                           AS fecha_efectiva,
++            MAX(DATEDIFF(day, rep.UltimaReprogramacion, ISNULL(
++                NULLIF(CAST(i.FechaDespacho AS DATE), '19000101'),
++                NULLIF(CAST(i.FechaEntrega  AS DATE), '19000101')
++            )))                                                  AS horizonte_reprog,
+             i.Estado                                            AS estado,
+             SUM(p.TotalKgs)                                     AS kg_comprometidos,
+             SUM(p.Cantidad)                                     AS n_piezas
+         FROM IT i
+         JOIN Obras o ON o.Id = i.IdObra
+         JOIN Piezas p ON p.Id_It = i.Id
++        OUTER APPLY (
++            SELECT MAX(pz.PIE_AVANCE) AS avance_pct
++            FROM detallePaquetesPieza dpp
++            JOIN PIEZA_PRODUCCION pz ON pz.PIE_ETIQUETA_PIEZA = dpp.id
++            WHERE dpp.idpieza = p.Id
++        ) av
++        LEFT JOIN (
++            SELECT IdIT, MAX(FechaMod) AS UltimaReprogramacion
++            FROM Reprogramar_IT
++            GROUP BY IdIT
++        ) rep ON rep.IdIT = i.Id
+         WHERE i.Estado IN ('PEN', 'IET', 'APR', 'ING', 'IVI')
+           AND i.IdSucursal IN ({placeholders})
+-          AND ISNULL(i.FechaDespacho, i.FechaEntrega)
+-              BETWEEN DATEADD(day, -30, GETDATE()) AND DATEADD(day, 21, GETDATE())
+           AND p.Diametro = ?
+           AND ISNULL(i.TipoAcero, '') LIKE ?
+           AND p.TotalKgs > 0
++          AND ISNULL(av.avance_pct, 0) < 100
+         GROUP BY i.NroIt, o.Nombre, o.Cliente, i.FechaDespacho, i.FechaEntrega, i.Estado
+         ORDER BY MAX(ISNULL(i.FechaDespacho, i.FechaEntrega)) ASC, i.NroIt ASC
+         """
+@@ -250,6 +276,9 @@ def comprometido_detalle(sucursal: int = Query(...), codigo: str = Query(...)):
+ 
+         detalle = []
+         for row in rows:
++            categoria = clasificar_fecha(row["fecha_efectiva"], row["horizonte_reprog"])
++            if categoria not in ("atrasada_valida", "proxima", "lejana_normal"):
++                continue
+             detalle.append({
+                 "nro_it":           row["nro_it"],
+                 "obra":             row["obra"] or "Sin obra",

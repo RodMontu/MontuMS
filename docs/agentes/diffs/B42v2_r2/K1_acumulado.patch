@@ -1,0 +1,151 @@
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index 76d2985..387fe6e 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -1081,12 +1081,17 @@ def programar_turno(
+             activas = MAQUINAS_ACTIVAS.get(sucursal_nombre, set())
+             if activas and nombre_maquina not in activas:
+                 candidatas_alt = [
+-                    m for m in activas
++                    m for m in sorted(activas)
+                     if m not in maquinas_detenidas
+                     and m not in maquinas_no_liberadas
+                     and diametro in conocimiento.diametros_x_maquina.get((sucursal_nombre, m), [])
+                 ]
+-                candidatas_alt.sort(key=lambda m: sum(1 for t in tareas if t["nombre_maquina"] == m))
++                # K1 (determinismo): desempate estable por nombre tras la carga
++                # actual (antes: solo carga, con empate resuelto por el orden
++                # de iteracion de `activas` -- un set, cuyo orden depende de
++                # PYTHONHASHSEED. Mismo criterio de eleccion, solo se agrega
++                # el desempate explicito).
++                candidatas_alt.sort(key=lambda m: (sum(1 for t in tareas if t["nombre_maquina"] == m), m))
+                 if candidatas_alt:
+                     logger.info(
+                         "Fallback maquina: '%s' no activa → usando '%s' para IdForma=%s Ø%smm",
+diff --git a/backend/test_b42v2_etiquetas.py b/backend/test_b42v2_etiquetas.py
+index 8d0ee48..5c9ac45 100644
+--- a/backend/test_b42v2_etiquetas.py
++++ b/backend/test_b42v2_etiquetas.py
+@@ -244,5 +244,122 @@ class TestB42v2Series(unittest.TestCase):
+             self.assertAlmostEqual(suma_duraciones, duracion_esperada, delta=0.5)
+ 
+ 
++class TestB42v2Determinismo(unittest.TestCase):
++    """K1 (CCa-14): el resultado de programar_turno debe ser independiente de
++    PYTHONHASHSEED. Antes del fix, `candidatas_alt` (motor_v2.py, fallback de
++    maquina no activa) iteraba `for m in activas` (un `set` de nombres): el
++    orden de iteracion de un set de strings depende del hash de las strings,
++    que Python aleatoriza por proceso salvo que PYTHONHASHSEED este fijo. El
++    `.sort(key=lambda m: carga)` posterior no desempataba por nombre, asi que
++    dos maquinas con igual carga podian quedar en cualquier orden segun la
++    semilla, y la elegida (`candidatas_alt[0]`) cambiaba de una corrida a
++    otra con el MISMO universo. Fix: `sorted(activas)` antes del filtro +
++    desempate explicito `(carga, nombre)` en el sort final.
++
++    Este test lanza subprocesos con distintas PYTHONHASHSEED sobre un
++    universo sintetico grande (45 series x 7 etiquetas = 315 etiquetas,
++    combinaciones IdForma/Diametro reales de Cerrillos con ruta hacia
++    maquinas distintas) y exige que la firma del resultado (id_tarea,
++    maquina, inicio por tarea) sea IDENTICA en todas las semillas. Sin el
++    fix de K1 este test FALLA (firmas distintas entre semillas); con el fix
++    pasa."""
++
++    # 45 combos reales (IdForma, Diametro) de Cerrillos (matriz_rutas.json),
++    # muestreados para cubrir rutas historicas hacia maquinas distintas
++    # (no solo PRIMA 3D/EURA 16 de los tests AC4/AC6 de arriba).
++    _COMBOS = [
++        (147, 16), (8, 22), (2, 12), (225, 8), (35, 12), (32, 16), (30, 10),
++        (10, 18), (217, 16), (8, 8), (164, 25), (385, 8), (101, 16), (7, 8),
++        (129, 8), (60, 25), (2, 25), (2, 22), (7, 16), (28, 22), (30, 25),
++        (89, 12), (133, 12), (2, 16), (106, 8), (22, 18), (207, 10),
++        (150, 22), (191, 10), (60, 18), (35, 8), (10, 12), (28, 16),
++        (101, 8), (133, 8), (89, 16), (207, 16), (150, 16), (191, 16),
++        (30, 12), (60, 12), (2, 10), (7, 22), (22, 25), (106, 16),
++    ]
++
++    def _universo_sintetico(self):
++        etiquetas = []
++        eid = 90000
++        for i, (id_forma, diametro) in enumerate(self._COMBOS):
++            for j in range(7):
++                etiquetas.append(_etiqueta(
++                    eid=eid, kgs=25.0 + (j % 5) * 3.0, id_forma=id_forma,
++                    diametro=diametro, codigo_viaje=f"K1-TEST-{i:03d}/1",
++                    n=j + 1, m=7,
++                ))
++                eid += 1
++        return etiquetas
++
++    def test_k1_determinismo_multiseed_universo_sintetico(self):
++        n_etiquetas = len(self._COMBOS) * 7
++        self.assertGreaterEqual(n_etiquetas, 300, "universo sintetico debe tener >= 300 etiquetas")
++        self.assertGreaterEqual(len(self._COMBOS), 40, "universo sintetico debe tener >= 40 series")
++
++        conocimiento = _cargar_conocimiento()
++        activas = getattr(__import__("motor_v2"), "MAQUINAS_ACTIVAS", {}).get(SUCURSAL_NOMBRE, set())
++        self.assertGreaterEqual(len(activas), 6, "se requieren >= 6 maquinas equivalentes activas en Cerrillos")
++
++        import subprocess
++        etiquetas = self._universo_sintetico()
++        base_dir = os.environ.get("MOTOR_BASE_DIR") or os.path.dirname(os.path.abspath(__file__))
++        here = os.path.dirname(os.path.abspath(__file__))
++
++        runner = f'''
++import sys, os, json, hashlib
++sys.path.insert(0, {here!r})
++os.chdir({base_dir!r})
++from motor_v2 import ConocimientoMotor, programar_turno
++c = ConocimientoMotor({base_dir!r})
++c.cargar()
++import sqlite3
++mapa_cub = {_CUB_MAQ_MAP!r}
++mapa_suc = {_CUB_TO_SQL_SUC!r}
++with sqlite3.connect(os.path.join({base_dir!r}, "optifierro_v2.db")) as conn:
++    conn.row_factory = sqlite3.Row
++    sql_nombre = {{(r["sucursal_id"], r["maquina_id"]): r["maquina"] for r in conn.execute("SELECT sucursal_id, maquina_id, maquina FROM maquinas_info")}}
++mapa = {{}}
++for (cub_suc, maq_nro), sql_maq_id in mapa_cub.items():
++    sql_suc = mapa_suc[cub_suc]
++    nombre = sql_nombre.get((sql_suc, sql_maq_id))
++    if nombre:
++        mapa[(sql_suc, maq_nro)] = nombre
++c.cargar_mapa_maquinas(mapa)
++ops = set()
++for (suc, _maq), lista in c.operadores_x_maquina.items():
++    if suc == {SUCURSAL_NOMBRE!r}:
++        ops.update(lista)
++etiquetas = json.load(open(os.environ["UNV"]))
++res = programar_turno(etiquetas=etiquetas, sucursal_id={SUCURSAL_ID!r}, fecha="2026-09-24", turno="dia", operadores_disponibles=sorted(ops), conocimiento=c)
++t = res["tareas"]
++sig = hashlib.sha1(json.dumps(sorted([(x.get("id_tarea"), x.get("nombre_maquina"), str(x.get("fecha_inicio"))) for x in t])).encode()).hexdigest()
++print("SIG", sig, len(t), round(sum((x.get("kilos") or 0) for x in t)))
++'''
++        import json as _json
++        import tempfile
++        fd, universo_path = tempfile.mkstemp(suffix=".json")
++        with os.fdopen(fd, "w") as f:
++            _json.dump(etiquetas, f)
++        try:
++            firmas = {}
++            for seed in ("0", "1", "2", "3", "42"):
++                env = dict(os.environ)
++                env["PYTHONHASHSEED"] = seed
++                env["UNV"] = universo_path
++                out = subprocess.run(
++                    [sys.executable, "-c", runner], env=env,
++                    capture_output=True, text=True, timeout=120,
++                )
++                self.assertEqual(out.returncode, 0, f"seed={seed} fallo: {out.stderr[-2000:]}")
++                linea = [l for l in out.stdout.splitlines() if l.startswith("SIG")]
++                self.assertTrue(linea, f"seed={seed} sin salida SIG: {out.stdout!r} {out.stderr[-500:]!r}")
++                firmas[seed] = linea[0]
++            self.assertEqual(
++                len(set(firmas.values())), 1,
++                f"NO DETERMINISTA: firmas distintas entre semillas (K1): {firmas}",
++            )
++        finally:
++            os.unlink(universo_path)
++
++
+ if __name__ == "__main__":
+     unittest.main(verbosity=2)

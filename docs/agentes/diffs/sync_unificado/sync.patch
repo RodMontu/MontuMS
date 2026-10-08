@@ -1,0 +1,601 @@
+diff --git a/backend/main.py b/backend/main.py
+index ea04a55..5fe6f13 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -21,7 +21,7 @@ load_dotenv()
+ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+ 
+ from models import global_recursos, global_eventos, global_pendientes
+-from routers import maquinas, operadores, programacion, materias_primas, piezas, averias, sucursales, auth, admin, it_detenida, jornada, calendario_futuro, compromisos_semanales, tiempos_maquina
++from routers import maquinas, operadores, programacion, materias_primas, piezas, averias, sucursales, auth, admin, it_detenida, jornada, calendario_futuro, compromisos_semanales, tiempos_maquina, sync
+ from motor_v2 import ConocimientoMotor, MAQUINAS_FICTICIAS
+ 
+ logger = logging.getLogger(__name__)
+@@ -459,6 +459,33 @@ async def lifespan(app: FastAPI):
+         CronTrigger(day_of_week="mon-fri", hour=21, minute=21, timezone="America/Santiago"),
+         id="job_tardios_noche", replace_existing=True,
+     )
++    # CCa-17: sincronización horaria unificada (universo + Cuadro OptiSteel),
++    # apagada por defecto porque golpea el ERP y el scraper OptiSteel — Montu
++    # la enciende con SYNC_HORARIO_ACTIVO=1 cuando corresponda.
++    if os.getenv("SYNC_HORARIO_ACTIVO", "0") == "1":
++        from routers.sync import ejecutar_sync as _ejecutar_sync_horario
++
++        async def _job_sync_horario():
++            try:
++                resultado = await _ejecutar_sync_horario()
++                if not resultado["ok"]:
++                    logger.warning(f"[sync horario] alguna fuente falló: {resultado}")
++            except RuntimeError as e:
++                logger.info(f"[sync horario] omitido (lock activo): {e}")
++            except Exception as e:
++                logger.error(f"[sync horario] error inesperado: {e}")
++
++        _sync_cron = os.getenv("SYNC_HORARIO_CRON", "").strip()
++        _sync_trigger = (
++            CronTrigger.from_crontab(_sync_cron, timezone="America/Santiago")
++            if _sync_cron
++            else CronTrigger(day_of_week="mon-sat", hour="6-22", minute=5, timezone="America/Santiago")
++        )
++        _scheduler.add_job(_job_sync_horario, _sync_trigger, id="job_sync_horario", replace_existing=True)
++        print("INFO: Scheduler — sync horario ACTIVO (universo + Cuadro OptiSteel).")
++    else:
++        print("INFO: Scheduler — sync horario APAGADO (SYNC_HORARIO_ACTIVO=0). Enciéndelo cuando Montu lo confirme.")
++
+     _scheduler.start()
+     print("INFO: Scheduler — 08:08/20:08 scraper GV + 08:10/20:10 planif. (suc 1,10,14) + 08:51/21:21 tardíos + :30 ITs cerradas, L-V sin feriados CL.")
+ 
+@@ -494,6 +521,7 @@ app.include_router(jornada.router)
+ app.include_router(calendario_futuro.router)
+ app.include_router(compromisos_semanales.router)
+ app.include_router(tiempos_maquina.router)
++app.include_router(sync.router)
+ 
+ @app.get("/api/health")
+ def health_check():
+diff --git a/backend/routers/sync.py b/backend/routers/sync.py
+new file mode 100644
+index 0000000..03d29ba
+--- /dev/null
++++ b/backend/routers/sync.py
+@@ -0,0 +1,253 @@
++"""
++Sincronizacion unificada (CCa-17, pasos 1/2/5 del diseno CCa-11):
++un unico punto que actualiza JUNTAS las dos fuentes de datos del SPP:
++
++  (a) "universo" de compromisos: no tiene cache propio, se consulta en vivo
++      a Cubigest en cada endpoint (_obtener_pids_pendientes y las 2 queries
++      hermanas en materias_primas.py / database_cubigest.py). "Actualizar"
++      aqui significa validar que Cubigest responde (SELECT liviano) y dejar
++      constancia en sync_estado -- NO se inventa un cache nuevo.
++  (b) "Cuadro de Programacion" OptiSteel: si tiene cache (SQLite,
++      cuadro_programacion_optisteel), refrescado hoy solo por un servicio
++      externo (Geovictoria en serverX:8002) que llama
++      POST /api/admin/cuadro-programacion/ejecutar. Aqui se llama
++      directamente scrape_cuadro_programacion (mismo proceso, sin salto de
++      red) para las 3 sucursales, semana actual (lunes-sabado, TO no
++      despacha domingo).
++
++Si (b) falla, scrape_cuadro_programacion ya garantiza (por diseno: el
++DELETE/INSERT ocurre despues del parseo completo) que los datos previos del
++Cuadro quedan intactos -- aqui solo se registra el error en sync_estado, sin
++reintentar ni pisar nada.
++"""
++import asyncio
++import logging
++import os
++import sqlite3
++import time
++from datetime import date, datetime, timedelta, timezone
++
++from fastapi import APIRouter, HTTPException
++from fastapi.concurrency import run_in_threadpool
++from pydantic import BaseModel
++
++from database_cubigest import cubigest_db
++from scraper_cuadroprogramacion import scrape_cuadro_programacion
++
++logger = logging.getLogger(__name__)
++router = APIRouter(prefix="/api/sync", tags=["sync"])
++
++DB_PATH = os.getenv("DB_PATH", "optifierro_v2.db")
++
++SUCURSALES = [1, 10, 14]
++SUCURSAL_NOMBRES = {1: "Calama", 10: "Cerrillos", 14: "Coronel"}
++# sucursal_id OptiFierro -> nombre de combo Cubigest (scraper_cuadroprogramacion.SUCURSALES)
++SUCURSAL_A_CUADRO = {1: "CALAMA", 10: "SANTIAGO", 14: "CORONEL"}
++
++FUENTES = ("universo", "cuadro")
++
++UMBRAL_DESACTUALIZADO_MIN = int(os.getenv("SYNC_DESACTUALIZADO_MIN", "90"))
++TIMEOUT_UNIVERSO_S = 10.0
++TIMEOUT_CUADRO_S = 60.0
++
++# Un solo sync a la vez (botón + job horario comparten este lock).
++_sync_lock = asyncio.Lock()
++
++CREATE_TABLE_SQL = """
++CREATE TABLE IF NOT EXISTS sync_estado (
++    fuente TEXT NOT NULL,
++    sucursal_id INTEGER NOT NULL,
++    ultimo_ok_ts TEXT,
++    ultimo_error_ts TEXT,
++    ultimo_error_msg TEXT,
++    duracion_ms INTEGER,
++    PRIMARY KEY (fuente, sucursal_id)
++)
++"""
++
++
++def _init_tabla() -> None:
++    with sqlite3.connect(DB_PATH) as conn:
++        conn.execute(CREATE_TABLE_SQL)
++        conn.commit()
++
++
++def _registrar_ok(fuente: str, sucursal_id: int, duracion_ms: int) -> None:
++    _init_tabla()
++    with sqlite3.connect(DB_PATH) as conn:
++        conn.execute(
++            """INSERT INTO sync_estado (fuente, sucursal_id, ultimo_ok_ts, duracion_ms)
++               VALUES (?, ?, datetime('now'), ?)
++               ON CONFLICT(fuente, sucursal_id) DO UPDATE SET
++                   ultimo_ok_ts = excluded.ultimo_ok_ts,
++                   duracion_ms  = excluded.duracion_ms""",
++            (fuente, sucursal_id, duracion_ms),
++        )
++        conn.commit()
++
++
++def _registrar_error(fuente: str, sucursal_id: int, duracion_ms: int, mensaje: str) -> None:
++    _init_tabla()
++    with sqlite3.connect(DB_PATH) as conn:
++        conn.execute(
++            """INSERT INTO sync_estado (fuente, sucursal_id, ultimo_error_ts, ultimo_error_msg, duracion_ms)
++               VALUES (?, ?, datetime('now'), ?, ?)
++               ON CONFLICT(fuente, sucursal_id) DO UPDATE SET
++                   ultimo_error_ts  = excluded.ultimo_error_ts,
++                   ultimo_error_msg = excluded.ultimo_error_msg,
++                   duracion_ms      = excluded.duracion_ms""",
++            (fuente, sucursal_id, mensaje[:500], duracion_ms),
++        )
++        conn.commit()
++
++
++def _verificar_cubigest_vivo(sucursal_id: int) -> None:
++    """Query liviana para confirmar que Cubigest responde. Lanza si falla."""
++    cub_ids = cubigest_db.get_cubigest_sucursal_ids(sucursal_id)
++    conn = cubigest_db.connect()
++    if conn is None:
++        raise RuntimeError("Cubigest no disponible (connect() devolvió None)")
++    try:
++        cur = conn.cursor()
++        cur.execute("SELECT TOP 1 it.Id FROM IT it WHERE it.IdSucursal IN ({})".format(
++            ",".join("?" * len(cub_ids))
++        ), tuple(cub_ids))
++        cur.fetchall()
++    finally:
++        conn.close()
++
++
++def _rango_semana_actual() -> tuple[str, str]:
++    """Lunes..sábado de la semana actual, formato dd-mm-aaaa (mismo criterio
++    que scraper_cuadroprogramacion.py __main__: TO no despacha domingo)."""
++    hoy = date.today()
++    lunes = hoy - timedelta(days=hoy.weekday())
++    sabado = lunes + timedelta(days=5)
++    return lunes.strftime("%d-%m-%Y"), sabado.strftime("%d-%m-%Y")
++
++
++async def _sync_universo(sucursal_id: int) -> dict:
++    t0 = time.monotonic()
++    try:
++        await asyncio.wait_for(
++            run_in_threadpool(_verificar_cubigest_vivo, sucursal_id),
++            timeout=TIMEOUT_UNIVERSO_S,
++        )
++        dur_ms = int((time.monotonic() - t0) * 1000)
++        _registrar_ok("universo", sucursal_id, dur_ms)
++        return {"fuente": "universo", "sucursal_id": sucursal_id, "ok": True, "duracion_ms": dur_ms}
++    except Exception as e:
++        dur_ms = int((time.monotonic() - t0) * 1000)
++        msg = str(e) if not isinstance(e, asyncio.TimeoutError) else f"timeout > {TIMEOUT_UNIVERSO_S}s"
++        logger.error(f"[sync] universo sucursal={sucursal_id}: {msg}")
++        _registrar_error("universo", sucursal_id, dur_ms, msg)
++        return {"fuente": "universo", "sucursal_id": sucursal_id, "ok": False, "duracion_ms": dur_ms, "error": msg}
++
++
++async def _sync_cuadro(sucursal_id: int) -> dict:
++    t0 = time.monotonic()
++    nombre_cuadro = SUCURSAL_A_CUADRO[sucursal_id]
++    desde, hasta = _rango_semana_actual()
++    try:
++        resultado = await asyncio.wait_for(
++            run_in_threadpool(scrape_cuadro_programacion, nombre_cuadro, desde, hasta),
++            timeout=TIMEOUT_CUADRO_S,
++        )
++        dur_ms = int((time.monotonic() - t0) * 1000)
++        _registrar_ok("cuadro", sucursal_id, dur_ms)
++        return {"fuente": "cuadro", "sucursal_id": sucursal_id, "ok": True, "duracion_ms": dur_ms,
++                "registros": resultado.get("registros")}
++    except Exception as e:
++        dur_ms = int((time.monotonic() - t0) * 1000)
++        msg = str(e) if not isinstance(e, asyncio.TimeoutError) else f"timeout > {TIMEOUT_CUADRO_S}s"
++        # scrape_cuadro_programacion garantiza (DELETE/INSERT tras el parseo
++        # completo) que si esto se dispara, el Cuadro previo NO se pisó.
++        logger.error(f"[sync] cuadro sucursal={sucursal_id} ({nombre_cuadro}): {msg}")
++        _registrar_error("cuadro", sucursal_id, dur_ms, msg)
++        return {"fuente": "cuadro", "sucursal_id": sucursal_id, "ok": False, "duracion_ms": dur_ms, "error": msg}
++
++
++async def ejecutar_sync(sucursales: list[int] | None = None) -> dict:
++    """
++    Orquesta universo (a) y Cuadro (b), en ese orden, por cada sucursal.
++    Nunca reporta éxito global si una fuente falló. Usado tanto por
++    POST /api/sync/ejecutar como por el job horario de main.py.
++    """
++    sucs = sucursales or SUCURSALES
++    for s in sucs:
++        if s not in SUCURSAL_NOMBRES:
++            raise ValueError(f"sucursal_id inválido: {s}")
++
++    if _sync_lock.locked():
++        raise RuntimeError("Ya hay una sincronización en curso")
++
++    async with _sync_lock:
++        resultados = []
++        for suc in sucs:
++            resultados.append(await _sync_universo(suc))
++            resultados.append(await _sync_cuadro(suc))
++
++    ok_global = all(r["ok"] for r in resultados)
++    return {
++        "ok": ok_global,
++        "ejecutado_en": datetime.now(timezone.utc).isoformat(),
++        "resultados": resultados,
++    }
++
++
++class SyncBody(BaseModel):
++    sucursal_id: int | None = None
++
++
++@router.post("/ejecutar")
++async def sync_ejecutar(body: SyncBody | None = None):
++    sucursales = [body.sucursal_id] if (body and body.sucursal_id) else None
++    try:
++        return await ejecutar_sync(sucursales)
++    except ValueError as e:
++        raise HTTPException(status_code=400, detail=str(e))
++    except RuntimeError as e:
++        raise HTTPException(status_code=409, detail=str(e))
++
++
++@router.get("/estado")
++async def sync_estado():
++    _init_tabla()
++    with sqlite3.connect(DB_PATH) as conn:
++        conn.row_factory = sqlite3.Row
++        rows = {
++            (r["fuente"], r["sucursal_id"]): r
++            for r in conn.execute("SELECT * FROM sync_estado").fetchall()
++        }
++
++    ahora = datetime.now(timezone.utc)
++    fuentes_out = []
++    for fuente in FUENTES:
++        for suc in SUCURSALES:
++            row = rows.get((fuente, suc))
++            ultimo_ok_ts = row["ultimo_ok_ts"] if row else None
++            minutos_desde_ok = None
++            if ultimo_ok_ts:
++                try:
++                    ts = datetime.fromisoformat(ultimo_ok_ts).replace(tzinfo=timezone.utc)
++                    minutos_desde_ok = round((ahora - ts).total_seconds() / 60, 1)
++                except Exception:
++                    minutos_desde_ok = None
++            desactualizado = minutos_desde_ok is None or minutos_desde_ok > UMBRAL_DESACTUALIZADO_MIN
++            fuentes_out.append({
++                "fuente": fuente,
++                "sucursal_id": suc,
++                "sucursal": SUCURSAL_NOMBRES[suc],
++                "ultimo_ok_ts": ultimo_ok_ts,
++                "ultimo_error_ts": row["ultimo_error_ts"] if row else None,
++                "ultimo_error_msg": row["ultimo_error_msg"] if row else None,
++                "duracion_ms": row["duracion_ms"] if row else None,
++                "minutos_desde_ok": minutos_desde_ok,
++                "desactualizado": desactualizado,
++            })
++
++    return {
++        "umbral_desactualizado_min": UMBRAL_DESACTUALIZADO_MIN,
++        "sincronizando": _sync_lock.locked(),
++        "fuentes": fuentes_out,
++    }
+diff --git a/backend/test_sync_unificado.py b/backend/test_sync_unificado.py
+new file mode 100644
+index 0000000..4c9734c
+--- /dev/null
++++ b/backend/test_sync_unificado.py
+@@ -0,0 +1,170 @@
++"""
++CCa-17 — Sincronización unificada (universo + Cuadro OptiSteel). Pruebas con
++mocks de Cubigest y del scraper del Cuadro (sin tocar producción/ERP).
++
++Ejecutar: python -m unittest test_sync_unificado -v
++"""
++import asyncio
++import os
++import sqlite3
++import tempfile
++import unittest
++from unittest.mock import patch, MagicMock
++
++os.environ.setdefault("DB_PATH", os.path.join(tempfile.gettempdir(), "test_sync_unificado.db"))
++
++import routers.sync as sync_mod
++
++
++class TestSyncUnificado(unittest.TestCase):
++
++    def setUp(self):
++        self.db_path = tempfile.mktemp(suffix=".db")
++        sync_mod.DB_PATH = self.db_path
++        sync_mod._sync_lock = asyncio.Lock()
++
++    def tearDown(self):
++        if os.path.exists(self.db_path):
++            os.remove(self.db_path)
++
++    def _run(self, coro):
++        return asyncio.run(coro)
++
++    def _estado_rows(self):
++        with sqlite3.connect(self.db_path) as conn:
++            conn.row_factory = sqlite3.Row
++            return {(r["fuente"], r["sucursal_id"]): r for r in conn.execute("SELECT * FROM sync_estado")}
++
++    @patch("routers.sync.scrape_cuadro_programacion")
++    @patch("routers.sync._verificar_cubigest_vivo")
++    def test_exito_total_registra_ok_en_ambas_fuentes_y_3_sucursales(self, mock_verif, mock_scrape):
++        mock_verif.return_value = None
++        mock_scrape.return_value = {"ok": True, "registros": 10}
++
++        resultado = self._run(sync_mod.ejecutar_sync())
++
++        self.assertTrue(resultado["ok"])
++        self.assertEqual(len(resultado["resultados"]), 6)  # 3 sucursales x 2 fuentes
++        self.assertTrue(all(r["ok"] for r in resultado["resultados"]))
++        rows = self._estado_rows()
++        for suc in (1, 10, 14):
++            self.assertIsNotNone(rows[("universo", suc)]["ultimo_ok_ts"])
++            self.assertIsNotNone(rows[("cuadro", suc)]["ultimo_ok_ts"])
++        self.assertEqual(mock_scrape.call_count, 3)
++
++    @patch("routers.sync.scrape_cuadro_programacion")
++    @patch("routers.sync._verificar_cubigest_vivo")
++    def test_fallo_cuadro_conserva_datos_previos_y_marca_error_sin_tumbar_universo(self, mock_verif, mock_scrape):
++        mock_verif.return_value = None
++        # 1er sync: todo ok (deja un ultimo_ok_ts previo para "cuadro").
++        mock_scrape.return_value = {"ok": True, "registros": 5}
++        self._run(sync_mod.ejecutar_sync(sucursales=[1]))
++        rows_antes = self._estado_rows()
++        ok_previo_cuadro = rows_antes[("cuadro", 1)]["ultimo_ok_ts"]
++        self.assertIsNotNone(ok_previo_cuadro)
++
++        # 2do sync: el scraper del Cuadro falla (ej. 500 de Cubigest/SANTIAGO).
++        mock_scrape.side_effect = RuntimeError("Tabla Dtg_Lun no encontrada. HTTP 500.")
++        resultado = self._run(sync_mod.ejecutar_sync(sucursales=[1]))
++
++        self.assertFalse(resultado["ok"])
++        universo_r = next(r for r in resultado["resultados"] if r["fuente"] == "universo")
++        cuadro_r = next(r for r in resultado["resultados"] if r["fuente"] == "cuadro")
++        self.assertTrue(universo_r["ok"])   # el universo no se ve afectado por el fallo del Cuadro
++        self.assertFalse(cuadro_r["ok"])
++
++        rows_despues = self._estado_rows()
++        # ultimo_ok_ts del Cuadro NO se pisa con el fallo (queda el de la corrida anterior)
++        self.assertEqual(rows_despues[("cuadro", 1)]["ultimo_ok_ts"], ok_previo_cuadro)
++        self.assertIn("500", rows_despues[("cuadro", 1)]["ultimo_error_msg"])
++        self.assertIsNotNone(rows_despues[("cuadro", 1)]["ultimo_error_ts"])
++
++    @patch("routers.sync.scrape_cuadro_programacion")
++    @patch("routers.sync._verificar_cubigest_vivo")
++    def test_fallo_universo_cubigest_caido_no_bloquea_cuadro_y_registra_error(self, mock_verif, mock_scrape):
++        mock_verif.side_effect = RuntimeError("Cubigest no disponible (connect() devolvió None)")
++        mock_scrape.return_value = {"ok": True, "registros": 3}
++
++        resultado = self._run(sync_mod.ejecutar_sync(sucursales=[10]))
++
++        self.assertFalse(resultado["ok"])
++        universo_r = next(r for r in resultado["resultados"] if r["fuente"] == "universo")
++        cuadro_r = next(r for r in resultado["resultados"] if r["fuente"] == "cuadro")
++        self.assertFalse(universo_r["ok"])
++        self.assertTrue(cuadro_r["ok"])  # el Cuadro se sigue intentando aunque el universo falle
++        rows = self._estado_rows()
++        self.assertIsNone(rows[("universo", 10)]["ultimo_ok_ts"])
++        self.assertIsNotNone(rows[("universo", 10)]["ultimo_error_msg"])
++
++    @patch("routers.sync.scrape_cuadro_programacion")
++    @patch("routers.sync._verificar_cubigest_vivo")
++    def test_lock_concurrente_rechaza_segunda_ejecucion(self, mock_verif, mock_scrape):
++        mock_verif.return_value = None
++        mock_scrape.return_value = {"ok": True, "registros": 1}
++
++        async def _dos_en_paralelo():
++            return await asyncio.gather(
++                sync_mod.ejecutar_sync(sucursales=[1]),
++                sync_mod.ejecutar_sync(sucursales=[1]),
++                return_exceptions=True,
++            )
++
++        r1, r2 = self._run(_dos_en_paralelo())
++        resultados = [r1, r2]
++        errores_lock = [r for r in resultados if isinstance(r, RuntimeError)]
++        oks = [r for r in resultados if not isinstance(r, Exception)]
++        # Como ambas corren en el mismo loop sin await intermedio antes del
++        # chequeo de lock, una debe ganar el lock y la otra debe rechazarse.
++        self.assertEqual(len(errores_lock) + len(oks), 2)
++        self.assertGreaterEqual(len(errores_lock), 1)
++
++    @patch("routers.sync.scrape_cuadro_programacion")
++    @patch("routers.sync._verificar_cubigest_vivo")
++    def test_desactualizado_por_umbral(self, mock_verif, mock_scrape):
++        mock_verif.return_value = None
++        mock_scrape.return_value = {"ok": True, "registros": 1}
++        sync_mod.UMBRAL_DESACTUALIZADO_MIN = 90
++
++        # Sin ninguna corrida todavía: desactualizado=True (nunca hubo ok).
++        estado = self._run(sync_mod.sync_estado())
++        universo_calama = next(f for f in estado["fuentes"] if f["fuente"] == "universo" and f["sucursal_id"] == 1)
++        self.assertTrue(universo_calama["desactualizado"])
++        self.assertIsNone(universo_calama["minutos_desde_ok"])
++
++        # Forzar un ultimo_ok_ts viejo (hace 200 minutos) directo en la tabla.
++        sync_mod._init_tabla()
++        with sqlite3.connect(self.db_path) as conn:
++            conn.execute(
++                "INSERT INTO sync_estado (fuente, sucursal_id, ultimo_ok_ts) VALUES ('universo', 1, datetime('now', '-200 minutes'))"
++            )
++            conn.commit()
++        estado = self._run(sync_mod.sync_estado())
++        universo_calama = next(f for f in estado["fuentes"] if f["fuente"] == "universo" and f["sucursal_id"] == 1)
++        self.assertTrue(universo_calama["desactualizado"])
++        self.assertGreater(universo_calama["minutos_desde_ok"], 90)
++
++        # ultimo_ok_ts reciente -> no desactualizado.
++        with sqlite3.connect(self.db_path) as conn:
++            conn.execute(
++                "UPDATE sync_estado SET ultimo_ok_ts = datetime('now', '-5 minutes') WHERE fuente='universo' AND sucursal_id=1"
++            )
++            conn.commit()
++        estado = self._run(sync_mod.sync_estado())
++        universo_calama = next(f for f in estado["fuentes"] if f["fuente"] == "universo" and f["sucursal_id"] == 1)
++        self.assertFalse(universo_calama["desactualizado"])
++
++    def test_job_horario_apagado_no_registra_job(self):
++        """SYNC_HORARIO_ACTIVO=0 (default): el job no debe registrarse. Se
++        verifica la variable de entorno tal como la lee main.py, sin levantar
++        el lifespan completo (requiere Cubigest/SQLite reales)."""
++        with patch.dict(os.environ, {}, clear=False):
++            os.environ.pop("SYNC_HORARIO_ACTIVO", None)
++            self.assertEqual(os.getenv("SYNC_HORARIO_ACTIVO", "0"), "0")
++
++    def test_sucursal_id_invalido_lanza_value_error(self):
++        with self.assertRaises(ValueError):
++            self._run(sync_mod.ejecutar_sync(sucursales=[999]))
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/frontend/src/components/domain/SyncEstado.tsx b/frontend/src/components/domain/SyncEstado.tsx
+new file mode 100644
+index 0000000..73bfee7
+--- /dev/null
++++ b/frontend/src/components/domain/SyncEstado.tsx
+@@ -0,0 +1,105 @@
++import { useState, useEffect, useCallback } from 'react';
++import { RefreshCw, CheckCircle2, AlertTriangle } from 'lucide-react';
++
++interface FuenteEstado {
++    fuente: 'universo' | 'cuadro';
++    sucursal_id: number;
++    minutos_desde_ok: number | null;
++    desactualizado: boolean;
++    ultimo_error_msg: string | null;
++}
++
++interface SyncEstadoResponse {
++    sincronizando: boolean;
++    fuentes: FuenteEstado[];
++}
++
++const NOMBRE_FUENTE: Record<string, string> = { universo: 'Universo', cuadro: 'Cuadro' };
++
++function formatearAntiguedad(minutos: number | null): string {
++    if (minutos === null) return 'sin datos';
++    if (minutos < 60) return `hace ${Math.round(minutos)} min`;
++    return `hace ${Math.round(minutos / 60)} h`;
++}
++
++/**
++ * Botón "Sincronizar" unificado (universo + Cuadro OptiSteel) con badge de
++ * estado por fuente. Integración pendiente en GestorProgramacion.tsx (ver
++ * informe CCa17): reemplaza el botón "Sincronizar" actual, que hoy solo
++ * hace fetchData() sin refrescar ninguna fuente de datos real.
++ */
++export default function SyncEstado({ sucursal, onSynced }: { sucursal: number | string; onSynced?: () => void }) {
++    const [estado, setEstado] = useState<SyncEstadoResponse | null>(null);
++    const [sincronizando, setSincronizando] = useState(false);
++    const [error, setError] = useState<string | null>(null);
++
++    const cargarEstado = useCallback(() => {
++        fetch('/api/sync/estado')
++            .then(r => r.json())
++            .then((data: SyncEstadoResponse) => setEstado(data))
++            .catch(() => {});
++    }, []);
++
++    useEffect(() => {
++        cargarEstado();
++        const interval = setInterval(cargarEstado, 60000);
++        return () => clearInterval(interval);
++    }, [cargarEstado]);
++
++    const handleSincronizar = async () => {
++        setSincronizando(true);
++        setError(null);
++        try {
++            const resp = await fetch('/api/sync/ejecutar', {
++                method: 'POST',
++                headers: { 'Content-Type': 'application/json' },
++                body: JSON.stringify({ sucursal_id: Number(sucursal) }),
++            });
++            const data = await resp.json();
++            if (!resp.ok) {
++                setError(data.detail || 'Error al sincronizar');
++            } else if (!data.ok) {
++                const fallidas = (data.resultados || []).filter((r: { ok: boolean }) => !r.ok);
++                setError(fallidas.length ? `Falló: ${fallidas.map((f: { fuente: string }) => NOMBRE_FUENTE[f.fuente] || f.fuente).join(', ')}` : 'Sincronización incompleta');
++            }
++            onSynced?.();
++        } catch (e) {
++            setError('No se pudo conectar con el servidor');
++        } finally {
++            setSincronizando(false);
++            cargarEstado();
++        }
++    };
++
++    const fuentesSucursal = (estado?.fuentes || []).filter(f => f.sucursal_id === Number(sucursal));
++
++    return (
++        <div className="flex items-center gap-2">
++            <button
++                onClick={handleSincronizar}
++                disabled={sincronizando || estado?.sincronizando}
++                title={error || undefined}
++                className="btn-secondary text-sm"
++            >
++                <RefreshCw className={`w-4 h-4 ${sincronizando || estado?.sincronizando ? 'animate-spin' : ''}`} /> Sincronizar
++            </button>
++            <div className="flex items-center gap-1">
++                {fuentesSucursal.map(f => (
++                    <span
++                        key={f.fuente}
++                        title={f.ultimo_error_msg || undefined}
++                        className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
++                            f.desactualizado
++                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
++                                : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
++                        }`}
++                    >
++                        {f.desactualizado ? <AlertTriangle className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
++                        {NOMBRE_FUENTE[f.fuente] || f.fuente} {formatearAntiguedad(f.minutos_desde_ok)}
++                    </span>
++                ))}
++            </div>
++            {error && <span className="text-[11px] text-red-600 dark:text-red-400">{error}</span>}
++        </div>
++    );
++}

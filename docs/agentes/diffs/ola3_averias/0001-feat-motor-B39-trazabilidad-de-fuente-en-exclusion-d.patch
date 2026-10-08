@@ -1,0 +1,106 @@
+From 4e7011b34e73b2f0c4ae691c9796659f04efd1f9 Mon Sep 17 00:00:00 2001
+From: Rodrigo Montuschi <rodrigo@montuschi.cl>
+Date: Wed, 23 Sep 2026 22:55:14 -0300
+Subject: [PATCH] feat(motor): B39 trazabilidad de fuente en exclusion de
+ maquinas (SQLite/Cubigest)
+
+La logica de fusion SQLite-primario + Cubigest MAQ_ACTIVA (siempre) +
+Cubigest NotificacionAveria (fallback si SQLite cae) ya existia y es la
+correcta: para Coronel (suc 14) y Cerrillos (suc 4 en Cubigest) la tabla
+NotificacionAveria no tiene ninguna averia real registrada nunca (Coronel)
+o dejo de alimentarse el 2026-08-24 (Cerrillos, solo la maquina de pruebas
+'PRUEBAS DE TI' con estado DET abierto sin resolver hace un mes). Fusionar
+"cualquiera de las fuentes" excluiria maquinas sanas por notificaciones
+viejas nunca cerradas. No se cambia la regla de fusion.
+
+Se agrega solo trazabilidad: dict maquinas_fuente_exclusion
+(sqlite_gestor_manual / cubigest_maq_inactiva / cubigest_notificacion_fallback),
+log INFO con la fuente por maquina excluida, y metadata.maquinas_excluidas_fuente
+en la respuesta del Motor. No cambia ninguna decision de asignacion (verificado:
+sets maquinas_detenidas/no_liberadas identicos antes/despues en Calama,
+Cerrillos y Coronel).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+---
+ backend/motor_v2.py | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/backend/motor_v2.py b/backend/motor_v2.py
+index c1687a0..bd516e9 100644
+--- a/backend/motor_v2.py
++++ b/backend/motor_v2.py
+@@ -846,6 +846,8 @@ def programar_turno(
+     maquinas_ingresadas:   set[str] = set()   # ING → subcategoría (sin clasificar)
+     maquinas_semi:         set[str] = set()   # SEMI → incluir con advertencia
+     maquinas_no_liberadas: set[str] = set()   # NO LIBERADA → excluir del turno (FIX-G06)
++    # B39: fuente que excluyo cada maquina, para trazabilidad en log/metadata.
++    maquinas_fuente_exclusion: dict[str, str] = {}
+     _sqlite_ok = False
+     try:
+         import sqlite3 as _sqlite3
+@@ -864,10 +866,12 @@ def programar_turno(
+                 continue
+             if _est == 'detenida':
+                 maquinas_detenidas.add(_nombre)
++                maquinas_fuente_exclusion[_nombre] = 'sqlite_gestor_manual'
+             elif _est in ('semioperativa', 'semi-operativa'):
+                 maquinas_semi.add(_nombre)
+             elif _est in ('no-liberada', 'operativa-no-liberada'):
+                 maquinas_no_liberadas.add(_nombre)
++                maquinas_fuente_exclusion[_nombre] = 'sqlite_gestor_manual'
+         _conn.close()
+         _sqlite_ok = True
+     except Exception:
+@@ -877,6 +881,7 @@ def programar_turno(
+     try:
+         for _maq_inactiva in _maquinas_inactivas_cubigest(sucursal_id):
+             maquinas_detenidas.add(_maq_inactiva)
++            maquinas_fuente_exclusion.setdefault(_maq_inactiva, 'cubigest_maq_inactiva')
+     except Exception:
+         pass
+ 
+@@ -888,22 +893,30 @@ def programar_turno(
+                 _est = _info["estado"]
+                 if _est == "detenida":
+                     maquinas_detenidas.add(_nombre)
++                    maquinas_fuente_exclusion.setdefault(_nombre, 'cubigest_notificacion_fallback')
+                 elif _est == "ingresada":
+                     maquinas_detenidas.add(_nombre)
+                     maquinas_ingresadas.add(_nombre)
++                    maquinas_fuente_exclusion.setdefault(_nombre, 'cubigest_notificacion_fallback')
+                 elif _est == "semi-operativa":
+                     maquinas_semi.add(_nombre)
+                 elif _est == "operativa-no-liberada":
+                     maquinas_no_liberadas.add(_nombre)
++                    maquinas_fuente_exclusion.setdefault(_nombre, 'cubigest_notificacion_fallback')
+         except Exception:
+             pass
+ 
+-    # Log de máquinas (FIX-G06)
++    # Log de máquinas (FIX-G06 + B39: fuente de exclusión)
+     _m_activas = MAQUINAS_ACTIVAS.get(sucursal_nombre, set())
+     _m_excluidas = (maquinas_detenidas | maquinas_no_liberadas) & _m_activas
+     _m_incluidas = _m_activas - _m_excluidas
+     logger.info(f"MOTOR {sucursal_nombre}: Máquinas INCLUIDAS: {sorted(_m_incluidas)}")
+     logger.info(f"MOTOR {sucursal_nombre}: Máquinas EXCLUIDAS (detenidas/no-liberadas): {sorted(_m_excluidas)}")
++    logger.info(
++        "MOTOR %s: Fuente de exclusión: %s",
++        sucursal_nombre,
++        ", ".join(f"{_m}={maquinas_fuente_exclusion.get(_m, 'desconocida')}" for _m in sorted(_m_excluidas)) or "(ninguna)",
++    )
+ 
+     # ── Operadores habituales por turno (todas las sucursales) ──
+     habituales_turno: dict[str, str] = {}  # {nombre_maquina: username_habitual}
+@@ -1692,6 +1705,9 @@ def programar_turno(
+             "maquinas_ingresadas":   sorted(maquinas_ingresadas),
+             "maquinas_semi":         sorted(maquinas_semi),
+             "maquinas_no_liberadas": sorted(maquinas_no_liberadas),
++            "maquinas_excluidas_fuente": {
++                _m: maquinas_fuente_exclusion.get(_m, "desconocida") for _m in sorted(_m_excluidas)
++            },
+             "capacidad":         capacidad_b16,
+         },
+         "tareas":             tareas,
+-- 
+2.54.0.windows.1
+

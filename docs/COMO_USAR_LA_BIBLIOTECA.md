@@ -35,19 +35,27 @@ Esta separación es la decisión de diseño más importante del sistema, y nunca
 ## 4. Cómo consultar (lectura — el 95% del uso normal)
 
 - **`buscar_tema(query)`** — búsqueda de texto completo (FTS5) sobre archivo, sección, resumen y tags. Uso principal para "¿qué sabemos sobre X?".
-  - *Cuidado de sintaxis:* FTS5 interpreta el guion como operador NOT. Buscar `biblioteca-mcp` sin comillas falla; usar `"biblioteca-mcp"` entre comillas.
+  - *Actualizacion 2026-08-29:* ya no hace falta cuidar la sintaxis a mano. `buscar_tema` sanitiza el query automaticamente (extrae solo palabras, descarta guiones/parentesis/puntuacion) antes de pasarlo a FTS5 — texto natural, con o sin fechas o guiones, funciona directo.
 - **`obtener_ultima_version(archivo, seccion)`** — devuelve la fecha de actualización y el resumen de un documento/sección puntual.
 - **`buscar_credencial(query)`** — devuelve **solo metadata** (servicio, variable, archivo `.env`, fecha de rotación). Nunca el valor real de una credencial.
 
 Estas se consultan vía el servidor `biblioteca-mcp` (puerto 8813) cuando hay acceso MCP disponible, o importando `mcp_tools` directo en Python cuando se opera por SSH/Bash.
 
-## 5. Cómo archivar información nueva (escritura — solo vía Aurora)
+## 5. Cómo archivar información nueva (escritura)
 
-1. Se le entrega el contenido a Aurora (la bibliotecaria).
-2. Aurora clasifica: decide archivo y sección destino en `docs/` (la fuente de verdad — ver sección 7).
-3. Para generar el resumen y tags, se usa **`clasificar_directo.py`**, nunca el bucle agéntico completo de Claude Code apuntando a Ollama (ver advertencia crítica abajo).
-4. Aurora (o el orquestador que la representa) llama a `registrar_cambio(archivo, seccion, resumen, tags, tipo)` para sincronizar el catálogo.
-5. Se verifica con `buscar_tema` que la entrada quedó encontrable.
+**Actualización 2026-08-25:** Aurora (el agente bibliotecario) fue descontinuada
+— quedaba colgada sin salida en invocaciones reales. Solo existe una versión
+nueva como agente dentro de LibreChat, que únicamente Montu puede lanzar — no
+es parte del flujo automatizado de agentes (Miaude/CCa). Desde esa fecha el
+escritor normal del catálogo es **Miaude**, y **CCa también está autorizado
+de forma general** (confirmado por Montu, 14-09-2026) — ya no requiere
+autorización caso por caso. El flujo de clasificación descrito abajo sigue
+vigente — solo cambió quién lo ejecuta.
+
+1. Se clasifica el contenido nuevo: se decide archivo y sección destino en `docs/` (la fuente de verdad — ver sección 7).
+2. Para generar el resumen y tags cuando se procesa en volumen, se usa **`clasificar_directo.py`**, nunca el bucle agéntico completo de Claude Code apuntando a Ollama (ver advertencia crítica abajo). Para archivado puntual con contexto ya en mano, quien esté autorizado a escribir sintetiza el resumen directamente.
+3. Quien esté autorizado (Miaude, u otro agente con autorización explícita de Montu para esa integración puntual — ver ejemplo del skill `biblioteca` de LibreChat, sesión 2026-08-28/29) llama a `registrar_cambio(archivo, seccion, resumen, tags, tipo)` para sincronizar el catálogo.
+4. Se verifica con `buscar_tema` que la entrada quedó encontrable.
 
 ### Criterio de granularidad (obligatorio)
 

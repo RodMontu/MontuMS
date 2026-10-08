@@ -74,6 +74,65 @@ error (nunca se había notado), se eliminó el provider `candidatos_conversacion
 primera vez un provider dedicado para Pro en Jan (no existía). Es una convención de
 nombres a modo de prueba, no necesariamente definitiva.
 
+## Confiabilidad de tool-calling contra google-workspace-mcp (2026-08-27)
+
+**Contexto:** tres pruebas reales end-to-end en Jan.app, con la tarea "redactar +
+enviar email a Francisco Ramos y crear evento en Calendar con Meet link", para
+evaluar si algún modelo local es confiable para ejecutar tareas de Google
+Workspace sin intervención de un modelo cloud.
+
+**Prueba 1 — Lite (gpt-oss-20b), tarea compuesta en un turno, temp default.**
+Falló tanto en `send_gmail_message` como en `manage_event`. El modelo razonaba
+correctamente en su "thinking" sobre qué campos incluir, pero el tool call real
+nunca llegaba completo. Causa identificada (no achacable a este MCP ni a Jan):
+problema documentado ampliamente en la comunidad (issues de llama.cpp, LM Studio,
+HuggingFace) con el formato "Harmony" que usa gpt-oss para tool-calling — el
+parser de llama.cpp es frágil con JSON de varios campos, más aún cuanto más
+elaborado el payload. Coincide con el patrón: la primera llamada simple funciona,
+las más complejas fallan.
+
+**Prueba 2 — Flash (qwen3:30b-a3b), tarea compuesta en un turno, temp 0.7/top_p
+0.8/top_k 20/repeat_penalty 1.12 (default, recomendado por Qwen para chat, no
+para tool-calling).**
+`draft_gmail_message` no se probó aislado en esta prueba (tarea encadenada).
+`manage_event` mandó `{"action":"create","calendar_id":"primary"}` — sin ningún
+otro campo, pese a tener toda la información (fecha, hora, invitado, link) desde
+el primer mensaje. Ante el error del servidor (`summary, start_time, and end_time
+are required`), reintentó el mismo payload **~70 veces en 3.5 minutos**, cadencia
+de ~3s, sin ninguna variación — requirió detención manual, no se resuelve solo.
+
+**Prueba 3 — Flash, tareas atomizadas (un mensaje = una acción), temperature
+bajada a valores deterministas antes de correr.**
+`draft_gmail_message` y `send_gmail_message`, cada uno en su propio turno:
+**perfectos, payload completo y correcto ambas veces.** `manage_event`, en un
+mensaje aparte con fecha/hora/timezone explícitos en texto plano (sin depender
+de turnos anteriores): volvió a fallar, esta vez con más campos poblados
+(`action`, `summary`, `timezone`, `transparency`, `visibility`) pero **otra vez
+sin `start_time` ni `end_time`** — mismo síntoma exacto que la prueba 2, esta vez
+con variables de sampling controladas y datos explícitos en el mismo mensaje, lo
+que descarta tanto aleatoriedad de sampling como pérdida de contexto entre turnos
+como causa. Reintentó el mismo payload fallido ~30 veces, payload byte-idéntico
+en cada intento — la cadencia e identidad exacta del payload en cada reintento
+sugiere que no es el modelo generando de nuevo cada vez, sino algo en el loop de
+manejo de errores de Jan reintentando sin corregir ni detenerse.
+
+**Conclusión (a la fecha):**
+- **Gmail** (`draft_gmail_message`/`send_gmail_message`) es confiable con Flash,
+  siempre que la tarea esté atomizada (un turno = una acción, sin encadenar con
+  otras herramientas en el mismo mensaje).
+- **Calendar** (`manage_event`) no es confiable con ningún modelo local probado
+  hasta ahora — falla consistentemente en incluir `start_time`/`end_time`,
+  independiente de temperatura, atomización, o explicitud de los datos en el
+  prompt. Es el tool con más parámetros de todo el MCP (~30), lo que podría
+  explicar por qué es el punto de falla recurrente.
+- El loop de reintento sin autocorrección ante errores de validación es un
+  problema aparte, más serio: no hay límite ni backoff visible, requiere
+  intervención manual cada vez. Pendiente de investigar si es un comportamiento
+  de Jan o algo específico de esta combinación modelo+MCP.
+- **Recomendación práctica:** para creación de eventos de Calendar, usar un
+  modelo cloud (vía CCa) hasta resolver esto. Gmail vía Flash atomizado es
+  utilizable hoy.
+
 ## Pendiente
 
 - Jan.app: agregado el provider `llama_server_gptoss` en `settings.json`, pero

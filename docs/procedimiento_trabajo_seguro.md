@@ -1,7 +1,7 @@
 # Procedimiento de Trabajo Seguro
 
-**Versión:** 1.0
-**Fecha:** 2026-08-26
+**Versión:** 1.1
+**Fecha:** 2026-08-26 (última adición: 2026-09-03)
 **Autores:** Rodrigo Montuschi + Miaude (Claude)
 **Alcance:** Todo trabajo de Montuschi Consultores SpA que involucre infraestructura o datos de un cliente. Primera aplicación: Torres Ocaranza / OptiFierro.
 **Origen:** Incidentes de disponibilidad y exposición de seguridad en Torres Ocaranza, agosto 2026 (ver `incidente_seguridad.md`) + reflexión estructurada de Rodrigo Montuschi, registrada y consolidada en esta conversación.
@@ -62,6 +62,15 @@ Cada sesión que toque el servidor o la base de datos de un cliente genera una e
 
 **Mecanismo de escritura:** CCa y el agente local escriben su sesión completa a un archivo en el momento de ejecutar (ej. redirección de la sesión de terminal a un archivo), no por copiar y pegar después. Miaude redacta su propia entrada estructurada al cerrar cada tarea. La bitácora completa vive en La Biblioteca, como cualquier otro documento técnico.
 
+**Convención de archivos (v1.1):** La bitácora de este archivo es el resumen ejecutivo por sesión. El detalle crudo (transcript completo de terminal) vive en **un archivo `.md` por intervención**, nunca en un archivo único creciente — evita contención de escritura concurrente entre agentes y da al indexador de La Biblioteca una unidad de catálogo limpia por sesión:
+
+```
+docs/logs_carlitos/sesion_YYYYMMDD_HHMMSS_descripcion.md
+docs/logs_cca/sesion_YYYYMMDD_HHMMSS_descripcion.md
+```
+
+Cada archivo: título con agente/fecha, una línea de tarea, transcript completo en bloque de código, cierre de resultado. Toda entrada de bitácora que involucre CCa o el agente local debe referenciar el archivo de sesión correspondiente en su campo "Resultado o referencia".
+
 ## 7. Qué es interno y qué se comparte con el cliente
 
 - **Bitácora interna (completa):** incluye el *cómo* — comandos, prompts, metodología, decisiones técnicas. Es propiedad intelectual del trabajo. Se mantiene interna.
@@ -97,6 +106,7 @@ Esta es la versión **1.0**: entra en vigencia de inmediato como procedimiento v
 | Versión | Fecha | Cambio |
 |---|---|---|
 | 1.0 | 2026-08-26 | Primera versión. Generada a partir de la reflexión conjunta post-incidente Torres Ocaranza (ver `incidente_seguridad.md`) y consolidada en conversación dedicada. |
+| 1.1 | 2026-09-03 | Sección 6: convención de archivo `.md` por intervención para el detalle crudo (`logs_carlitos/`, `logs_cca/`), en vez de un archivo único creciente. Decidido junto a Montu a raíz del incidente Formula 12 / Cerrillos. |
 
 ## 13. Fuentes
 

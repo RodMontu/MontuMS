@@ -139,6 +139,7 @@
 5. **D2 (Evaluator) nunca es el mismo agente que D1 (Generator).**
 6. **Correos siempre como borrador. Nunca envío directo desde agentes.**
 7. **Clawdio solo vive en serveri3. Jamás levantar en serverX.**
+8. **Antes de tocar código de OptiFierro o de cualquier repo relacionado con TO, y después de cualquier modificación real, se debe consultar/regenerar el grafo de dependencias (Graphify) — ver sección 11.**
 
 ---
 
@@ -154,3 +155,134 @@
 ---
 
 **Actualización:** 2026-05-29 — Migración de v1.0 a v2.0 (MS v3.0 Harness Engineering)
+
+
+---
+
+## 10. Protocolo de eficiencia en orquestación por lotes (agregado 2026-09-06, a pedido de Montu)
+
+**Contexto:** con la cadena Miaude → CCa (supervisor) → Carlitos (ejecutor) ya
+operativa, Montu identificó un problema de eficiencia: si Miaude lanza una tarea
+y luego chequea cada pocos minutos si terminó, se pierde tiempo de ambos lados
+sin necesidad.
+
+**Regla:** cuando una tarea se pueda descomponer en varios pasos secuenciales para
+CCa/Carlitos, Miaude debe:
+
+1. Encargar **todos los pasos de una vez**, en un solo prompt/lote, de forma que
+   al completar un paso el agente avance automáticamente al siguiente — no
+   encargar de a un paso por vez esperando confirmación intermedia.
+2. Lanzar la tarea, verificar que arrancó bien (no que terminó), y **detenerse**.
+3. Al detenerse, decirle a Montu una **estimación de tiempo** razonable antes de
+   que valga la pena volver a preguntar/chequear el estado — no dejar que Montu
+   tenga que adivinar cuándo volver a consultar, y no generar polling innecesario
+   de Miaude hacia CCa/Carlitos tampoco.
+
+**Relación con la jerarquía de supervisión:** Miaude supervisa a CCa, que
+supervisa a Carlitos. Por transitividad, Miaude también supervisa a Carlitos,
+pero no debería hacerlo de forma directa y continua si CCa ya está en el rol de
+supervisor para esa tarea — el chequeo de Miaude es sobre el resultado
+consolidado que CCa entrega, no sobre cada paso individual de Carlitos.
+
+Esto no reemplaza la verificación cruzada obligatoria (nunca confiar en el
+autoreporte) — solo cambia la *cadencia* de cuándo se verifica, de "cada pocos
+minutos" a "cuando la estimación de tiempo indica que ya debería estar listo".
+
+
+---
+
+## 11. Grafo de dependencias de código (Graphify) — obligatorio antes/después
+    de tocar código OF/TO (agregado 2026-09-09, a pedido de Montu)
+
+**Contexto:** la noche del 08-09-2026 se construyó un mapa completo de
+dependencias del código de OptiFierro (backend+frontend) y scrap-geovictoria
+usando Graphify (tree-sitter, 100% local, sin LLM externo — ninguna línea de
+código salió de la máquina). Resultado: 890 nodos combinados, 99% de las
+conexiones extraídas de forma determinista (no adivinadas), construido sobre
+el commit 7581b9a de optifierro (confirmado como HEAD real de TO al momento
+de construirlo). Artefactos en
+~/graphify-workspace/{optifierro,scrap-geovictoria}/graphify-out/ y
+~/graphify-workspace/merged/ en el Mac Studio. Documentado en La Biblioteca
+vía Aurora.
+
+**Regla (obligatoria, no una recomendación):**
+
+1. **Antes** de proponer o ejecutar cualquier cambio de código en OptiFierro
+   o en cualquier repositorio relacionado con TO, Miaude y CCa DEBEN
+   consultar el grafo vigente para identificar qué otras partes del sistema
+   se ven afectadas por el cambio propuesto.
+2. **Después** de aplicar cualquier modificación real al código de OF/TO, es
+   obligatorio regenerar el grafo antes de cerrar la tarea.
+3. El grafo solo se considera vigente si corresponde al commit actual del
+   repo. Si el commit cambió desde la última regeneración, tratarlo como
+   potencialmente desactualizado hasta confirmarlo (comparar el HEAD real
+   contra el commit registrado en la sección "Graph Freshness" de
+   GRAPH_REPORT.md).
+4. Esta regla se SUMA a la verificación cruzada obligatoria de todo
+   autoreporte de agentes — no la reemplaza. Generador≠Evaluador sigue
+   aplicando igual al resultado de regenerar el grafo.
+
+**Mecanismo de aplicación (triple capa, redundante a propósito — un solo
+lugar se puede olvidar):**
+- Project instructions de "Mi TI" en claude.ai (regla #5 de "TUS REGLAS DE
+  ORO").
+- Este documento (regla #8 de REGLAS CARDINALES INAMOVIBLES, arriba).
+- CLAUDE.md del repo optifierro en TO — para que CCa la reciba
+  automáticamente al iniciar sesión ahí, sin depender de que el prompt de
+  turno la repita.
+
+
+---
+
+## 12. Territorio de archivos entre ventanas paralelas (agregado 2026-09-14,
+    corrige la regla original del 07-09)
+
+**Regla original (07-09-2026):** `backend/routers/programacion.py`,
+`backend/routers/tiempos_maquina.py`, `backend/motor_v2.py` y algunos otros
+archivos quedaron declarados como territorio exclusivo de la ventana Motor
+de Tiempos, para evitar colisiones con la ventana Pendientes-OF.
+
+**Por qué ya no es sostenible tal cual:** desde el 13-09-2026, B1
+(Pendientes-OF) necesitó legítimamente modificar `programacion.py` para
+wirear `_obtener_pids_pendientes_optisteel` al motor de asignación
+(`/api/programacion/generar`). El mismo día, Motor de Tiempos también
+necesitó tocar `motor_v2.py` (diámetro en `estimar_duracion_min`). Ambos
+cambios eran legítimos y ambos fueron autorizados por Montu paso a paso —
+pero la regla de "territorio exclusivo" nunca se actualizó para reflejar
+que ahora es territorio compartido. Una ventana (la de esta mañana,
+14-09) detectó la colisión potencial y frenó apropiadamente antes de
+tocar el archivo sin coordinar — comportamiento correcto, pero evidencia
+de que la regla vieja generaba ambigüedad real.
+
+**Regla nueva (reemplaza la exclusividad por coordinación explícita):**
+
+1. `backend/routers/programacion.py` y `backend/motor_v2.py` son
+   **territorio compartido** entre Motor de Tiempos y Pendientes-OF —
+   ninguna de las dos ventanas es dueña exclusiva.
+2. Antes de modificar cualquiera de estos 2 archivos, la ventana que va a
+   tocar debe: (a) hacer `git pull` primero para tener el estado real más
+   reciente (evita pisar el trabajo de la otra ventana sin saberlo), (b)
+   revisar `handoff_actual.md` por si la otra ventana dejó una nota de
+   trabajo en curso sobre el mismo archivo, (c) preguntarle a Montu
+   explícitamente si la otra ventana está activa en paralelo en este
+   momento, antes de proceder si hay cualquier duda.
+3. `backend/routers/tiempos_maquina.py`,
+   `frontend/.../TiemposPorMaquina.tsx`, `extractor_rutas_v2.py` y los
+   scripts de análisis propios (`build_kgshora_referencia.py`,
+   `diagnostico_kgshora.py`, `diagnostico_metodologia.py`,
+   `run_multi_sucursal.py`) **siguen siendo exclusivos de Motor de
+   Tiempos** — no cambia nada ahí.
+4. `backend/scraper_cuadroprogramacion.py`, `backend/scraper_optisteel.py`,
+   `backend/routers/admin.py` (el endpoint de cuadro-programación) y
+   `scrap-geovictoria/scheduler.py` **siguen siendo exclusivos de
+   Pendientes-OF**.
+5. Cualquier archivo nuevo que ambas ventanas necesiten tocar en el futuro
+   sigue este mismo patrón por defecto (compartido + coordinación
+   explícita), no se asume exclusividad de entrada.
+
+**Nota sobre el ejemplo real del 13/14-09:** el cruce de esos días no causó
+daño — ambos cambios (B1 en `programacion.py`, diámetro en `motor_v2.py`)
+tocaron partes distintas del archivo y el merge de git fue limpio sin
+conflictos. Pero fue suerte de que no se solaparan las líneas exactas, no
+un mecanismo de coordinación real. Esta regla existe para no depender de
+esa suerte la próxima vez.

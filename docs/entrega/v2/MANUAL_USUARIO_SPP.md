@@ -337,19 +337,24 @@ etiqueta del grupo, no un resumen de todas — ver punto nuevo en la sección 10
 | Cajita gris con ícono de candado | Etapa ya confirmada como ejecutada en Cubigest, para (al menos) la primera etiqueta del grupo; no se puede mover; permanente. | `GestorProgramacion.tsx`, `isEtapaCongelada`; `programacion.py`, `_construir_evento_grupo` |
 | Cajita verde (borde `#16a34a`) | Trabajo completado (IT/viaje cerrado), según el estado de la primera etiqueta del grupo. | `GestorProgramacion.tsx`, `isCompletado` |
 | Ribete rojo | Fecha vencida (atrasada). | `GestorProgramacion.tsx`, `esVencido` |
-| Ribete naranja | Fecha próxima a vencer (inminente), o máquina detenida por avería. | `GestorProgramacion.tsx`, `esInminente` / `isDetenida` |
+| Ribete negro segmentado (outline, enmarca toda la cajita) | Trabajo adelantado: el viaje figura en el Cuadro de Programación OptiSteel SOLO en fechas posteriores a la del turno (si también figura el día del turno, o solo en días pasados, o no figura, NO se marca). Reemplaza el concepto "inminente" (eliminado 05-10-2026, QA Montu). | `GestorProgramacion.tsx:376` (`vieneDeFuturo`), `:426` (`futuroStyle`); backend `routers/programacion.py:520` (`_marcar_adelanto_desde_cuadro`) |
 | Ribete verde | Sin urgencia de fecha y acero **soldable** (calidad con sufijo S, por ejemplo A630S o A440S). | `GestorProgramacion.tsx`, función `esSoldable` (corregido por Miaude 28-09; la auditoría lo había dejado sin explicar) |
 | Ribete gris | Sin urgencia de fecha y acero no soldable. | `GestorProgramacion.tsx`, valor por defecto |
-| Borde punteado ámbar (2px) | Acero que no es calidad A630 (calidad no estándar). | `GestorProgramacion.tsx`, `esNoA630` |
-| Fila de máquina en fondo ámbar, badge "SEMIOPERATIVA" | Máquina con avería parcial (semi-operativa). | `GestorProgramacion.tsx` líneas 648-649 |
+| Borde naranja segmentado (2px, enmarca toda la cajita) | Acero que no es calidad A630 (calidad no estándar). Si la cajita ADEMÁS es adelantada, este borde queda por DENTRO y el ribete negro de adelanto pasa a verse por FUERA (offset positivo), para que ambos se distingan — nunca uno encima del otro (requerimiento literal de Montu, 05-10-2026). | `GestorProgramacion.tsx:383` (`esNoA630`) |
+| Fila de máquina en fondo ámbar, badge "SEMIOPERATIVA" | Máquina con avería parcial (semi-operativa). Desde 05-10-2026 esto es SOLO esta leyenda/badge de la fila de máquina — ya no lleva además un ribete naranja en la cajita (eliminado, QA Montu: "la máquina con avería no es un ribete, hay una leyenda ... con eso es suficiente"). | `GestorProgramacion.tsx` líneas 648-649 |
 | Estado de máquina en Averías: DET / SEMI / ING / OP | Detenida / Semi-operativa / Ingresada / Operativa — etiqueta que usa Cubigest. | `GestorAverias.tsx`, `ESTADO_CUBIGEST_LABEL` |
 | Badge "Universo hace X min" / "Cuadro hace X min" en verde | Esa fuente de datos está actualizada. | `SyncEstado.tsx` |
 | Mismo badge en ámbar con ícono de alerta | Esa fuente está desactualizada (`desactualizado: true`). | `SyncEstado.tsx` |
 
-Los estados "no liberada" y "adelanto de trabajo futuro" mencionados en versiones anteriores del manual existen
-en el código como señales internas (`viene_de_futuro`, indicador de orden adelantada), pero su representación
-visual exacta en pantalla **queda por confirmar** con una captura real, porque no se alcanzó a verificar el
-estilo exacto (color/ribete) en esta revisión. <!-- fuente parcial: GestorProgramacion.tsx comentarios líneas 59-65, 363-365 -->
+El estado "no liberada" se ve como borde superior morado punteado (3px) en la cajita (`estadoMaqStyle`,
+`isNoLiberada`, `GestorProgramacion.tsx:400`) — sin cambios en esta revisión.
+
+El "adelanto de trabajo futuro" (`viene_de_futuro`) quedó resuelto el 05-10-2026 (QA Montu) con el ribete negro
+segmentado descrito en la tabla de arriba, y con un fix de datos en el backend: antes solo la asignación
+automática de adelanto (`completar_con_adelanto`) marcaba la señal; la asignación normal de un trabajo que
+también viene de un día futuro del Cuadro no la marcaba, y por eso muchas cajitas adelantadas no mostraban el
+ribete (`_marcar_adelanto_desde_cuadro`, `routers/programacion.py:520`, corre antes de agrupar cajitas para que
+el grupo herede el flag si cualquier etiqueta lo tiene).
 
 ---
 

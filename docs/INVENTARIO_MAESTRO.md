@@ -49,37 +49,104 @@ en serveri3, antes de la migracion a Mac Studio + Hermes en serverX). Estan
 desactualizadas y pendientes de un refresco completo. Esta seccion documenta el
 estado real, verificado directamente, al 2026-07-19.
 
-### Mac Studio M2 Max — inferencia local (Ollama)
+### Mac Studio M2 Max — inferencia local (act. 2026-08-28)
 
-**Motor:** Ollama 0.31.1, backend Metal nativo, 77.8 GiB disponibles a GPU.
-**Fuente de verdad de configuracion:** /opt/homebrew/opt/ollama/homebrew.mxcl.ollama.plist
-(Cellar — brew services regenera SIEMPRE desde aqui, no editar LaunchAgents directo).
+**NOTA:** esta seccion reemplaza la version anterior (2026-07-19, solo Ollama).
+El stack de inferencia local crecio de 1 modelo (Ollama) a 4 modelos servidos
+via llama-server, con Ollama relegado a un unico consumidor legacy pendiente
+de migrar. Ver LOG_CAMBIOS_2026.md, entrada 2026-08-28, para el benchmark
+completo que motivo este cambio.
 
-Variables activas (actualizado 2026-08-06, ver LOG_CAMBIOS Fase 0): OLLAMA_FLASH_ATTENTION=1, OLLAMA_KV_CACHE_TYPE=q8_0,
-OLLAMA_KEEP_ALIVE=30m, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NUM_PARALLEL=1.
-(Valores anteriores hasta 2026-08-05: KEEP_ALIVE=-1, MAX_LOADED_MODELS=3 -- causaban
-sobre-suscripcion de memoria, corregido en Fase 0 del plan de arquitectura IA local.)
+#### Modelos LLM locales disponibles (Mac Studio, 192.168.1.102)
 
-**Nota 2026-08-06:** "Carlitos" y "Aurora" como CLI de uso diario de Montu YA NO corren
-sobre estos modelos Ollama -- migraron a Pi + llama-server (Qwen3-Coder-Next-80B-A3B),
-ver seccion "Stack de inferencia local nuevo" mas abajo. Los tags Ollama de abajo se
-conservan para los roles que Fase 4 NO migro (dev-implementer/debugger, of-implementer/
-debugger, subagentes de Rabin/Risko, dev-tech-lead/refactorizador) y como rollback.
+| Alias | Modelo | Puerto | LaunchAgent | Persistencia | Rol |
+|---|---|---|---|---|---|
+| Flash | qwen3-30b-a3b-instruct-Q4_K_M (MoE, ~3B activos) | 11500 | cl.montuschi.llama-server.plist | KeepAlive=true, RunAtLoad=true | Conversacional/RAG, driver principal |
+| Pro | qwen3-coder-next-80b-a3b-Q4_K_M (MoE, ~3B activos, 80B total) | 11501 | cl.montuschi.llama-server-pro.plist | RunAtLoad=false, manual (kickstart) | Coding para tareas dificiles |
+| Lite | gpt-oss-20b-MXFP4 (MoE, ~3.6B activos) | 11502 | cl.montuschi.llama-server-gptoss.plist | KeepAlive=true, RunAtLoad=true, requiere --jinja | Conversacional alternativo/rapido |
+| coder-flash | Qwen3-Coder-30B-A3B-Instruct-Q4_K_M (MoE, ~3B activos) | 11503 | cl.montuschi.llama-server-coderflash.plist | KeepAlive=true, RunAtLoad=true | Coding driver diario (validado 2026-08-28) |
 
-**Modelos instalados (verificado con ollama list, 2026-07-19 -- num_ctx de carlitos
-corregido 2026-08-06, ver nota):**
+Todos bindeados a la IP LAN 192.168.1.102 (no loopback) para que serverX y
+otros dispositivos de la LAN los alcancen directo sin tunel. Motor de
+inferencia: llama-server (llama.cpp), expone API compatible OpenAI
+(/v1/chat/completions, /v1/models) y API nativa (/completion, con objeto
+timings de rendimiento real: prompt_per_second, predicted_per_second).
 
-| Modelo | Tamano | num_ctx | Uso |
-|---|---|---|---|
-| gemma3:27b | 17GB | 131072 | sin rol asignado activo por ahora |
-| carlitos (Modelfile) | 18GB (comparte pesos con qwen3-coder:30b) | 65536 (corregido 2026-08-04, esta tabla tenia el valor viejo 20480 sin actualizar) | dev-implementer/debugger, of-implementer/debugger (Carlitos-CLI de Montu ya no usa este tag, ver nota arriba) |
-| qwen3-coder:30b | 18GB (base) | 262144 | dev-implementer/debugger via contexto completo cuando se requiere |
-| qwen3.6:35b-a3b | 23GB, MoE 3B activos | 262144 (default) | Rabin y Risko (primario, desde 2026-07-19), subagente de analisis de ambos, dev-tech-lead/of-tech-lead, dev-refactorizador/of-refactorizador |
-| aurora (Modelfile) | comparte pesos con qwen3.6:35b-a3b | 32768 | uso historico, gestion documental (Aurora-CLI de Montu ya no usa este tag, ver nota arriba) |
-| qwen3.5:9b | 6.6GB | — | fallback |
+**Restriccion de RAM (96GB unificada) -- CORREGIDO 2026-08-28:**
 
-**NO existen en el stack (documentados antes, confirmado eliminados):**
-gpt-oss:20b, qwen3.6:27b, qwen3.6:27b-mtp-q4_K_M, qwen3.6:35b-a3b-mtp-q4_K_M.
+**IMPORTANTE -- metrica correcta a usar:** `ps aux` y el "unused" crudo de
+`top -l 1 -s 0` SOBRESTIMAN el uso real de RAM de los procesos llama-server,
+porque cuentan como RSS las paginas del archivo .gguf mapeado via mmap()
+(ningun LaunchAgent usa --no-mmap), que macOS trata como cache de archivo
+reclamable, no como memoria privada de la app. Confirmado con `footprint <pid>`
+(el mismo mecanismo que usa Monitor de Actividad) y `vmmap --summary <pid>`:
+cada proceso llama-server tiene ~17GB de region "mapped file" con 0B dirty
+(paginas limpias, reclamables al instante). La metrica correcta para juzgar
+salud de RAM es `memory_pressure` o el desglose de Monitor de Actividad
+("Memoria residente" + "Comprimido"), NUNCA el RSS crudo de `ps aux` ni el
+"unused" de `top` para estos procesos. Es el mismo fenomeno ya documentado
+el 2026-08-26 con Pro/gpt-oss (ver seccion gpt-oss-20b en
+MODELOS_CONVERSACIONALES_CANDIDATOS.md, parrafo "RAM medida (no proyectada)").
+
+Footprint real medido (via `footprint <pid>`, no RSS de `ps`) con Flash +
+coder-flash simultaneos (modo-flash): ~6.1GB por proceso (~12GB total para
+los 2 modelos de 30B), memory_pressure ~40% libre real, Presion de Memoria
+verde en Monitor de Actividad (confirmado 2026-08-28 por CCa).
+
+Los numeros de "Flash + Pro" (113-563MB libres) y "Solo Pro" (452-563MB
+libres) documentados originalmente hoy usaban la metrica cruda enganosa y
+NO fueron re-verificados con footprint/memory_pressure -- quedan marcados
+como pendientes de re-medicion, no confirmados como sanos ni como criticos.
+
+#### Formas de conexion disponibles a los modelos locales
+
+- **llama-server (llama.cpp):** motor usado por los 4 modelos de la tabla de
+  arriba. API OpenAI-compatible + API nativa con timings. Via principal
+  desde 2026-08.
+- **Ollama:** sigue instalado y corriendo (qwen3.6:35b-a3b, puerto 11434,
+  bind solo 127.0.0.1 -- no alcanzable desde LAN). Uso actual: Rabin/Risko
+  (Hermes Agent, serverX) via integracion nativa. PENDIENTE (backlog, no
+  tocado hoy): migrar Rabin/Risko a Flash y decomisionar Ollama.
+- **Jan.app (Mac Studio, cliente de escritorio):** consume Flash y Ollama via
+  providers propios (llama_server_local, ollama_local).
+- **Pi coding agent (Carlitos):** wrapper que consume llama-server via
+  providers en ~/.pi/agent/models.json. Providers activos: llama-local
+  (-> Pro, 11501), coder-flash (-> coder-flash, 11503), llama-test-2
+  (metadata desactualizada, apunta al puerto de Lite pero el nombre dice
+  "Devstral" -- limpieza pendiente, backlog ya conocido).
+- **LibreChat (serverX, ia.montuschi.cl):** consume los 4 modelos via
+  endpoints custom (Mac-Flash, Mac-Pro, Mac-GPTOSS, Mac-CoderFlash) apuntando
+  directo a las URLs LAN de llama-server.
+
+#### Modos de operacion (reemplazan modo-normal / modo-carlitos, 2026-08-28)
+
+RAM insuficiente para tener los 4 modelos arriba a la vez -- se definieron 3
+modos exclusivos, cada uno sube 2 y baja los otros 2. Scripts en ~/bin/,
+mismo patron de idempotencia/verificacion de salud que los modos anteriores
+(bootout/bootstrap/kickstart + polling a /v1/models).
+
+| Modo | Sube | Baja | Uso | Carlitos a usar |
+|---|---|---|---|---|
+| modo-flash | Flash (11500) + coder-flash (11503) | Pro + Lite | Default / uso diario | CarlitosCoderFlash |
+| modo-coder | Pro (11501) + Lite (11502) | Flash + coder-flash | Tareas de coding realmente dificiles | Carlitos (el original, apunta a Pro) |
+| modo-chat | Flash (11500) + Lite (11502) | Pro + coder-flash | Conversacional/RAG puro, sin modelo de coding cargado | N/A |
+
+modo-normal y modo-carlitos quedaron deprecados (renombrados a .bak en
+~/bin/) -- no manejaban Lite ni coder-flash, quedaron incompletos frente al
+stack de 4 modelos actual.
+
+#### Decision de arquitectura 2026-08-28: coder-flash como driver diario
+
+Benchmark completo (18 pruebas cortas + sesion larga de 7 turnos con
+verificacion via API publica) mostro fiabilidad equivalente entre coder-flash
+y Pro en tareas acotadas/mecanicas (el rol real de Carlitos), con coder-flash
+~1.6x mas rapido en generacion (86 vs 53 tok/s promedio) y con mejor margen
+de RAM para convivir con Flash+Lite simultaneos. Bajo sesiones largas con
+requisitos acumulativos, ambos modelos produjeron un bug real distinto (ya
+corregidos en el ejercicio de benchmark, no aplica a produccion real) --
+conclusion: ningun modelo local exime de verificacion de cierre en tareas
+largas, independiente de cual se use. Detalle completo en LOG_CAMBIOS_2026.md,
+entrada 2026-08-28.
 
 ### Agentes Hermes (Rabin, Risko) — estado verificado 2026-07-19
 

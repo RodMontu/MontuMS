@@ -36,9 +36,14 @@ Desde el 29-09, la cajita ya no es una etiqueta suelta: agrupa las etiquetas de 
 juntas, una tras otra, en la misma máquina.
 - **Gris con candado:** esa etapa YA se ejecutó de verdad (confirmado en Cubigest). No se puede mover, nunca.
 - **Verde:** trabajo completado (viaje/IT cerrado).
-- **Ribete rojo:** fecha atrasada. **Ribete naranja:** fecha por vencer, o máquina con avería.
+- **Ribete rojo:** fecha atrasada.
+- **Ribete negro segmentado (enmarca toda la cajita):** trabajo adelantado (viene de un día futuro del Cuadro
+  de Programación OptiSteel). La avería de máquina ya NO se marca con ribete — se ve solo en la leyenda/badge
+  SEMIOPERATIVA/DETENIDA de la fila de esa máquina (`GestorProgramacion.tsx:426`).
   Sin urgencia de fecha: **ribete verde** = acero soldable (calidad terminada en S, ej. A630S); **gris** = no soldable.
-- **Borde punteado ámbar:** acero que no es la calidad estándar A630.
+- **Borde naranja segmentado (enmarca toda la cajita):** acero que no es la calidad estándar A630
+  (`GestorProgramacion.tsx:383`). Si una cajita es adelantada Y además no es A630, lleva los dos ribetes a la
+  vez, uno por fuera del otro (nunca superpuestos).
 
 ## Ante una avería
 1. Vaya a **Averías** → **"Reportar Falla"** → elija la máquina → describa el síntoma.

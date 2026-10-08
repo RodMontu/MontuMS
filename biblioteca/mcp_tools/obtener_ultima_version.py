@@ -1,6 +1,6 @@
 """Lectura rapida: ultima version conocida de un archivo/seccion."""
 
-import sqlite3
+import pysqlite3 as sqlite3
 
 from ._conexion import conectar
 

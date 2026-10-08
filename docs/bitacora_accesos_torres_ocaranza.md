@@ -1306,3 +1306,21 @@ git en TO, sin push, con diff revisado por Montu antes de autorizarlo.
 6. **Limpieza de worktrees:** se eliminaron los 3 worktrees de hoy y, de paso, los 5 worktrees residuales de la Ola 1 de ayer (`optifierro_f4/f5/f8/f9/int`) que habían quedado sin borrar — ya estaban mergeados, sin trabajo pendiente en ellos.
 7. **Graphify (Mac):** regenerado tras el deploy (`git archive 47c72c7` → `graphify update`). **Incidente de proceso:** ninguno de los 3 prompts de hoy instruyó consultar Graphify antes de modificar código (a diferencia del preludio de la Ola 1) — corregido retroactivamente por Miaude antes de integrar, sin hallar colisiones de riesgo.
 8. **Miaude — prueba de SSH vía Antigravity (`agy_ask`/`agy_research`, MCP):** intento de que Antigravity ejecutara `ssh TO "..."` (solo lectura) terminó bloqueado por el modo headless (permiso de comando denegado, sin bandera expuesta para forzarlo). No se logró acceso remoto por esta vía; no se tocó nada en TO desde ese intento.
+
+---
+
+## 2026-10-07 / 2026-10-08 — Renovación de clave SQL, CCa-40/41/42, deploy y push a GitHub (Miaude)
+
+**Campos comunes:** Sistema = TO (192.168.1.65), checkout `optifierro` (`cajita-viaje-deploy`; HEAD `8a4f903` el 07-10 y `116b3fb` el 08-10). Sensibilidad: ALTA (escrituras en producción, push a un repositorio externo). Autorización: Montu ("dale con CCa", "despliega, dale también con commit + push").
+
+1. **07-10 ≈21:30 — Tras reconectar la VPN:** lecturas de contenedores, logs del backend (errores de login de la cuenta SQL de Cubigest) y estado de `trabajos_optisteel`. Prueba de conexión SQL (`SELECT 1`) desde el contenedor.
+2. **07-10 ≈22:00 — Montu renovó la clave de la cuenta SQL de Cubigest y la dejó en el `.env`** (no registrada aquí). Miaude reinició el backend (`docker compose up -d backend`) y ejecutó `importar_optisteel.ejecutar_importacion()` dentro del contenedor, que **escribió** en `trabajos_optisteel` de producción (Calama 1.763 filas, Cerrillos 3.672; Coronel falló por el bug de Cubigest) además de la consulta de solo lectura al portal Cubigest.
+3. **07-10 ≈22:10–22:35 — CCa-40** en su worktree (`fix-coronel-scraper`): consultas de solo lectura al portal Cubigest con la cuenta del scraper; sus scripts de depuración contenían la credencial del scraper (ya hardcodeada en el código original) y no se commitearon. Fast-forward a `8a4f903`; worktree y rama eliminados.
+4. **07-10 ≈22:47 — Lanzamiento de CCa-41 y CCa-42** (worktrees `fix-historial-gris`, `fix-averias-antiguedad`, desde `8a4f903`). CCa-41 hizo consultas de solo lectura a Cubigest y a la API desde el contenedor. Miaude corrió tests sobre una copia temporal de la BD en el worktree (copia eliminada) y `py_compile`.
+5. **07-10 ≈23:35 — Integración:** commit local de CCa-41 (`25e92af`), merges a `cajita-viaje-deploy` (HEAD `116b3fb`), worktrees y ramas eliminados.
+6. **07-10 ≈23:40 — Primer intento de deploy:** no llegó a ejecutarse (herramientas locales colgadas); verificado el 08-10 06:34: imágenes de hace 42 h, sin cambios en producción.
+7. **08-10 06:34–06:36 — Deploy:** `docker compose build --no-cache backend frontend` y `up -d`; verificación en vivo (versión, integridad SQLite, logs, planes restaurados, operadores de Coronel, averías de Calama).
+8. **08-10 ≈06:40 — Revisión previa al push (solo lectura):** `git grep` de patrones de credenciales en HEAD y en `origin/master` (valores enmascarados), listado de archivos del diff con extensiones sensibles.
+9. **08-10 ≈06:45 — PUSH a GitHub:** `git push -u origin cajita-viaje-deploy` desde TO a `https://github.com/RodMontu/Optifierro-V2.git` (rama nueva, sin force, 43 commits). Verificado con `git ls-remote`: `116b3fb`. El administrador de credenciales de Windows no pudo persistir la credencial (aviso `wincredman`), sin efecto sobre el push. `origin/master` no se tocó.
+10. **Graphify (Mac, 07-10 noche y 08-10):** `git archive` desde TO hacia `~/graphify-workspace/optifierro` y reconstrucción; respaldos movidos a `~/graphify-backups/` (ver LOG).
+

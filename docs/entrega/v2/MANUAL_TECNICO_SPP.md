@@ -1,6 +1,8 @@
 # Manual Técnico v2.0 — Sistema Planificador de la Producción (SPP)
 
-**Versión:** 2.0 (reescrito desde cero, 2026-09-28) — reemplaza íntegramente a v1 (24-09-2026)
+**Versión:** 2.2 (30-09-2026) — agrega sección 2.2-bis (adelanto de trabajos: migración de SQL directo a
+scraper HTTP, decisión de Montu) y amplía la sección 2.5 con la investigación completa del error SSL
+intermitente de Cubigest. Reemplaza a v2.1 (29-09-2026, cajita=viaje).
 **Ambiente de producción:** servidor Windows 11 Pro de Torres Ocaranza (TO), Docker Desktop
 **Identificador técnico interno de repositorio:** `optifierro` (también llamado `Optifierro-V2` en GitHub); el producto se llama **SPP** o **el Planificador**
 **Ruta de despliegue en TO:** `C:\Users\OptiFierro\Desktop\optifierro`
@@ -255,6 +257,47 @@ se evaluó y se descartó explícitamente el 2026-09-24 (Montu decidió NO retir
   el problema). Pendiente de revisión con el administrador del ERP — no es un bug del SPP.
 <!-- fuente: backend/routers/sync.py; MANUAL_TECNICO_SPP.md v1, hallazgo mantenido -->
 
+### 2.2-bis Adelanto de trabajos: camino elegido — scraper HTTP, no SQL directo
+
+Decisión de Montu (30-09-2026), tras la investigación de la sección 2.5: en vez de seguir dependiendo de la
+conexión SQL directa a Cubigest (intermitente, fuera del control del SPP — ver sección 2.5) para traer el
+detalle de piezas de días futuros que necesita el adelanto automático de trabajos (`completar_con_adelanto`,
+sección 4), se migra esa fuente a un **scraper HTTP sobre `DescargarOptistel.aspx`** (Cubigest web, puerto 80
+plano — no pasa por SQL Server ni por TLS en absoluto, protocolo y puerto completamente distintos).
+
+**Ya existe, construido y no conectado — hallazgo del 30-09:**
+- `backend/scraper_optisteel.py::scrape_optisteel()`: descarga el CSV "Piezas NO variables" (mismo patrón
+  login/sesión/VIEWSTATE que el scraper del Cuadro OptiSteel, sección 2.2). Nivel de detalle: **un tag físico
+  individual por fila**, no un agregado — exactamente la granularidad que necesita el Motor para rutear una
+  pieza a una máquina. Documentado en detalle (27 columnas del CSV real) en
+  `docs/analisis_optisteel_export.md` de MontuMS, análisis del 06-09-2026.
+- `backend/importar_optisteel.py`: parsea ese CSV y lo carga en la tabla local `trabajos_optisteel`
+  (`sucursal_id, tag_id, codigo, diametro, id_forma, kgs, fecha_despacho, producido, fecha_produccion,
+  producido_en`). **Hoy es un script standalone, "NO wireado a main.py ni a ningún router"** (docstring propio)
+  — uso manual únicamente, sin programar en el scheduler.
+
+**Brechas identificadas antes de poder reemplazar la vía SQL para el adelanto:**
+1. `trabajos_optisteel` **no guarda `largo` ni `tipoAcero`** (calidad de acero) — ambas columnas SÍ existen en
+   el CSV crudo de Cubigest (columnas 5 y 24 según `analisis_optisteel_export.md`), simplemente
+   `importar_optisteel.py` no las persiste hoy. `resolver_ruta()` (`motor_v2.py`) necesita ambos valores para
+   decidir a qué máquina puede ir una pieza — sin ellos, el adelanto no podría enrutar nada igual.
+2. El script no está programado — hay que agregarlo al scheduler (sección 5) con una cadencia razonable
+   (propuesta: cada 15-30 min, igual que los demás scrapers), no dejarlo manual.
+3. `_obtener_pids_pendientes_optisteel`/`_piezas_optisteel_por_viajes` (`routers/programacion.py`) deben
+   reescribirse para leer `trabajos_optisteel` en vez de hacer la consulta SQL en vivo a Cubigest — confirmando
+   primero que el filtro `Producido=0` (que el CSV sí trae, con fecha/hora/máquina real de fabricación — un
+   hecho registrado, no una heurística) reproduce el mismo comportamiento que hoy tiene la vía SQL, para no
+   introducir una regresión de otro tipo al migrar.
+
+**Estado a la fecha de este manual: decisión tomada, implementación pendiente** — no ejecutada todavía. No
+confundir con el resto de los 9 puntos de la tabla de la sección 2.1 (comprometido, stock, materias primas,
+averías, etc.), que **siguen** en la vía SQL directa; esta migración es específica del adelanto automático de
+trabajos y de la Bolsa de días futuros.
+<!-- fuente: en vivo, TO 30-09-2026: backend/scraper_optisteel.py, backend/importar_optisteel.py; MontuMS
+     docs/analisis_optisteel_export.md (06-09-2026) -->
+
+
+
 ### 2.3 GeoVictoria (asistencia biométrica)
 
 Servicio externo (fuera de este repo) en `http://192.168.1.111:8002`, configurable con `GEOVICTORIA_API_URL`.
@@ -325,6 +368,51 @@ siendo válida, pero el archivo y las líneas que cita ya no son correctos; se r
   uno lo hace de forma independiente al inicio del archivo). Aun con esta mitigación, la conexión SSL a
   Cubigest es intermitente en la práctica — varias verificaciones documentadas en `agentes/` quedaron
   bloqueadas por este síntoma y se resolvieron reintentando más tarde.
+
+  **Investigación exhaustiva 29/30-09-2026 (Miaude, en vivo contra el contenedor real de TO), motivada por el
+  adelanto automático de trabajos sin resultados:** se agotaron, en orden, las siguientes hipótesis antes de
+  llegar a la explicación correcta —
+  1. *¿Certificado no confiable?* No — `TrustServerCertificate=yes` ya estaba en la cadena de conexión.
+     Montu conectó sin problema desde SSMS (Windows) con "Certificado de servidor de confianza" marcado,
+     confirmando que el servidor sí responde y el usuario/contraseña son correctos.
+  2. *¿Falta bajar la versión mínima de TLS?* El propio `openssl_legacy.cnf` ya hace exactamente eso
+     (`MinProtocol=TLSv1`, `CipherString=DEFAULT:@SECLEVEL=0`) — un intento de editar el `/etc/ssl/openssl.cnf`
+     del sistema (en vez del archivo correcto que el código ya apunta) no tuvo ningún efecto, confirmando que
+     el mecanismo real de mitigación es el correcto, no uno alternativo.
+  3. *¿El driver de Microsoft ignora la config?* `ldd` sobre `libmsodbcsql-18.7.so` no muestra enlace directo a
+     `libssl` (carga TLS vía `libltdl`/`dlopen` en tiempo de ejecución) — hallazgo real, pero no explica el
+     síntoma: replicando exactamente el mecanismo del código (`OPENSSL_CONF` seteado antes de `import pyodbc`,
+     igual que hace `database_cubigest.py`) la conexión **sí** funcionó en una prueba aislada.
+  4. **Explicación real, confirmada con 15 intentos seguidos exitosos vía `database_cubigest.cubigest_db.execute_query`,
+     y por contraste 4 de 5 intentos con error real (pero silenciado) vía `_obtener_pids_pendientes_optisteel`
+     en la misma ventana de tiempo:** es intermitencia genuina de la negociación TLS contra este SQL Server en
+     particular — ni 100% caída, ni 100% sana — agravada por un problema de diseño real y separado:
+     **`CubigestDB.execute_query` atrapa la excepción de conexión y devuelve `[]`** (ver punto de esta misma
+     sección más abajo), así que una falla real de conexión y un "no hay datos" genuino son indistinguibles
+     para cualquier función que consuma su resultado — incluido `_obtener_pids_pendientes_optisteel`, que por
+     eso puede reportar "0 piezas" para un día que en verdad sí tiene trabajo en el Cuadro OptiSteel, sin que
+     quede ningún rastro de que la conexión falló.
+  <!-- fuente: en vivo contra optifierro-backend (TO), 29/30-09-2026: docker exec pruebas repetidas de
+       database_cubigest.cubigest_db.execute_query y routers.programacion._obtener_pids_pendientes_optisteel;
+       ldd sobre /opt/microsoft/msodbcsql18/lib64/libmsodbcsql-18.7.so.1.1; SSMS desde VM Windows de Montu -->
+
+  **Impacto práctico:** afecta a los **9 puntos de la tabla de la sección 2.1** que dependen de SQL directo a
+  Cubigest, no solo al adelanto automático de trabajos — cualquiera de ellos puede estar silenciosamente
+  devolviendo "sin datos" en vez de "no pude conectar" en un momento dado. El adelanto de trabajos es el caso
+  donde esto se hizo visible primero (máquinas ociosas sin nada asignado, con trabajo real disponible en el
+  Cuadro), pero no es el único consumidor afectado.
+
+  **Decisión de Montu (30-09-2026):** dado que Torres Ocaranza no va a intervenir la configuración TLS del
+  SQL Server de Cubigest, se descarta seguir intentando estabilizar la vía SQL directa para el caso del
+  adelanto. Ver sección 2.2-bis para el camino elegido.
+
+  **Actualización 01-10-2026:** la misma intermitencia bloqueó, un día después, la asignación REGULAR de hoy
+  para Coronel (no solo el adelanto) — `_obtener_pids_pendientes` devolvía 0 etiquetas en vivo, 5/5 intentos
+  seguidos, silenciado por el mismo `execute_query` que traga excepciones. Mitigación aplicada (no reemplaza la
+  migración a scraper de la sección 2.2-bis, que sigue siendo lo correcto a mediano plazo): reintento de 3
+  intentos con 1.5s de espera, centralizado en `CubigestDB.connect()` (`database_cubigest.py`) — beneficia a
+  los 9 consumidores de SQL directo listados en 2.1, no solo a uno. Probado en vivo: 5/5 fallos sin el fix,
+  287 etiquetas obtenidas para Coronel con el fix aplicado.
   <!-- fuente: backend/main.py:1-6; backend/database_cubigest.py:1-14 -->
 - **Emoji en `print` de manejo de error rompía la consola de Windows (`UnicodeEncodeError`, cp1252).** Un
   `print` con `❌` en `database_cubigest.py` reventaba silenciosamente el log de error real bajo la consola

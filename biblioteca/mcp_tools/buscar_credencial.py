@@ -2,7 +2,7 @@
 La tabla 'credenciales' nunca almacena valores reales, solo referencias
 a donde vive cada secreto (servicio, variable, archivo .env)."""
 
-import sqlite3
+import pysqlite3 as sqlite3
 
 from ._conexion import conectar
 

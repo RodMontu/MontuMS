@@ -4,7 +4,7 @@ funcionar (invocacion colgada sin salida). Desde esa fecha, Miaude escribe
 directo en el catalogo. Ningun otro agente ni la futura UI debe llamar a esta
 funcion sin autorizacion explicita de Montu."""
 
-import sqlite3
+import pysqlite3 as sqlite3
 from datetime import datetime, timezone
 
 from ._conexion import conectar

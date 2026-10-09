@@ -1324,3 +1324,18 @@ git en TO, sin push, con diff revisado por Montu antes de autorizarlo.
 9. **08-10 ≈06:45 — PUSH a GitHub:** `git push -u origin cajita-viaje-deploy` desde TO a `https://github.com/RodMontu/Optifierro-V2.git` (rama nueva, sin force, 43 commits). Verificado con `git ls-remote`: `116b3fb`. El administrador de credenciales de Windows no pudo persistir la credencial (aviso `wincredman`), sin efecto sobre el push. `origin/master` no se tocó.
 10. **Graphify (Mac, 07-10 noche y 08-10):** `git archive` desde TO hacia `~/graphify-workspace/optifierro` y reconstrucción; respaldos movidos a `~/graphify-backups/` (ver LOG).
 
+---
+
+## 2026-10-09 — Auditoría para la entrega, CCa-43, cambio de `.env`, deploy y push (Miaude)
+
+**Campos comunes:** Sistema = TO (192.168.1.65), checkout `optifierro` (`cajita-viaje-deploy`, HEAD `116b3fb` → `f61b08c`). Sensibilidad: ALTA (lectura/escritura de secretos, recreación de contenedor en producción, push a GitHub). Autorización: Montu ("dale con ello", 14:08).
+
+1. **06:56–13:30 — Auditoría de solo lectura del repo en GitHub** (clon parcial en el Mac, borrado después): estructura, archivos sensibles, historial. Consultas de solo lectura a TO: logs del backend, `docker compose config`, nombres (no valores) de variables de `.env`, contenedores de Geovictoria.
+2. **13:27–13:55 — CCa-43** lanzado desde el Mac por Miaude; creó el worktree `optifierro_cred` en TO desde `116b3fb` y modificó 3 scrapers.
+3. **~14:00 — Revisión:** py_compile y tests en el worktree; suite completa comparada contra un worktree temporal de `116b3fb` (eliminado); escaneo de la clave previa imprimiendo solo conteos.
+4. **~14:05 — Merge local** fast-forward a `f61b08c`; worktrees y rama eliminados.
+5. **14:08 — ESCRITURA de secretos:** Miaude leyó del commit `116b3fb` (git, en TO) el usuario y la clave de Cubigest y los escribió en `backend/.env` como `CUBIGEST_WEB_USER`/`CUBIGEST_WEB_PASS`, sin imprimirlos. Respaldo del `.env` previo en `C:/Users/OptiFierro/optifierro_env_backups/` (fuera del repo, contiene secretos). Hashes de referencia en un temporal, ya eliminados.
+6. **14:09–14:10 — Deploy:** `docker tag` de rollback, `docker compose build --no-cache backend`, `up -d --force-recreate backend`. Verificación por hash dentro del contenedor y **login real de solo lectura al portal de Cubigest** con la cuenta del scraper.
+7. **~14:15 — PUSH a GitHub:** `git push origin cajita-viaje-deploy` (`116b3fb..f61b08c`), sin force.
+8. **~14:16 — Graphify (Mac):** `git fetch`/`reset --hard` del espejo a la rama y `graphify update .`; respaldo previo en `~/graphify-backups/`.
+
